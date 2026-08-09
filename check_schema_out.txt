@@ -1,0 +1,11 @@
+Col 57: Đa mục đích sử dụng 1 - Thời hạn sử dụng - 58 - Type: dropdown - Options count: 77
+  Sample option: NNP - Nhóm đất nông nghiệp
+Col 58: Đa mục đích sử dụng 1 - Nguồn gốc biến động - 59 - Type: dropdown - Options count: 77
+  Sample option: NNP - Nhóm đất nông nghiệp
+Col 59: Đa mục đích sử dụng 1 - Nguồn gốc cấp
+GCN lần đầu - 60 - Type: dropdown - Options count: 77
+  Sample option: NNP - Nhóm đất nông nghiệp
+Col 60: Đa mục đích sử dụng 1 - Nguồn gốc chi tiết - 61 - Type: dropdown - Options count: 77
+  Sample option: NNP - Nhóm đất nông nghiệp
+Col 61: Đa mục đích sử dụng 2 - Mã MĐSD - 62 - Type: dropdown - Options count: 77
+  Sample option: NNP - Nhóm đất nông nghiệp

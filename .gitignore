@@ -1,0 +1,64 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# PyInstaller folders
+build/
+dist/
+*.spec
+
+# C extensions
+*.so
+
+# Distribution / packaging
+.Python
+env/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual environments
+venv/
+.venv/
+env/
+.env/
+
+# SQLite databases (if they are generated automatically and not meant to be shared)
+# If you want to share data.db, you can remove the next line.
+data.db
+*.sqlite3
+
+# Uploaded PDF and images
+uploads/
+
+# IDEs and Editors
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# MacOS
+.DS_Store
+
+# Logs
+logs/
+*.log
+
+# Scratch and temp files
+scratch/
+tai_lieu_mau/~$*.xlsx
+
+.agents/

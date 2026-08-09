@@ -1,0 +1,16 @@
+Col 50: Phan loai thua at - 
+Col 51: Dien tich ban o - 
+Col 52: Dien tich Phap ly - 
+Col 53: a muc ich su dung 1 - Ma MSD
+Col 54:  - Ma MSD Quy hoach
+Col 55:  - Dien tich
+Col 56:  - La SD chung
+Col 57:  - Thoi han su dung
+Col 58:  - Nguon goc bien ong
+Col 59:  - Nguon goc cap
+GCN lan au
+Col 60:  - Nguon goc chi tiet
+Col 61: a muc ich su dung 2 - Ma MSD
+Col 62:  - Ma MSD Quy hoach
+Col 63:  - Dien tich
+Col 64:  - La SD chung

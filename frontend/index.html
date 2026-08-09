@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Số hóa Giấy chứng nhận</title>
+    <!-- Bootstrap 5 CSS -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <!-- FontAwesome for Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        body { background-color: #f8f9fa; }
+        .navbar { background-color: #0d6efd; color: white; }
+        .form-section { background: white; border-radius: 8px; padding: 20px; margin-bottom: 20px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+        .form-section-title { color: #0d6efd; border-bottom: 2px solid #0d6efd; padding-bottom: 10px; margin-bottom: 20px; font-weight: bold; }
+        .autocomplete-items {
+            position: absolute;
+            border: 1px solid #d4d4d4;
+            border-bottom: none;
+            border-top: none;
+            z-index: 99;
+            top: 100%;
+            left: 0;
+            right: 0;
+            max-height: 200px;
+            overflow-y: auto;
+            background-color: white;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        }
+        .autocomplete-items div {
+            padding: 10px;
+            cursor: pointer;
+            border-bottom: 1px solid #d4d4d4;
+        }
+        .autocomplete-items div:hover {
+            background-color: #e9e9e9;
+        }
+        .autocomplete-active {
+            background-color: #0d6efd !important;
+            color: #ffffff;
+        }
+        .position-relative { position: relative; }
+        #loading { text-align: center; margin-top: 50px; font-size: 1.2rem; }
+    </style>
+</head>
+<body>
+    <nav class="navbar navbar-expand-lg navbar-dark shadow-sm">
+        <div class="container-fluid">
+            <span class="navbar-brand mb-0 h1">Quản lý và Số hóa Giấy chứng nhận</span>
+            <div class="d-flex">
+                <div class="btn-group">
+                    <button type="button" class="btn btn-outline-light dropdown-toggle" data-bs-toggle="dropdown" aria-expanded="false">
+                        Xuất báo cáo
+                    </button>
+                    <ul class="dropdown-menu dropdown-menu-end">
+                        <li><a class="dropdown-item" href="#" onclick="exportExcel('new'); return false;">📄 Tạo mới báo cáo</a></li>
+                        <li><a class="dropdown-item" href="#" onclick="document.getElementById('appendExcelInput').click(); return false;">📎 Bổ sung vào báo cáo hiện có</a></li>
+                    </ul>
+                </div>
+                <input type="file" id="appendExcelInput" accept=".xlsx" style="display:none;" onchange="exportExcelAppend(this)">
+            </div>
+        </div>
+    </nav>
+
+    <div class="container-fluid mt-4 px-4">
+        <div id="loading">Đang tải cấu trúc biểu mẫu, vui lòng đợi...</div>
+        
+        <!-- Tabs for Switching Views -->
+        <ul class="nav nav-tabs mb-4" id="appTabs" role="tablist" style="display: none;">
+          <li class="nav-item" role="presentation">
+            <button class="nav-link active" id="form-tab" data-bs-toggle="tab" data-bs-target="#form-pane" type="button" role="tab">Thêm mới hồ sơ</button>
+          </li>
+          <li class="nav-item" role="presentation">
+            <button class="nav-link" id="list-tab" data-bs-toggle="tab" data-bs-target="#list-pane" type="button" role="tab" onclick="fetchSubmissions()">Quản lý hồ sơ</button>
+          </li>
+        </ul>
+
+        <div class="tab-content" id="appTabsContent">
+            <!-- FORM PANE -->
+            <div class="tab-pane fade show active" id="form-pane" role="tabpanel">
+                <div class="row mt-3">
+                    <!-- LEFT COLUMN: PDF VIEWER & LIST -->
+                    <div class="col-lg-8">
+                        <div class="sticky-top" style="z-index: 1;">
+                            <div class="row">
+                                <!-- File List Sidebar -->
+                                <div class="col-md-3">
+                                    <div class="mb-3">
+                                        <label for="pdfUploadInput" class="form-label fw-bold btn btn-outline-primary w-100 mb-0">
+                                            + Tải tài liệu quét
+                                        </label>
+                                        <input class="form-control d-none" type="file" id="pdfUploadInput" accept=".pdf,image/*" multiple>
+                                    </div>
+                                    <div style="height: 80vh; overflow-y: auto;">
+                                        <div class="list-group" id="fileQueueList">
+                                            <!-- Files will be dynamically inserted here -->
+                                        </div>
+                                    </div>
+                                </div>
+                                
+                                <!-- PDF Viewer -->
+                                <div class="col-md-9">
+                                    <div class="border rounded bg-light d-flex align-items-center justify-content-center" id="pdfViewerContainer" style="height: 85vh; overflow: hidden;">
+                                        <p class="text-muted text-center" id="pdfPlaceholder">Chưa có tài liệu nào được tải lên.<br>Vui lòng chọn tệp PDF hoặc hình ảnh ở cột bên trái.</p>
+                                        <iframe id="pdfIframe" style="width: 100%; height: 100%; display: none;" frameborder="0"></iframe>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- RIGHT COLUMN: DATA FORM -->
+                    <div class="col-lg-4">
+                        <div style="height: 85vh; overflow-y: auto; padding-right: 15px; padding-left: 5px;">
+                            <form id="dataForm" style="display: none;">
+                                <div class="d-flex justify-content-between align-items-center mb-3 p-2 bg-light border rounded">
+                                    <h5 class="text-primary mb-0"><i class="fas fa-edit"></i> Dữ liệu hồ sơ</h5>
+                                    <button type="button" id="pdfLinkBtn" class="btn btn-outline-secondary btn-sm" onclick="togglePdfLink()" title="Liên kết với PDF đang hiển thị">
+                                        <i class="fas fa-link"></i> <span id="pdfLinkText">Không liên kết</span>
+                                    </button>
+                                </div>
+                                <div id="form-container"></div>
+                                <div class="d-grid gap-2 mb-5 mt-3">
+                                    <button type="button" class="btn btn-primary btn-lg" id="submitBtn" onclick="submitData()">Lưu hồ sơ</button>
+                                    <button type="button" class="btn btn-warning btn-sm" id="clearFormBtn" onclick="resetFormData()">Làm mới biểu mẫu</button>
+                                    <button type="button" class="btn btn-secondary btn-sm d-none" id="cancelEditBtn" onclick="cancelEdit()">Hủy cập nhật</button>
+                                </div>
+                            </form>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- LIST PANE -->
+            <div class="tab-pane fade" id="list-pane" role="tabpanel">
+                <div class="form-section">
+                    <div class="d-flex justify-content-between align-items-center mb-3">
+                        <h4 class="form-section-title mb-0">Quản lý hồ sơ</h4>
+                        <div style="width: 300px;">
+                            <input type="text" id="searchInput" class="form-control form-control-sm" placeholder="Tìm kiếm (ID, Họ tên...)" onkeyup="filterSubmissions()">
+                        </div>
+                    </div>
+                    <table class="table table-striped table-hover">
+                        <thead class="table-dark">
+                            <tr>
+                                <th># ID</th>
+                                <th>Ngày tạo</th>
+                                <th>Họ tên</th>
+                                <th>Số giấy tờ</th>
+                                <th>Tài liệu đính kèm</th>
+                                <th>Thao tác</th>
+                            </tr>
+                        </thead>
+                        <tbody id="submissionsTableBody">
+                            <tr><td colspan="6" class="text-center">Chưa có dữ liệu</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Bootstrap JS Bundle -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="app.js?v=4.1"></script>
+</body>
+</html>
