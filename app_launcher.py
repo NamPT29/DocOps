@@ -17,7 +17,7 @@ def get_base_dir():
 def open_browser():
     """Opens the default browser after a short delay to let the server start."""
     time.sleep(2)
-    webbrowser.open("http://127.0.0.1:8000")
+    webbrowser.open("http://127.0.0.1")
 
 if __name__ == "__main__":
     # Change working directory to the base directory
@@ -37,9 +37,9 @@ if __name__ == "__main__":
     threading.Thread(target=open_browser, daemon=True).start()
     
     print("  Trinh duyet se tu dong mo trong giay lat...")
-    print("  Neu khong tu mo, hay truy cap: http://127.0.0.1:8000")
+    print("  Neu khong tu mo, hay truy cap: http://127.0.0.1")
     print("  De tat ung dung, dong cua so nay.")
     print("=" * 50)
     
     # Start the server (no reload when packaged)
-    uvicorn.run("server.main:app", host="127.0.0.1", port=8000, reload=False)
+    uvicorn.run("server.main:app", host="0.0.0.0", port=80, reload=False)

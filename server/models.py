@@ -1,14 +1,36 @@
-from sqlalchemy import create_engine, Column, Integer, String, DateTime
-from sqlalchemy.orm import declarative_base
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Boolean, Text
 from datetime import datetime
+from server.database import Base
 
-DATABASE_URL = "sqlite:///./scan_to_excel.db"
+class User(Base):
+    __tablename__ = "users"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    username = Column(String(255), unique=True, index=True, nullable=False)
+    password = Column(String(255), nullable=False) # Plain text per user request
+    role = Column(String(255), default="user") # 'admin' or 'user'
+    created_at = Column(DateTime, default=datetime.utcnow)
 
-engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
-SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+class Template(Base):
+    __tablename__ = "templates"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String(255), nullable=False)
+    filename = Column(String(255), nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    is_active = Column(Boolean, default=True)
 
-Base = declarative_base()
+class Task(Base):
+    __tablename__ = "tasks"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"))
+    template_id = Column(Integer, ForeignKey("templates.id"), nullable=True) # Which template this task is for
+    title = Column(String(255), nullable=False)
+    target_quantity = Column(Integer, nullable=False)
+    current_quantity = Column(Integer, default=0)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    status = Column(String(255), default="in_progress") # in_progress, completed
 
 class Submission(Base):
     __tablename__ = "submissions"
@@ -16,11 +38,24 @@ class Submission(Base):
     id = Column(Integer, primary_key=True, index=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     
-    # Store the entire 186 columns as a JSON string to easily support schema changes
-    data_json = Column(String, nullable=False)
+    # Store the dynamically filled JSON
+    data_json = Column(Text, nullable=False)
     
-    # Keep track of which template this belongs to
-    template_name = Column(String, default="Excel_FormMau_v5_04082026.xlsx")
+    # Track which template this belongs to
+    template_id = Column(Integer, ForeignKey("templates.id"), nullable=True)
+    
+    # Track which user created this submission
+    created_by_user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    
+    # Track admin check status
+    is_checked = Column(Boolean, default=False)
 
-# Create tables
-Base.metadata.create_all(bind=engine)
+class AssignedDocument(Base):
+    __tablename__ = "assigned_documents"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    original_filename = Column(String(255), nullable=False)
+    uuid_filename = Column(String(255), nullable=False, unique=True)
+    assigned_to_user_id = Column(Integer, ForeignKey("users.id"), nullable=True) # null = unassigned
+    status = Column(String(255), default="pending") # pending, assigned, completed
+    created_at = Column(DateTime, default=datetime.utcnow)

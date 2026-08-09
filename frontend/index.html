@@ -48,46 +48,45 @@
         <div class="container-fluid">
             <span class="navbar-brand mb-0 h1">Quản lý và Số hóa Giấy chứng nhận</span>
             <div class="d-flex">
-                <div class="btn-group">
-                    <button type="button" class="btn btn-outline-light dropdown-toggle" data-bs-toggle="dropdown" aria-expanded="false">
-                        Xuất báo cáo
-                    </button>
-                    <ul class="dropdown-menu dropdown-menu-end">
-                        <li><a class="dropdown-item" href="#" onclick="exportExcel('new'); return false;">📄 Tạo mới báo cáo</a></li>
-                        <li><a class="dropdown-item" href="#" onclick="document.getElementById('appendExcelInput').click(); return false;">📎 Bổ sung vào báo cáo hiện có</a></li>
-                    </ul>
+                <div class="ms-3 text-white d-flex align-items-center" id="userInfoDisplay" style="display:none;">
+                    <span class="me-3 fs-6">
+                        <i class="fas fa-user-circle"></i> <span id="userNameText" class="fw-bold"></span>
+                        <span id="userRoleBadge" class="badge bg-secondary ms-1"></span>
+                    </span>
+                    <a href="admin.html#data" id="backToAdminBtn" class="btn btn-outline-light btn-sm me-2 d-none"><i class="fas fa-arrow-left"></i> Về trang Quản trị</a>
+                    <button class="btn btn-sm btn-outline-light ms-2" onclick="doLogout()">Thoát</button>
                 </div>
-                <input type="file" id="appendExcelInput" accept=".xlsx" style="display:none;" onchange="exportExcelAppend(this)">
             </div>
         </div>
     </nav>
 
     <div class="container-fluid mt-4 px-4">
-        <div id="loading">Đang tải cấu trúc biểu mẫu, vui lòng đợi...</div>
-        
-        <!-- Tabs for Switching Views -->
-        <ul class="nav nav-tabs mb-4" id="appTabs" role="tablist" style="display: none;">
-          <li class="nav-item" role="presentation">
-            <button class="nav-link active" id="form-tab" data-bs-toggle="tab" data-bs-target="#form-pane" type="button" role="tab">Thêm mới hồ sơ</button>
-          </li>
-          <li class="nav-item" role="presentation">
-            <button class="nav-link" id="list-tab" data-bs-toggle="tab" data-bs-target="#list-pane" type="button" role="tab" onclick="fetchSubmissions()">Quản lý hồ sơ</button>
-          </li>
+        <ul class="nav nav-tabs mb-4" id="employeeTabs" role="tablist">
+            <li class="nav-item" role="presentation">
+                <button class="nav-link active fw-bold text-primary" id="form-tab" data-bs-toggle="tab" data-bs-target="#form-pane" type="button" role="tab">Nhập Hồ sơ</button>
+            </li>
+            <li class="nav-item" role="presentation">
+                <button class="nav-link fw-bold" id="data-tab" data-bs-toggle="tab" data-bs-target="#data-pane" type="button" role="tab" onclick="fetchSubmissions()">Hồ sơ đã nhập</button>
+            </li>
         </ul>
 
         <div class="tab-content" id="appTabsContent">
             <!-- FORM PANE -->
             <div class="tab-pane fade show active" id="form-pane" role="tabpanel">
+                <div id="loading">Đang tải cấu trúc biểu mẫu, vui lòng đợi...</div>
                 <div class="row mt-3">
                     <!-- LEFT COLUMN: PDF VIEWER & LIST -->
                     <div class="col-lg-8">
                         <div class="sticky-top" style="z-index: 1;">
                             <div class="row">
                                 <!-- File List Sidebar -->
-                                <div class="col-md-3">
-                                    <div class="mb-3">
-                                        <label for="pdfUploadInput" class="form-label fw-bold btn btn-outline-primary w-100 mb-0">
-                                            + Tải tài liệu quét
+                                <div class="col-md-3" id="fileSidebar">
+                                    <div class="mb-3 d-flex flex-column gap-2">
+                                        <button class="btn btn-success fw-bold w-100" onclick="fetchMyQueue()" id="btnFetchQueue">
+                                            <i class="fas fa-download"></i> Tải tài liệu được giao
+                                        </button>
+                                        <label for="pdfUploadInput" class="form-label btn btn-outline-primary w-100 mb-0">
+                                            + Tải tài liệu thủ công
                                         </label>
                                         <input class="form-control d-none" type="file" id="pdfUploadInput" accept=".pdf,image/*" multiple>
                                     </div>
@@ -99,7 +98,7 @@
                                 </div>
                                 
                                 <!-- PDF Viewer -->
-                                <div class="col-md-9">
+                                <div class="col-md-9" id="pdfViewerCol">
                                     <div class="border rounded bg-light d-flex align-items-center justify-content-center" id="pdfViewerContainer" style="height: 85vh; overflow: hidden;">
                                         <p class="text-muted text-center" id="pdfPlaceholder">Chưa có tài liệu nào được tải lên.<br>Vui lòng chọn tệp PDF hoặc hình ảnh ở cột bên trái.</p>
                                         <iframe id="pdfIframe" style="width: 100%; height: 100%; display: none;" frameborder="0"></iframe>
@@ -112,6 +111,19 @@
                     <!-- RIGHT COLUMN: DATA FORM -->
                     <div class="col-lg-4">
                         <div style="height: 85vh; overflow-y: auto; padding-right: 15px; padding-left: 5px;">
+                            <div class="mb-3" id="templateSelectContainer" style="display:none;">
+                                <label for="templateSelect" class="form-label fw-bold text-primary"><i class="fas fa-file-alt"></i> Chọn Biểu mẫu cần nhập</label>
+                                <select id="templateSelect" class="form-select border-primary" onchange="onTemplateSelected()">
+                                    <option value="">-- Đang tải danh sách biểu mẫu... --</option>
+                                </select>
+                            </div>
+                            
+                            <div id="adminCheckArea" class="alert alert-warning py-3 px-3 mb-3 border-warning" style="display:none;">
+                                <div class="form-check form-switch mb-0 d-flex justify-content-between align-items-center">
+                                    <label class="form-check-label fw-bold text-dark fs-6" for="adminFormCheckToggle">Xác nhận Đã Kiểm tra & Duyệt hồ sơ</label>
+                                    <input class="form-check-input" type="checkbox" id="adminFormCheckToggle" style="transform: scale(1.5);">
+                                </div>
+                            </div>
                             <form id="dataForm" style="display: none;">
                                 <div class="d-flex justify-content-between align-items-center mb-3 p-2 bg-light border rounded">
                                     <h5 class="text-primary mb-0"><i class="fas fa-edit"></i> Dữ liệu hồ sơ</h5>
@@ -120,7 +132,14 @@
                                     </button>
                                 </div>
                                 <div id="form-container"></div>
-                                <div class="d-grid gap-2 mb-5 mt-3">
+                                <div id="adminCheckArea" class="mt-4 p-3 bg-white border border-primary rounded d-none shadow-sm">
+                                    <div class="form-check form-switch fs-5 d-flex align-items-center">
+                                        <input class="form-check-input me-3 mt-0" type="checkbox" id="adminFormCheckToggle" onchange="toggleFormCheck()" style="cursor: pointer; transform: scale(1.3);">
+                                        <label class="form-check-label text-primary fw-bold" for="adminFormCheckToggle" style="cursor: pointer;">Xác nhận Đã Kiểm tra & Duyệt hồ sơ</label>
+                                    </div>
+                                    <small class="text-muted ms-5">Thao tác này chỉ dành cho tài khoản Quản trị viên.</small>
+                                </div>
+                                <div class="d-grid gap-2 mb-5 mt-4">
                                     <button type="button" class="btn btn-primary btn-lg" id="submitBtn" onclick="submitData()">Lưu hồ sơ</button>
                                     <button type="button" class="btn btn-warning btn-sm" id="clearFormBtn" onclick="resetFormData()">Làm mới biểu mẫu</button>
                                     <button type="button" class="btn btn-secondary btn-sm d-none" id="cancelEditBtn" onclick="cancelEdit()">Hủy cập nhật</button>
@@ -131,13 +150,16 @@
                 </div>
             </div>
             
-            <!-- LIST PANE -->
-            <div class="tab-pane fade" id="list-pane" role="tabpanel">
+            <!-- DATA LIST PANE -->
+            <div class="tab-pane fade" id="data-pane" role="tabpanel">
                 <div class="form-section">
                     <div class="d-flex justify-content-between align-items-center mb-3">
-                        <h4 class="form-section-title mb-0">Quản lý hồ sơ</h4>
-                        <div style="width: 300px;">
-                            <input type="text" id="searchInput" class="form-control form-control-sm" placeholder="Tìm kiếm (ID, Họ tên...)" onkeyup="filterSubmissions()">
+                        <h4 class="form-section-title mb-0" style="border-bottom: none;"><i class="fas fa-database"></i> Hồ sơ bạn đã nhập</h4>
+                        <div class="d-flex">
+                            <select id="filterTemplateId" class="form-select me-2" onchange="fetchSubmissions()" style="display:none;">
+                                <!-- Hidden since users likely don't need to filter by template if they are assigned one, but app.js uses it -->
+                                <option value="">-- Tất cả Biểu mẫu --</option>
+                            </select>
                         </div>
                     </div>
                     <table class="table table-striped table-hover">
@@ -147,21 +169,44 @@
                                 <th>Ngày tạo</th>
                                 <th>Họ tên</th>
                                 <th>Số giấy tờ</th>
+                                <th>Biểu mẫu</th>
                                 <th>Tài liệu đính kèm</th>
+                                <th>Kiểm tra</th>
                                 <th>Thao tác</th>
                             </tr>
                         </thead>
                         <tbody id="submissionsTableBody">
-                            <tr><td colspan="6" class="text-center">Chưa có dữ liệu</td></tr>
+                            <tr><td colspan="8" class="text-center">Đang tải dữ liệu...</td></tr>
                         </tbody>
                     </table>
                 </div>
             </div>
         </div>
     </div>
+    </div>
 
     <!-- Bootstrap JS Bundle -->
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
-    <script src="app.js?v=4.1"></script>
+    <script>
+        // Immediate Auth Check to prevent flickering
+        const token = localStorage.getItem('token');
+        const userStr = localStorage.getItem('user');
+        if (!token || !userStr) {
+            window.location.href = '/login.html';
+        } else {
+            const user = JSON.parse(userStr);
+            const urlParams = new URLSearchParams(window.location.search);
+            const hasCheckId = urlParams.has('check_id');
+            if (user.role === 'admin' && !hasCheckId) {
+                window.location.href = '/admin.html';
+            }
+        }
+    </script>
+    <script src="auth.js?v=6.26"></script>
+    <script src="js/pdf_handler.js?v=6.26"></script>
+    <script src="js/form_renderer.js?v=6.26"></script>
+    <script src="js/submission.js?v=6.26"></script>
+    <script src="js/admin_panel.js?v=6.26"></script>
+    <script src="app.js?v=6.26"></script>
 </body>
 </html>

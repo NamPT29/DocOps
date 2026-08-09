@@ -167,7 +167,7 @@ def get_form_schema(excel_path):
         if field_type == "dropdown":
             if col_1 in [6, 7, 8, 10, 27, 54, 55, 62, 63, 70, 71, 78, 79, 172]:
                 extract_mode = "left"
-            elif col_1 in [13, 24, 30]:
+            elif col_1 in [13, 24, 30, 99]:
                 extract_mode = "right"
             elif col_1 == 41:
                 extract_mode = "right"
@@ -310,21 +310,41 @@ def get_ma_xa_mapping(excel_path):
 def get_don_vi_do_mapping(excel_path):
     """
     Extracts mapping from QNH_ThongTinDoDac sheet to automatically fill Don vi do dac based on address.
-    Returns: { "normalized_phuong_huyen": "Tên đơn vị đo" }
+    Returns: { "normalized_phuong_huyen": {"don_vi": "Tên đơn vị đo", "ngay_hoan_thanh": "Ngày hoàn thành"} }
     """
     import re
     try:
         df = pd.read_excel(excel_path, sheet_name='QNH_ThongTinDoDac', dtype=str)
+        # Handle dynamic columns in case of encoding issues
+        col_phuong = next((c for c in df.columns if 'ph' in c.lower() and 'c' in c.lower()), df.columns[1] if len(df.columns) > 1 else 'Tên phường cũ')
+        col_huyen = next((c for c in df.columns if 'huy' in c.lower()), df.columns[2] if len(df.columns) > 2 else 'Huyện')
+        col_don_vi = next((c for c in df.columns if 'đơn vị' in c.lower() or 'v' in c.lower()), df.columns[3] if len(df.columns) > 3 else 'Tên đơn vị đo')
+        col_ngay = next((c for c in df.columns if 'ng' in c.lower() and 'ho' in c.lower()), df.columns[4] if len(df.columns) > 4 else 'Ngày hoàn thành')
+
         mapping = {}
         for _, row in df.iterrows():
-            phuong = str(row.get('Tên phường cũ', '')).strip()
-            huyen = str(row.get('Huyện', '')).strip()
-            don_vi = str(row.get('Tên đơn vị đo', '')).strip()
+            phuong = str(row.get(col_phuong, '')).strip()
+            huyen = str(row.get(col_huyen, '')).strip()
+            don_vi = str(row.get(col_don_vi, '')).strip()
+            ngay = str(row.get(col_ngay, '')).strip()
+            
+            if ngay and ngay != 'nan':
+                if ngay.replace('.', '', 1).isdigit():
+                    try:
+                        ngay = pd.to_datetime(float(ngay), origin='1899-12-30', unit='D').strftime("%d/%m/%Y")
+                    except:
+                        pass
+            else:
+                ngay = ""
+
             if phuong and phuong != 'nan' and don_vi and don_vi != 'nan':
                 # create a normalized key: lowercase and alphanumeric only
                 s = (phuong + huyen).lower()
                 key = re.sub(r'[^a-z0-9áàảãạăắằẳẵặâấầẩẫậéèẻẽẹêếềểễệíìỉĩịóòỏõọôốồổỗộơớờởỡợúùủũụưứừửữựýỳỷỹỵđ]', '', s)
-                mapping[key] = don_vi
+                mapping[key] = {
+                    "don_vi": don_vi,
+                    "ngay_hoan_thanh": ngay
+                }
         return mapping
     except Exception as e:
         print(f"Error reading QNH_ThongTinDoDac: {e}")
