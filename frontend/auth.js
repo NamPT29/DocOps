@@ -86,72 +86,71 @@ async function authFetch(url, options = {}) {
     return res;
 }
 
+async function apiCall(url, options = {}, errorMessage = "Lỗi kết nối máy chủ") {
+    try {
+        const res = await authFetch(url, options);
+        if (!res) return null; // 401 was handled by authFetch
+        
+        const data = await res.json();
+        if (data.status === 'ok') {
+            return data;
+        } else {
+            alert('Lỗi: ' + (data.message || data.detail || 'Lỗi không xác định'));
+            return null;
+        }
+    } catch (err) {
+        alert(errorMessage + ': ' + err.message);
+        return null;
+    }
+}
+
 // ---------------- ADMIN LOGIC ----------------
 
 async function fetchAdminData() {
     if (currentUser.role !== 'admin') return;
     
     // Fetch users for table
-    const res = await authFetch('/api/users');
-    if (!res) return;
-    const data = await res.json();
+    const data = await apiCall('/api/users');
+    if (!data) return;
     
-    if (data.status === 'ok') {
-        const tbody = document.getElementById('adminUsersTableBody');
-        if (tbody) {
-            tbody.innerHTML = '';
-            data.data.forEach(u => {
-                let badge = u.role === 'admin' ? '<span class="badge bg-danger">Admin</span>' : '<span class="badge bg-primary">Nhân viên</span>';
-                let deleteBtn = u.id === currentUser.id ? '' : `<button class="btn btn-sm btn-danger" onclick="deleteUser(${u.id})"><i class="fas fa-trash"></i> Xóa</button>`;
-                tbody.innerHTML += `
-                    <tr>
-                        <td>${u.id}</td>
-                        <td>${u.username}</td>
-                        <td>${badge}</td>
-                        <td>${deleteBtn}</td>
-                    </tr>
-                `;
-            });
-        }
+    const tbody = document.getElementById('adminUsersTableBody');
+    if (tbody) {
+        tbody.innerHTML = '';
+        data.data.forEach(u => {
+            let badge = u.role === 'admin' ? '<span class="badge bg-danger">Admin</span>' : '<span class="badge bg-primary">Nhân viên</span>';
+            let deleteBtn = u.id === currentUser.id ? '' : `<button class="btn btn-sm btn-danger" onclick="deleteUser(${u.id})"><i class="fas fa-trash"></i> Xóa</button>`;
+            tbody.innerHTML += `
+                <tr>
+                    <td>${u.id}</td>
+                    <td>${u.username}</td>
+                    <td>${badge}</td>
+                    <td>${deleteBtn}</td>
+                </tr>
+            `;
+        });
     }
 }
 
 async function deleteUser(userId) {
     if(!confirm("Bạn có chắc chắn muốn xóa tài khoản này? Toàn bộ tài liệu chưa xử lý của họ sẽ trở về trạng thái trống.")) return;
     
-    try {
-        const res = await authFetch(`/api/users/${userId}`, { method: 'DELETE' });
-        if(!res) return;
-        const data = await res.json();
-        
-        if (data.status === 'ok') {
-            alert('Đã xóa thành công!');
-            fetchAdminData();
-            if (typeof fetchDocumentPool === 'function') fetchDocumentPool();
-        } else {
-            alert('Lỗi: ' + data.message);
-        }
-    } catch(err) {
-        alert('Lỗi kết nối: ' + err.message);
+    const data = await apiCall(`/api/users/${userId}`, { method: 'DELETE' });
+    if (data) {
+        alert('Đã xóa thành công!');
+        fetchAdminData();
+        if (typeof fetchDocumentPool === 'function') fetchDocumentPool();
     }
 }
 
 async function fetchDashboardStats() {
     if (currentUser.role !== 'admin') return;
     
-    try {
-        const res = await authFetch('/api/submissions');
-        if (!res) return;
-        const data = await res.json();
-        
-        if (data.status === 'ok') {
-            const el = document.getElementById('dashTotalDocs');
-            if (el) {
-                el.innerText = data.data.length;
-            }
+    const data = await apiCall('/api/submissions');
+    if (data) {
+        const el = document.getElementById('dashTotalDocs');
+        if (el) {
+            el.innerText = data.data.length;
         }
-    } catch (e) {
-        console.error("Dashboard err", e);
     }
     
     // Also load templates dropdown so export/filter works
@@ -159,51 +158,45 @@ async function fetchDashboardStats() {
 }
 
 async function populateTemplatesDropdown(elementId, keepDefault = false) {
-    const res = await authFetch('/api/templates');
-    if (!res) return;
-    const data = await res.json();
+    const data = await apiCall('/api/templates');
+    if (!data) return;
     
-    if (data.status === 'ok') {
-        const select = document.getElementById(elementId);
-        if (!select) return;
-        
-        let originalContent = '';
-        if (keepDefault) {
-            originalContent = select.innerHTML;
-        }
-        
-        select.innerHTML = originalContent;
-        data.data.forEach(t => {
-            const opt = document.createElement('option');
-            opt.value = t.id;
-            opt.innerText = t.name;
-            select.appendChild(opt);
-        });
+    const select = document.getElementById(elementId);
+    if (!select) return;
+    
+    let originalContent = '';
+    if (keepDefault) {
+        originalContent = select.innerHTML;
     }
+    
+    select.innerHTML = originalContent;
+    data.data.forEach(t => {
+        const opt = document.createElement('option');
+        opt.value = t.id;
+        opt.innerText = t.name;
+        select.appendChild(opt);
+    });
 }
 
 async function fetchAdminTemplates() {
-    const res = await authFetch('/api/templates');
-    if (!res) return;
-    const data = await res.json();
+    const data = await apiCall('/api/templates');
+    if (!data) return;
     
-    if (data.status === 'ok') {
-        const tbody = document.getElementById('templatesTableBody');
-        tbody.innerHTML = '';
-        if (data.data.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="3" class="text-center">Chưa có biểu mẫu nào.</td></tr>';
-            return;
-        }
-        data.data.forEach(t => {
-            tbody.innerHTML += `
-                <tr>
-                    <td>${t.id}</td>
-                    <td><b>${t.name}</b></td>
-                    <td>${t.filename}</td>
-                </tr>
-            `;
-        });
+    const tbody = document.getElementById('templatesTableBody');
+    tbody.innerHTML = '';
+    if (data.data.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="3" class="text-center">Chưa có biểu mẫu nào.</td></tr>';
+        return;
     }
+    data.data.forEach(t => {
+        tbody.innerHTML += `
+            <tr>
+                <td>${t.id}</td>
+                <td><b>${t.name}</b></td>
+                <td>${t.filename}</td>
+            </tr>
+        `;
+    });
 }
 
 async function uploadTemplate() {
@@ -215,18 +208,15 @@ async function uploadTemplate() {
     const formData = new FormData();
     formData.append("file", fileInput.files[0]);
     
-    const res = await authFetch('/api/templates', {
+    const data = await apiCall('/api/templates', {
         method: 'POST',
         body: formData
     });
     
-    const data = await res.json();
-    if (data.status === 'ok') {
+    if (data) {
         alert("Tải mẫu lên thành công!");
         fileInput.value = "";
         fetchAdminTemplates();
-    } else {
-        alert("Lỗi: " + data.message);
     }
 }
 
@@ -235,19 +225,17 @@ async function createUser() {
     const p = document.getElementById('newPassword').value.trim();
     if (!u || !p) return alert("Vui lòng nhập tên và mật khẩu");
     
-    const res = await authFetch('/api/users', {
+    const data = await apiCall('/api/users', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({username: u, password: p})
     });
-    const data = await res.json();
-    if (data.status === 'ok') {
+    
+    if (data) {
         alert("Tạo tài khoản thành công!");
         document.getElementById('newUsername').value = '';
         document.getElementById('newPassword').value = '';
         fetchAdminData();
-    } else {
-        alert("Lỗi: " + data.message);
     }
 }
 
@@ -294,11 +282,10 @@ async function exportExcelByTemplate() {
 
 // ---------------- USER LOGIC ----------------
 async function populateTemplateDropdown() {
-    const res = await authFetch('/api/templates');
-    if (!res) return;
-    const data = await res.json();
+    const data = await apiCall('/api/templates');
+    if (!data) return;
     
-    if (data.status === 'ok' && data.data.length > 0) {
+    if (data.data.length > 0) {
         const select = document.getElementById('templateSelect');
         const container = document.getElementById('templateSelectContainer');
         if (select && container) {

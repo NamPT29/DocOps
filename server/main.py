@@ -41,12 +41,13 @@ app.add_middleware(
 )
 
 # Include routers
-from server.routers import auth, templates, tasks, submissions, documents
+from server.routers import auth, templates, tasks, submissions, documents, processing
 app.include_router(auth.router)
 app.include_router(templates.router)
 app.include_router(tasks.router)
 app.include_router(submissions.router)
 app.include_router(documents.router)
+app.include_router(processing.router)
 
 # Ensure upload dirs exist
 os.makedirs("uploads", exist_ok=True)

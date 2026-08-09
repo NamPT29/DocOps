@@ -4,6 +4,9 @@ import webbrowser
 import threading
 import time
 import uvicorn
+from dotenv import load_dotenv
+
+load_dotenv()
 
 def get_base_dir():
     """Returns the correct base directory whether running as script or frozen exe."""
@@ -14,10 +17,13 @@ def get_base_dir():
         # Running as normal script
         return os.path.dirname(os.path.abspath(__file__))
 
-def open_browser():
+def open_browser(host, port):
     """Opens the default browser after a short delay to let the server start."""
     time.sleep(2)
-    webbrowser.open("http://127.0.0.1")
+    # Nếu host là 0.0.0.0, mở trên localhost hoặc 127.0.0.1
+    url_host = "127.0.0.1" if host == "0.0.0.0" else host
+    url = f"http://{url_host}:{port}" if port != 80 else f"http://{url_host}"
+    webbrowser.open(url)
 
 if __name__ == "__main__":
     # Change working directory to the base directory
@@ -28,18 +34,22 @@ if __name__ == "__main__":
     os.makedirs("uploads", exist_ok=True)
     os.makedirs("scratch", exist_ok=True)
     
+    # Read environment variables
+    host = os.environ.get("HOST", "0.0.0.0")
+    port = int(os.environ.get("PORT", "80"))
+    
     print("=" * 50)
     print("  HE THONG QUAN LY DU LIEU GCN")
     print("  Dang khoi dong may chu...")
     print("=" * 50)
     
     # Open browser in a separate thread
-    threading.Thread(target=open_browser, daemon=True).start()
+    threading.Thread(target=open_browser, args=(host, port), daemon=True).start()
     
     print("  Trinh duyet se tu dong mo trong giay lat...")
-    print("  Neu khong tu mo, hay truy cap: http://127.0.0.1")
+    print(f"  Neu khong tu mo, hay truy cap: http://{'127.0.0.1' if host == '0.0.0.0' else host}:{port}")
     print("  De tat ung dung, dong cua so nay.")
     print("=" * 50)
     
     # Start the server (no reload when packaged)
-    uvicorn.run("server.main:app", host="0.0.0.0", port=80, reload=False)
+    uvicorn.run("server.main:app", host=host, port=port, reload=False)

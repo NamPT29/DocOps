@@ -1,65 +1,44 @@
-let maXaMapping = null;
-let donViDoMapping = null;
-
-async function fetchMaXaMapping() {
-    try {
+let debounceTimer;
+async function debounceProcessField(fieldName, value, callback) {
+    clearTimeout(debounceTimer);
+    debounceTimer = setTimeout(async () => {
         if (!window.activeTemplateId) return;
-        const response = await authFetch(`/api/templates/${window.activeTemplateId}/maxa_mapping`);
-        const res = await response.json();
-        if (res.status === 'ok') {
-            maXaMapping = res.data;
+        const res = await apiCall(`/api/templates/${window.activeTemplateId}/process-field`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ field_name: fieldName, value: value })
+        }, "Lỗi xử lý tự động điền");
+        if (res && res.data) {
+            callback(res.data);
         }
-    } catch (err) {
-        console.error("Lỗi tải mapping mã xã: " + err);
-    }
-}
-
-async function fetchDonViDoMapping() {
-    try {
-        if (!window.activeTemplateId) return;
-        const response = await authFetch(`/api/templates/${window.activeTemplateId}/don_vi_do_mapping`);
-        const res = await response.json();
-        if (res.status === 'ok') {
-            donViDoMapping = res.data;
-        }
-    } catch (err) {
-        console.error("Lỗi tải mapping đơn vị đo: " + err);
-    }
+    }, 500);
 }
 
 async function fetchSchema() {
-    try {
-        const loadingEl = document.getElementById('loading');
-        const dataForm = document.getElementById('dataForm');
-        
-        if (!window.activeTemplateId) {
-            if (loadingEl) {
-                loadingEl.innerHTML = '<div class="alert alert-info text-center mt-4">Vui lòng chọn Biểu mẫu nhập liệu ở menu phía trên để bắt đầu.</div>';
-                loadingEl.style.display = 'block';
-            }
-            if (dataForm) dataForm.style.display = 'none';
-            return;
-        }
-        
+    const loadingEl = document.getElementById('loading');
+    const dataForm = document.getElementById('dataForm');
+    
+    if (!window.activeTemplateId) {
         if (loadingEl) {
-            loadingEl.innerHTML = 'Đang tải cấu trúc biểu mẫu, vui lòng đợi...';
+            loadingEl.innerHTML = '<div class="alert alert-info text-center mt-4">Vui lòng chọn Biểu mẫu nhập liệu ở menu phía trên để bắt đầu.</div>';
             loadingEl.style.display = 'block';
         }
         if (dataForm) dataForm.style.display = 'none';
-        
-        const response = await authFetch(`/api/templates/${window.activeTemplateId}/schema`);
-        const res = await response.json();
-        
-        if (loadingEl) loadingEl.style.display = 'none';
-        
-        if (res.status === 'ok') {
-            renderForm(res.data);
-            if (dataForm) dataForm.style.display = 'block';
-        } else {
-            alert("Lỗi tải dữ liệu: " + res.message);
-        }
-    } catch (err) {
-        alert("Lỗi kết nối máy chủ : " + err);
+        return;
+    }
+    
+    if (loadingEl) {
+        loadingEl.innerHTML = 'Đang tải cấu trúc biểu mẫu, vui lòng đợi...';
+        loadingEl.style.display = 'block';
+    }
+    if (dataForm) dataForm.style.display = 'none';
+    
+    const data = await apiCall(`/api/templates/${window.activeTemplateId}/schema`);
+    if (loadingEl) loadingEl.style.display = 'none';
+    
+    if (data) {
+        renderForm(data.data);
+        if (dataForm) dataForm.style.display = 'block';
     }
 }
 
@@ -68,8 +47,6 @@ async function onTemplateSelected() {
     if (select && select.value) {
         window.activeTemplateId = select.value;
         if (typeof cancelEdit === 'function') cancelEdit();
-        await fetchMaXaMapping();
-        await fetchDonViDoMapping();
         await fetchSchema();
     } else {
         window.activeTemplateId = null;
@@ -307,8 +284,6 @@ function renderForm(schema) {
 
             if (['col_20', 'col_37', 'col_92'].includes(field.name)) {
                 input.addEventListener('input', function() {
-                    if (!maXaMapping) return;
-                    
                     let val = this.value.trim();
                     if (!val) {
                         if (field.name === 'col_20') {
@@ -322,113 +297,59 @@ function renderForm(schema) {
                         return;
                     }
                     
-                    let normalizedVal = val.toLowerCase().replace(/[^a-z0-9áàảãạăắằẳẵặâấầẩẫậéèẻẽẹêếềểễệíìỉĩịóòỏõọôốồổỗộơớờởỡợúùủũụưứừửữựýỳỷỹỵđ]/g, '');
-                    
-                    let matchedKey = null;
-                    let matchObj = null;
-                    
-                    for (let key in maXaMapping.mapping_3_cap) {
-                        if (normalizedVal.endsWith(key)) {
-                            if (!matchedKey || key.length > matchedKey.length) {
-                                matchedKey = key;
-                                matchObj = maXaMapping.mapping_3_cap[key];
-                            }
-                        }
-                    }
-                    for (let key in maXaMapping.mapping_2_cap) {
-                        if (normalizedVal.endsWith(key)) {
-                            if (!matchedKey || key.length > matchedKey.length) {
-                                matchedKey = key;
-                                matchObj = maXaMapping.mapping_2_cap[key];
-                            }
-                        }
-                    }
-                    
-                    if (matchObj) {
-                        let prefixNormLen = normalizedVal.length - matchedKey.length;
-                        let count = 0;
-                        let splitIdx = 0;
-                        for (let i = 0; i < val.length; i++) {
-                            if (count === prefixNormLen) {
-                                splitIdx = i;
-                                break;
-                            }
-                            let charNorm = val[i].toLowerCase().replace(/[^a-z0-9áàảãạăắằẳẵặâấầẩẫậéèẻẽẹêếềểễệíìỉĩịóòỏõọôốồổỗộơớờởỡợúùủũụưứừửữựýỳỷỹỵđ]/g, '');
-                            if (charNorm) count++;
-                        }
-                        
-                        let prefixOriginal = val.substring(0, splitIdx).trim();
-                        prefixOriginal = prefixOriginal.replace(/(^[\s,]+)|([\s,]+$)/g, '');
-                        
-                        let finalStr = prefixOriginal ? (prefixOriginal + ", " + matchObj.formatted) : matchObj.formatted;
-                        
-                        this.value = finalStr;
-                        
-                        if (field.name === 'col_20') {
-                            let maXa = document.getElementById('col_19');
-                            if (maXa) maXa.value = matchObj.code;
+                    debounceProcessField(field.name, val, (data) => {
+                        if (data && data.formatted) {
+                            input.value = data.formatted;
                             
-                            let f19 = document.getElementById('col_18');
-                            let f22 = document.getElementById('col_21');
-                            if (f22) {
-                                let parts = [];
-                                if (f19 && f19.value.trim()) parts.push(f19.value.trim());
-                                parts.push(finalStr);
-                                f22.value = parts.join(', ');
-                            }
-                        }
-                        
-                        if (field.name === 'col_37') {
-                            let maXa = document.getElementById('col_36');
-                            if (maXa) maXa.value = matchObj.code;
-                            
-                            let f36 = document.getElementById('col_35');
-                            let f39 = document.getElementById('col_38');
-                            if (f39) {
-                                let parts = [];
-                                if (f36 && f36.value.trim()) parts.push(f36.value.trim());
-                                parts.push(finalStr);
-                                f39.value = parts.join(', ');
-                            }
-                        }
-                        
-                        if (field.name === 'col_92') {
-                            // Không có mã xã cho mục 93
-                            
-                            let f92 = document.getElementById('col_91');
-                            let f94 = document.getElementById('col_93');
-                            if (f94) {
-                                let parts = [];
-                                if (f92 && f92.value.trim()) parts.push(f92.value.trim());
-                                parts.push(finalStr);
-                                f94.value = parts.join(', ');
-                            }
-                            
-                            // Mục 47 = Tên đơn vị đo, Mục 50 = Ngày hoàn thành
-                            let f47 = document.getElementById('col_46');
-                            let f50 = document.getElementById('col_49');
-                            if (f47 && donViDoMapping) {
-                                let searchStr = (matchObj.formatted || finalStr).replace(/(, Tỉnh Quảng Ninh)/g, '');
-                                let key = searchStr.toLowerCase().replace(/[^a-z0-9áàảãạăắằẳẵặâấầẩẫậéèẻẽẹêếềểễệíìỉĩịóòỏõọôốồổỗộơớờởỡợúùủũụưứừửữựýỳỷỹỵđ]/g, '');
-                                if (donViDoMapping[key]) {
-                                    f47.value = donViDoMapping[key].don_vi || '';
-                                    if (f50) f50.value = donViDoMapping[key].ngay_hoan_thanh || '';
-                                } else {
-                                    // Try to match only the ward part in case District is omitted in mapping
-                                    let wardStr = searchStr.split(',')[0].toLowerCase().replace(/[^a-z0-9áàảãạăắằẳẵặâấầẩẫậéèẻẽẹêếềểễệíìỉĩịóòỏõọôốồổỗộơớờởỡợúùủũụưứừửữựýỳỷỹỵđ]/g, '');
-                                    let found = false;
-                                    for (let mapKey in donViDoMapping) {
-                                        if (mapKey.startsWith(wardStr)) {
-                                            f47.value = donViDoMapping[mapKey].don_vi || '';
-                                            if (f50) f50.value = donViDoMapping[mapKey].ngay_hoan_thanh || '';
-                                            found = true;
-                                            break;
-                                        }
-                                    }
+                            if (field.name === 'col_20') {
+                                let maXa = document.getElementById('col_19');
+                                if (maXa) maXa.value = data.code;
+                                
+                                let f19 = document.getElementById('col_18');
+                                let f22 = document.getElementById('col_21');
+                                if (f22) {
+                                    let parts = [];
+                                    if (f19 && f19.value.trim()) parts.push(f19.value.trim());
+                                    parts.push(data.formatted);
+                                    f22.value = parts.join(', ');
                                 }
                             }
+                            
+                            if (field.name === 'col_37') {
+                                let maXa = document.getElementById('col_36');
+                                if (maXa) maXa.value = data.code;
+                                
+                                let f36 = document.getElementById('col_35');
+                                let f39 = document.getElementById('col_38');
+                                if (f39) {
+                                    let parts = [];
+                                    if (f36 && f36.value.trim()) parts.push(f36.value.trim());
+                                    parts.push(data.formatted);
+                                    f39.value = parts.join(', ');
+                                }
+                            }
+                            
+                            if (field.name === 'col_92') {
+                                let f92 = document.getElementById('col_91');
+                                let f94 = document.getElementById('col_93');
+                                if (f94) {
+                                    let parts = [];
+                                    if (f92 && f92.value.trim()) parts.push(f92.value.trim());
+                                    parts.push(data.formatted);
+                                    f94.value = parts.join(', ');
+                                }
+                                
+                                let f47 = document.getElementById('col_46');
+                                let f50 = document.getElementById('col_49');
+                                if (f47 && data.don_vi_do) {
+                                    f47.value = data.don_vi_do;
+                                    if (f50 && data.ngay_hoan_thanh) f50.value = data.ngay_hoan_thanh;
+                                }
+                            }
+                            
+                            if (typeof saveFormDraft === 'function') saveFormDraft();
                         }
-                    }
+                    });
                 });
             }
             

@@ -6,7 +6,7 @@ import os
 import uuid
 import shutil
 from server.database import get_db
-from server.routers.auth import get_current_user
+from server.routers.auth import get_current_user, get_admin_user
 from server.models import AssignedDocument, User
 from pydantic import BaseModel
 
@@ -17,10 +17,7 @@ class AssignRequest(BaseModel):
     count: int
 
 @router.post("/documents/batch-upload")
-async def batch_upload_documents(files: List[UploadFile] = File(...), current_user: dict = Depends(get_current_user), db: Session = Depends(get_db)):
-    if current_user["role"] != "admin":
-        raise HTTPException(status_code=403, detail="Access denied")
-        
+async def batch_upload_documents(files: List[UploadFile] = File(...), current_user: dict = Depends(get_admin_user), db: Session = Depends(get_db)):
     os.makedirs("uploads", exist_ok=True)
     uploaded_count = 0
     
@@ -51,10 +48,7 @@ async def batch_upload_documents(files: List[UploadFile] = File(...), current_us
         return {"status": "error", "message": f"Có lỗi xảy ra (có thể do trùng tên file gốc): {str(e)}"}
 
 @router.get("/documents/pool")
-def get_document_pool(current_user: dict = Depends(get_current_user), db: Session = Depends(get_db)):
-    if current_user["role"] != "admin":
-        raise HTTPException(status_code=403, detail="Access denied")
-        
+def get_document_pool(current_user: dict = Depends(get_admin_user), db: Session = Depends(get_db)):
     unassigned_count = db.query(AssignedDocument).filter(AssignedDocument.assigned_to_user_id == None).count()
     
     # Get assignment stats per user
@@ -84,10 +78,7 @@ def get_document_pool(current_user: dict = Depends(get_current_user), db: Sessio
     }
 
 @router.post("/documents/assign")
-def assign_documents(req: AssignRequest, current_user: dict = Depends(get_current_user), db: Session = Depends(get_db)):
-    if current_user["role"] != "admin":
-        raise HTTPException(status_code=403, detail="Access denied")
-        
+def assign_documents(req: AssignRequest, current_user: dict = Depends(get_admin_user), db: Session = Depends(get_db)):
     if req.count <= 0:
         return {"status": "error", "message": "Số lượng phải lớn hơn 0"}
         

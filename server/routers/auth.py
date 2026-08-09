@@ -18,6 +18,11 @@ def get_current_user(authorization: str = Header(None)):
         raise HTTPException(status_code=401, detail="Invalid token")
     return SESSIONS[token]
 
+def get_admin_user(current_user: dict = Depends(get_current_user)):
+    if current_user.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="Access denied")
+    return current_user
+
 def init_admin():
     db = SessionLocal()
     try:
@@ -48,9 +53,7 @@ class CreateUserRequest(BaseModel):
     role: str = "user"
 
 @router.post("/users")
-def api_create_user(req: CreateUserRequest, current_user: dict = Depends(get_current_user), db: Session = Depends(get_db)):
-    if current_user["role"] != "admin":
-        return {"status": "error", "message": "Access denied"}
+def api_create_user(req: CreateUserRequest, current_user: dict = Depends(get_admin_user), db: Session = Depends(get_db)):
     if db.query(User).filter(User.username == req.username).first():
         return {"status": "error", "message": "Username already exists"}
     user = User(username=req.username, password=req.password, role=req.role)
@@ -59,9 +62,7 @@ def api_create_user(req: CreateUserRequest, current_user: dict = Depends(get_cur
     return {"status": "ok"}
 
 @router.delete("/users/{user_id}")
-def api_delete_user(user_id: int, current_user: dict = Depends(get_current_user), db: Session = Depends(get_db)):
-    if current_user["role"] != "admin":
-        return {"status": "error", "message": "Access denied"}
+def api_delete_user(user_id: int, current_user: dict = Depends(get_admin_user), db: Session = Depends(get_db)):
     if current_user["id"] == user_id:
         return {"status": "error", "message": "Không thể tự xóa tài khoản của chính mình"}
         
@@ -83,8 +84,6 @@ def api_delete_user(user_id: int, current_user: dict = Depends(get_current_user)
     return {"status": "ok"}
 
 @router.get("/users")
-def api_get_users(current_user: dict = Depends(get_current_user), db: Session = Depends(get_db)):
-    if current_user["role"] != "admin":
-        return {"status": "error", "message": "Access denied"}
+def api_get_users(current_user: dict = Depends(get_admin_user), db: Session = Depends(get_db)):
     users = db.query(User).all()
     return {"status": "ok", "data": [{"id": u.id, "username": u.username, "role": u.role} for u in users]}

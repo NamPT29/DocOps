@@ -10,7 +10,8 @@ from sqlalchemy.orm import Session
 from datetime import timedelta, datetime
 from server.database import get_db
 from server.models import Submission, Task, User, Template
-from server.routers.auth import get_current_user
+from server.routers.auth import get_current_user, get_admin_user
+from fastapi import HTTPException
 
 router = APIRouter(prefix="/api", tags=["submissions"])
 
@@ -70,16 +71,16 @@ def api_get_submissions(template_id: int = None, start_date: str = None, end_dat
             
         users = db.query(User).all()
         user_map = {u.id: u.username for u in users}
+        
+        templates = db.query(Template).all()
+        template_map = {t.id: t.name for t in templates}
             
         results = []
         for sub in submissions:
             data_dict = json.loads(sub.data_json)
             ho_ten = data_dict.get("col_8", "") or data_dict.get("col_25", "") or "(Chưa có tên)"
             so_giay_to = data_dict.get("col_13", "") or data_dict.get("col_30", "") or "(Chưa có CMND)"
-            template_name = "Unknown"
-            if sub.template_id:
-                t = db.query(Template).filter(Template.id == sub.template_id).first()
-                if t: template_name = t.name
+            template_name = template_map.get(sub.template_id, "Unknown") if sub.template_id else "Unknown"
                 
             results.append({
                 "id": sub.id,
@@ -122,23 +123,26 @@ def api_get_submission(sub_id: int, current_user: dict = Depends(get_current_use
         return {"status": "error", "message": str(e)}
 
 @router.put("/submissions/{sub_id}")
-def api_update_submission(sub_id: int, req: SubmitRequest, db: Session = Depends(get_db)):
+def api_update_submission(sub_id: int, req: SubmitRequest, current_user: dict = Depends(get_current_user), db: Session = Depends(get_db)):
     try:
         sub = db.query(Submission).filter(Submission.id == sub_id).first()
         if not sub:
             return {"status": "error", "message": "Không tìm thấy hồ sơ."}
+            
+        if current_user["role"] != "admin" and sub.created_by_user_id != current_user["id"]:
+            raise HTTPException(status_code=403, detail="Bạn không có quyền sửa hồ sơ này.")
         
         sub.data_json = json.dumps(req.data, ensure_ascii=False)
         db.commit()
         return {"status": "ok"}
+    except HTTPException as e:
+        raise e
     except Exception as e:
         db.rollback()
         return {"status": "error", "message": str(e)}
 
 @router.put("/submissions/{sub_id}/toggle_check")
-def api_toggle_check(sub_id: int, current_user: dict = Depends(get_current_user), db: Session = Depends(get_db)):
-    if current_user["role"] != "admin":
-        return {"status": "error", "message": "Access denied"}
+def api_toggle_check(sub_id: int, current_user: dict = Depends(get_admin_user), db: Session = Depends(get_db)):
     try:
         sub = db.query(Submission).filter(Submission.id == sub_id).first()
         if not sub:
@@ -154,9 +158,7 @@ def api_toggle_check(sub_id: int, current_user: dict = Depends(get_current_user)
         return {"status": "error", "message": str(e)}
 
 @router.put("/submissions/{sub_id}/errors")
-def api_update_errors(sub_id: int, req: ErrorSectionsRequest, current_user: dict = Depends(get_current_user), db: Session = Depends(get_db)):
-    if current_user["role"] != "admin":
-        return {"status": "error", "message": "Access denied"}
+def api_update_errors(sub_id: int, req: ErrorSectionsRequest, current_user: dict = Depends(get_admin_user), db: Session = Depends(get_db)):
     try:
         sub = db.query(Submission).filter(Submission.id == sub_id).first()
         if not sub:
@@ -172,7 +174,7 @@ def api_update_errors(sub_id: int, req: ErrorSectionsRequest, current_user: dict
         return {"status": "error", "message": str(e)}
 
 @router.delete("/submissions/{sub_id}")
-def api_delete_submission(sub_id: int, db: Session = Depends(get_db)):
+def api_delete_submission(sub_id: int, current_user: dict = Depends(get_admin_user), db: Session = Depends(get_db)):
     try:
         sub = db.query(Submission).filter(Submission.id == sub_id).first()
         if not sub:
@@ -186,30 +188,35 @@ def api_delete_submission(sub_id: int, db: Session = Depends(get_db)):
         return {"status": "error", "message": str(e)}
 
 @router.post("/submissions/{sub_id}/copy")
-def api_copy_submission(sub_id: int, db: Session = Depends(get_db)):
+def api_copy_submission(sub_id: int, current_user: dict = Depends(get_current_user), db: Session = Depends(get_db)):
     try:
         sub = db.query(Submission).filter(Submission.id == sub_id).first()
         if not sub:
             return {"status": "error", "message": "Không tìm thấy hồ sơ."}
+            
+        if current_user["role"] != "admin" and sub.created_by_user_id != current_user["id"]:
+            raise HTTPException(status_code=403, detail="Bạn không có quyền nhân bản hồ sơ này.")
         
-        new_created_at = sub.created_at - timedelta(milliseconds=1)
+        new_created_at = sub.created_at - timedelta(milliseconds=1) if sub.created_at else datetime.now()
         
         new_sub = Submission(
             data_json=sub.data_json,
             template_id=sub.template_id,
             created_at=new_created_at,
-            created_by_user_id=sub.created_by_user_id
+            created_by_user_id=current_user["id"]  # Mới: Người copy sẽ là người tạo
         )
         db.add(new_sub)
         db.commit()
         db.refresh(new_sub)
         return {"status": "ok", "new_id": new_sub.id}
+    except HTTPException as e:
+        raise e
     except Exception as e:
         db.rollback()
         return {"status": "error", "message": str(e)}
 
 @router.get("/export")
-def api_export(template_id: int, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
+def api_export(template_id: int, background_tasks: BackgroundTasks, current_user: dict = Depends(get_admin_user), db: Session = Depends(get_db)):
     try:
         import openpyxl
         
@@ -224,51 +231,13 @@ def api_export(template_id: int, background_tasks: BackgroundTasks, db: Session 
         download_filename = f"BaoCao_{template_id}_{timestamp}.xlsx"
         download_path = os.path.join("scratch", download_filename)
         
-        shutil.copy(template_file_path, download_path)
-        wb = openpyxl.load_workbook(download_path)
+        from server.services.excel_service import export_submissions_to_excel
         
-        sht_name = next((s for s in wb.sheetnames if s.strip().lower() == 'data'), None)
-        if not sht_name:
-            raise Exception("Không tìm thấy sheet 'Data' trong file mẫu.")
-        ws = wb[sht_name]
-        
-        if ws.max_row >= 5:
-            ws.delete_rows(5, ws.max_row - 4)
-        
-        def process_value(idx, val):
-            if val and " - " in str(val):
-                parts = str(val).split(" - ", 1)
-                if len(parts) == 2 and parts[0].strip().isdigit():
-                    val = parts[0].strip()
-            
-            if idx == 58 and val and str(val).strip():
-                str_val = str(val).strip()
-                if not str_val.lower().startswith("đến ngày"):
-                    val = f"đến ngày {str_val}"
-                    
-            return val
-            
         submissions = db.query(Submission).filter(Submission.template_id == template_id).order_by(Submission.id).all()
         if not submissions:
             raise Exception("Không có dữ liệu hồ sơ nào trong hệ thống để xuất báo cáo cho mẫu này.")
             
-        for sub in submissions:
-            data_dict = json.loads(sub.data_json)
-            new_row = [""] * (ws.max_column + 10)
-            
-            for key, value in data_dict.items():
-                if key.startswith('col_'):
-                    idx = int(key.split('_')[1])
-                    new_row[idx] = process_value(idx, value)
-                    
-            if len(new_row) <= 105:
-                new_row.extend([""] * (106 - len(new_row)))
-            new_row[105] = new_row[101]
-                
-            ws.append(new_row)
-            
-        wb.save(download_path)
-        wb.close()
+        export_submissions_to_excel(template_file_path, submissions, download_path)
         
         def remove_file(path):
             try:

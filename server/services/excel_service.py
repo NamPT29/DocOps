@@ -1,6 +1,8 @@
 import pandas as pd
-
 import os
+import json
+import shutil
+import openpyxl
 
 def load_dictionaries(excel_path):
     """
@@ -349,3 +351,51 @@ def get_don_vi_do_mapping(excel_path):
     except Exception as e:
         print(f"Error reading QNH_ThongTinDoDac: {e}")
         return {}
+
+def export_submissions_to_excel(template_file_path: str, submissions: list, download_path: str):
+    """
+    Exports a list of submissions into a provided Excel template.
+    Returns the path to the exported file.
+    """
+    shutil.copy(template_file_path, download_path)
+    wb = openpyxl.load_workbook(download_path)
+    
+    sht_name = next((s for s in wb.sheetnames if s.strip().lower() == 'data'), None)
+    if not sht_name:
+        raise Exception("Không tìm thấy sheet 'Data' trong file mẫu.")
+    ws = wb[sht_name]
+    
+    if ws.max_row >= 5:
+        ws.delete_rows(5, ws.max_row - 4)
+    
+    def process_value(idx, val):
+        if val and " - " in str(val):
+            parts = str(val).split(" - ", 1)
+            if len(parts) == 2 and parts[0].strip().isdigit():
+                val = parts[0].strip()
+        
+        if idx == 58 and val and str(val).strip():
+            str_val = str(val).strip()
+            if not str_val.lower().startswith("đến ngày"):
+                val = f"đến ngày {str_val}"
+                
+        return val
+        
+    for sub in submissions:
+        data_dict = json.loads(sub.data_json)
+        new_row = [""] * (ws.max_column + 10)
+        
+        for key, value in data_dict.items():
+            if key.startswith('col_'):
+                idx = int(key.split('_')[1])
+                new_row[idx] = process_value(idx, value)
+                
+        if len(new_row) <= 105:
+            new_row.extend([""] * (106 - len(new_row)))
+        new_row[105] = new_row[101]
+            
+        ws.append(new_row)
+        
+    wb.save(download_path)
+    wb.close()
+    return download_path
