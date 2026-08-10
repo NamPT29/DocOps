@@ -140,9 +140,19 @@
                                     <small class="text-muted ms-5">Thao tác này chỉ dành cho tài khoản Quản trị viên.</small>
                                 </div>
                                 <div class="d-grid gap-2 mb-5 mt-4">
-                                    <button type="button" class="btn btn-primary btn-lg" id="submitBtn" onclick="submitData()">Lưu hồ sơ</button>
-                                    <button type="button" class="btn btn-warning btn-sm" id="clearFormBtn" onclick="resetFormData()">Làm mới biểu mẫu</button>
-                                    <button type="button" class="btn btn-secondary btn-sm d-none" id="cancelEditBtn" onclick="cancelEdit()">Hủy cập nhật</button>
+                                    <div class="row g-2" id="actionButtonsRow">
+                                        <div class="col-6">
+                                            <button type="button" class="btn btn-secondary w-100" id="draftBtn" onclick="submitData('draft')"><i class="fas fa-save"></i> Lưu nháp</button>
+                                        </div>
+                                        <div class="col-6">
+                                            <button type="button" class="btn btn-primary w-100" id="submitBtn" onclick="submitData('pending_review')"><i class="fas fa-paper-plane"></i> Nộp duyệt</button>
+                                        </div>
+                                    </div>
+                                    <div class="alert alert-info mt-2 mb-0" id="readonlyNotice" style="display: none;">
+                                        <i class="fas fa-lock"></i> Hồ sơ đang chờ duyệt / đã duyệt. (Chỉ Xem)
+                                    </div>
+                                    <button type="button" class="btn btn-warning btn-sm mt-2" id="clearFormBtn" onclick="resetFormData()">Làm mới biểu mẫu</button>
+                                    <button type="button" class="btn btn-outline-danger btn-sm mt-2 d-none" id="cancelEditBtn" onclick="cancelEdit()">Quay lại danh sách</button>
                                 </div>
                             </form>
                         </div>

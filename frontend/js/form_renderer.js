@@ -51,7 +51,8 @@ async function fetchSchema() {
     if (loadingEl) loadingEl.style.display = 'none';
     
     if (data) {
-        renderForm(data.data);
+        window.activeTemplateConfig = data.config || {};
+        renderForm(data.data, data.config || {});
         if (dataForm) dataForm.style.display = 'block';
     }
 }
@@ -69,7 +70,7 @@ async function onTemplateSelected() {
     }
 }
 
-function renderForm(schema) {
+function renderForm(schema, config = {}) {
     const container = document.getElementById('form-container');
     if (!container) return; // Guard for pages without form-container
     container.innerHTML = '';
@@ -222,154 +223,121 @@ function renderForm(schema) {
             input.id = field.name;
             input.setAttribute('autocomplete', 'off');
             
-            // Make auto-generated fields read-only
-            if (['col_2', 'col_19', 'col_36', 'col_21', 'col_38', 'col_93', 'col_105'].includes(field.name)) {
+            // Make auto-generated fields read-only based on config
+            const roCols = config.readonly_cols || [];
+            if (roCols.includes(field.col_index + 1)) {
                 input.readOnly = true;
                 input.style.backgroundColor = '#e9ecef';
             }
             
-            if (field.name === 'col_101') {
-                input.addEventListener('input', function() {
-                    const col105 = document.getElementById('col_105');
-                    if (col105) {
-                        col105.value = this.value;
-                    }
-                });
-            }
-            
-            if (field.name === 'col_2' || field.name === 'col_3') {
-                // Real-time autofill as user types/scans
-                if (field.name === 'col_3') {
+            // Sync columns logic
+            const syncRules = config.sync_cols || [];
+            syncRules.forEach(rule => {
+                if (field.col_index + 1 === rule.source) {
                     input.addEventListener('input', function() {
-                        let val = this.value.replace(/\s+/g, '');
-                        const col2Input = document.getElementById('col_2');
-                        if (col2Input) {
-                            if (val.length >= 6) {
-                                col2Input.value = val.slice(-6);
-                            } else {
-                                col2Input.value = ''; // Xóa trắng khi chuỗi ngắn hơn 6 ký tự
-                            }
+                        const targetId = 'col_' + (rule.target - 1);
+                        const targetInput = document.getElementById(targetId);
+                        if (targetInput) {
+                            targetInput.value = this.value;
                         }
                     });
                 }
-                
-                input.addEventListener('blur', function() {
-                    this.value = this.value.replace(/\s+/g, '');
-                    if (typeof saveFormDraft === 'function') saveFormDraft();
-                });
-            }
+            });
             
-            // Tự động nối Địa chỉ đầy đủ (22, 39, và 94)
-            if (['col_18', 'col_20', 'col_35', 'col_37', 'col_91', 'col_92'].includes(field.name)) {
-                input.addEventListener('input', function() {
-                    if (field.name === 'col_18' || field.name === 'col_20') {
-                        let f19 = document.getElementById('col_18');
-                        let f21 = document.getElementById('col_20');
-                        let f22 = document.getElementById('col_21');
-                        if (f22) {
-                            let parts = [];
-                            if (f19 && f19.value.trim()) parts.push(f19.value.trim());
-                            if (f21 && f21.value.trim()) parts.push(f21.value.trim());
-                            f22.value = parts.join(', ');
-                        }
-                    }
-                    if (field.name === 'col_35' || field.name === 'col_37') {
-                        let f36 = document.getElementById('col_35');
-                        let f38 = document.getElementById('col_37');
-                        let f39 = document.getElementById('col_38');
-                        if (f39) {
-                            let parts = [];
-                            if (f36 && f36.value.trim()) parts.push(f36.value.trim());
-                            if (f38 && f38.value.trim()) parts.push(f38.value.trim());
-                            f39.value = parts.join(', ');
-                        }
-                    }
-                    if (field.name === 'col_91' || field.name === 'col_92') {
-                        let f92 = document.getElementById('col_91');
-                        let f93 = document.getElementById('col_92');
-                        let f94 = document.getElementById('col_93');
-                        if (f94) {
-                            let parts = [];
-                            if (f92 && f92.value.trim()) parts.push(f92.value.trim());
-                            if (f93 && f93.value.trim()) parts.push(f93.value.trim());
-                            f94.value = parts.join(', ');
-                        }
-                    }
-                });
-            }
-
-            if (['col_20', 'col_37', 'col_92'].includes(field.name)) {
-                input.addEventListener('input', function() {
-                    let val = this.value.trim();
-                    if (!val) {
-                        if (field.name === 'col_20') {
-                            let t = document.getElementById('col_19');
-                            if (t) t.value = '';
-                        }
-                        if (field.name === 'col_37') {
-                            let t = document.getElementById('col_36');
-                            if (t) t.value = '';
-                        }
-                        return;
-                    }
-                    
-                    debounceProcessField(field.name, val, (data) => {
-                        if (data && data.formatted) {
-                            input.value = data.formatted;
-                            
-                            if (field.name === 'col_20') {
-                                let maXa = document.getElementById('col_19');
-                                if (maXa) maXa.value = data.code;
-                                
-                                let f19 = document.getElementById('col_18');
-                                let f22 = document.getElementById('col_21');
-                                if (f22) {
-                                    let parts = [];
-                                    if (f19 && f19.value.trim()) parts.push(f19.value.trim());
-                                    parts.push(data.formatted);
-                                    f22.value = parts.join(', ');
-                                }
+            // Slice columns (CMND real-time cut)
+            const sliceRules = config.slice_cols || [];
+            sliceRules.forEach(rule => {
+                if (field.col_index + 1 === rule.source) {
+                    input.addEventListener('input', function() {
+                        let val = this.value.replace(/\s+/g, '');
+                        const targetId = 'col_' + (rule.target - 1);
+                        const targetInput = document.getElementById(targetId);
+                        if (targetInput) {
+                            if (val.length >= rule.length) {
+                                targetInput.value = val.slice(-rule.length);
+                            } else {
+                                targetInput.value = '';
                             }
-                            
-                            if (field.name === 'col_37') {
-                                let maXa = document.getElementById('col_36');
-                                if (maXa) maXa.value = data.code;
-                                
-                                let f36 = document.getElementById('col_35');
-                                let f39 = document.getElementById('col_38');
-                                if (f39) {
-                                    let parts = [];
-                                    if (f36 && f36.value.trim()) parts.push(f36.value.trim());
-                                    parts.push(data.formatted);
-                                    f39.value = parts.join(', ');
-                                }
-                            }
-                            
-                            if (field.name === 'col_92') {
-                                let f92 = document.getElementById('col_91');
-                                let f94 = document.getElementById('col_93');
-                                if (f94) {
-                                    let parts = [];
-                                    if (f92 && f92.value.trim()) parts.push(f92.value.trim());
-                                    parts.push(data.formatted);
-                                    f94.value = parts.join(', ');
-                                }
-                                
-                                let f47 = document.getElementById('col_46');
-                                let f50 = document.getElementById('col_49');
-                                if (f47 && data.don_vi_do) {
-                                    f47.value = data.don_vi_do;
-                                    if (f50 && data.ngay_hoan_thanh) f50.value = data.ngay_hoan_thanh;
-                                }
-                            }
-                            
-                            if (typeof saveFormDraft === 'function') saveFormDraft();
                         }
                     });
-                });
-            }
+                    
+                    input.addEventListener('blur', function() {
+                        this.value = this.value.replace(/\s+/g, '');
+                        if (typeof saveFormDraft === 'function') saveFormDraft();
+                    });
+                }
+            });
             
-            if (field.name === 'col_10' || field.name === 'col_27') {
+            // Concatenation Rules
+            const concatRules = config.concat_rules || [];
+            concatRules.forEach(rule => {
+                if (field.col_index + 1 === rule.source_1 || field.col_index + 1 === rule.source_2) {
+                    input.addEventListener('input', function() {
+                        let f1 = document.getElementById('col_' + (rule.source_1 - 1));
+                        let f2 = document.getElementById('col_' + (rule.source_2 - 1));
+                        let target = document.getElementById('col_' + (rule.target - 1));
+                        if (target) {
+                            let parts = [];
+                            if (f1 && f1.value.trim()) parts.push(f1.value.trim());
+                            if (f2 && f2.value.trim()) parts.push(f2.value.trim());
+                            target.value = parts.join(', ');
+                        }
+                    });
+                }
+            });
+
+            // Address Autofill Rules
+            const addressRules = config.address_autofill_rules || [];
+            addressRules.forEach(rule => {
+                if (field.col_index + 1 === rule.trigger) {
+                    input.addEventListener('input', function() {
+                        let val = this.value.trim();
+                        if (!val) {
+                            let maxa = document.getElementById('col_' + (rule.maxa - 1));
+                            if (maxa) maxa.value = '';
+                            return;
+                        }
+                        
+                        debounceProcessField(field.name, val, (data) => {
+                            if (data && data.formatted) {
+                                input.value = data.formatted;
+                                
+                                let maXa = document.getElementById('col_' + (rule.maxa - 1));
+                                if (maXa) maXa.value = data.code;
+                                
+                                if (rule.concat_target) {
+                                    let cTarget = document.getElementById('col_' + (rule.concat_target - 1));
+                                    if (cTarget) {
+                                        let parts = [];
+                                        if (rule.concat_source_1) {
+                                            let s1 = document.getElementById('col_' + (rule.concat_source_1 - 1));
+                                            if (s1 && s1.value.trim()) parts.push(s1.value.trim());
+                                        }
+                                        parts.push(data.formatted);
+                                        cTarget.value = parts.join(', ');
+                                    }
+                                }
+                                
+                                if (rule.don_vi_do) {
+                                    let f_dvd = document.getElementById('col_' + (rule.don_vi_do - 1));
+                                    if (f_dvd && data.don_vi_do) f_dvd.value = data.don_vi_do;
+                                }
+                                
+                                if (rule.ngay_hoan_thanh) {
+                                    let f_nht = document.getElementById('col_' + (rule.ngay_hoan_thanh - 1));
+                                    if (f_nht && data.ngay_hoan_thanh) f_nht.value = data.ngay_hoan_thanh;
+                                }
+                                
+                                if (typeof saveFormDraft === 'function') saveFormDraft();
+                            }
+                        });
+                    });
+                }
+            });
+            
+            // Date fields
+            const dateCols = config.date_cols || [];
+            if (dateCols.includes(field.col_index + 1)) {
                 input.placeholder = 'dd/mm/yyyy';
                 input.maxLength = 10;
                 input.addEventListener('blur', function() {
@@ -383,7 +351,9 @@ function renderForm(schema) {
                 });
             }
             
-            if (field.name === 'col_11' || field.name === 'col_28') {
+            // Year fields
+            const yearCols = config.year_cols || [];
+            if (yearCols.includes(field.col_index + 1)) {
                 input.placeholder = 'yyyy';
                 input.maxLength = 4;
                 input.addEventListener('input', function() {
@@ -412,20 +382,20 @@ function renderForm(schema) {
     // Attach listener for real-time draft saving
     document.getElementById('dataForm').addEventListener('input', saveFormDraft);
     
-    // Auto-update Nguồn gốc chi tiết từ Mã
-    const linkedPairs = [[59, 60], [67, 68], [75, 76], [83, 84]];
+    // Auto-update Nguồn gốc chi tiết từ Mã (Linked Pairs)
+    const linkedPairs = config.linked_pairs || [];
     linkedPairs.forEach(pair => {
-        let colA = document.getElementById('col_' + pair[0]);
-        let colB = document.getElementById('col_' + pair[1]);
+        let colA = document.getElementById('col_' + (pair.source - 1));
+        let colB = document.getElementById('col_' + (pair.target - 1));
         if (colA && colB) {
             colB.readOnly = true;
             colB.style.backgroundColor = "#e9ecef";
-            colB.placeholder = "Tự động lấy theo Mã nguồn gốc";
+            colB.placeholder = "Tự động lấy theo dữ liệu nguồn";
             
             let colAField = null;
             schema.forEach(cat => {
                 cat.fields.forEach(f => {
-                    if (f.name === 'col_' + pair[0]) colAField = f;
+                    if (f.col_index + 1 === pair.source) colAField = f;
                 });
             });
             

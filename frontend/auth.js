@@ -205,14 +205,31 @@ async function fetchAdminTemplates() {
         return;
     }
     data.data.forEach(t => {
+        const safeName = t.name.replace(/'/g, "\\'");
         tbody.innerHTML += `
             <tr>
                 <td>${t.id}</td>
                 <td><b>${t.name}</b></td>
                 <td>${t.filename}</td>
+                <td>
+                    <button class="btn btn-sm btn-outline-primary me-1" onclick="openConfigModal(${t.id}, '${safeName}')">
+                        <i class="fas fa-cog"></i> Cấu hình
+                    </button>
+                    <button class="btn btn-sm btn-outline-danger" onclick="deleteTemplate(${t.id}, '${safeName}')">
+                        <i class="fas fa-trash"></i> Xóa
+                    </button>
+                </td>
             </tr>
         `;
     });
+}
+
+async function deleteTemplate(id, name) {
+    if (!confirm(`Xóa biểu mẫu "${name}" ?\nLưu ý: Hồ sơ đã nhập liệu liên quan sẽ không bị xóa.`)) return;
+    const data = await apiCall(`/api/templates/${id}`, { method: 'DELETE' });
+    if (data) {
+        fetchAdminTemplates();
+    }
 }
 
 async function uploadTemplate() {

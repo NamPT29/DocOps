@@ -18,6 +18,7 @@ router = APIRouter(prefix="/api", tags=["submissions"])
 class SubmitRequest(BaseModel):
     template_id: Optional[int] = None
     data: dict
+    status: Optional[str] = "draft"
 
 class ErrorSectionsRequest(BaseModel):
     wrong_sections: list[str]
@@ -28,7 +29,8 @@ def api_submit(req: SubmitRequest, current_user: dict = Depends(get_current_user
         sub = Submission(
             data_json=json.dumps(req.data, ensure_ascii=False),
             created_by_user_id=current_user["id"],
-            template_id=req.template_id
+            template_id=req.template_id,
+            status=req.status
         )
         db.add(sub)
         # Update document status if linked
@@ -50,12 +52,18 @@ def api_submit(req: SubmitRequest, current_user: dict = Depends(get_current_user
         return {"status": "error", "message": str(e)}
 
 @router.get("/submissions")
-def api_get_submissions(template_id: int = None, start_date: str = None, end_date: str = None, current_user: dict = Depends(get_current_user), db: Session = Depends(get_db)):
+def api_get_submissions(template_id: int = None, start_date: str = None, end_date: str = None, status: str = None, current_user: dict = Depends(get_current_user), db: Session = Depends(get_db)):
     try:
         query = db.query(Submission)
         if current_user["role"] != "admin":
             query = query.filter(Submission.created_by_user_id == current_user["id"])
         
+        if status:
+            if "," in status:
+                query = query.filter(Submission.status.in_(status.split(",")))
+            else:
+                query = query.filter(Submission.status == status)
+                
         if template_id:
             query = query.filter(Submission.template_id == template_id)
             
@@ -91,7 +99,8 @@ def api_get_submissions(template_id: int = None, start_date: str = None, end_dat
                 "template_id": sub.template_id,
                 "pdf_filename": data_dict.get("_pdf_filename", ""),
                 "is_checked": sub.is_checked,
-                "has_errors": len(data_dict.get("_wrong_sections", [])) > 0,
+                "status": sub.status,
+                "has_errors": sub.status == "rejected" or len(data_dict.get("_wrong_sections", [])) > 0,
                 "creator_name": user_map.get(sub.created_by_user_id, "Unknown")
             })
         return {"status": "ok", "data": results}
@@ -118,7 +127,7 @@ def api_get_submission(sub_id: int, current_user: dict = Depends(get_current_use
             return {"status": "error", "message": "Không tìm thấy hồ sơ."}
         if current_user["role"] != "admin" and sub.created_by_user_id != current_user["id"]:
             return {"status": "error", "message": "Không có quyền truy cập hồ sơ này."}
-        return {"status": "ok", "data": json.loads(sub.data_json), "template_id": sub.template_id, "is_checked": sub.is_checked}
+        return {"status": "ok", "data": json.loads(sub.data_json), "template_id": sub.template_id, "is_checked": sub.is_checked, "submission_status": sub.status}
     except Exception as e:
         return {"status": "error", "message": str(e)}
 
@@ -133,6 +142,16 @@ def api_update_submission(sub_id: int, req: SubmitRequest, current_user: dict = 
             raise HTTPException(status_code=403, detail="Bạn không có quyền sửa hồ sơ này.")
         
         sub.data_json = json.dumps(req.data, ensure_ascii=False)
+        if req.status:
+            sub.status = req.status
+            
+        # Nộp lại hồ sơ sau khi báo lỗi thì xóa lỗi đi
+        if req.status == "pending_review":
+            data_dict = req.data
+            if "_wrong_sections" in data_dict:
+                data_dict["_wrong_sections"] = []
+                sub.data_json = json.dumps(data_dict, ensure_ascii=False)
+                
         db.commit()
         return {"status": "ok"}
     except HTTPException as e:
@@ -151,8 +170,10 @@ def api_toggle_check(sub_id: int, current_user: dict = Depends(get_admin_user), 
         # In case is_checked is None (for old data before migration)
         current = sub.is_checked if sub.is_checked is not None else False
         sub.is_checked = not current
+        sub.status = "approved" if sub.is_checked else "pending_review"
+        
         db.commit()
-        return {"status": "ok", "is_checked": sub.is_checked}
+        return {"status": "ok", "is_checked": sub.is_checked, "new_status": sub.status}
     except Exception as e:
         db.rollback()
         return {"status": "error", "message": str(e)}
@@ -167,6 +188,8 @@ def api_update_errors(sub_id: int, req: ErrorSectionsRequest, current_user: dict
         data_dict = json.loads(sub.data_json)
         data_dict["_wrong_sections"] = req.wrong_sections
         sub.data_json = json.dumps(data_dict, ensure_ascii=False)
+        sub.status = "rejected"
+        sub.is_checked = False
         db.commit()
         return {"status": "ok"}
     except Exception as e:

@@ -1,4 +1,4 @@
-async function submitData() {
+async function submitData(targetStatus = 'draft') {
     const inputs = document.querySelectorAll('#dataForm input[type="text"]');
     const data = {};
     inputs.forEach(input => {
@@ -16,7 +16,8 @@ async function submitData() {
     
     const payload = {
         data: data,
-        template_id: window.activeTemplateId
+        template_id: window.activeTemplateId,
+        status: targetStatus
     };
 
     try {
@@ -85,7 +86,13 @@ function cancelEdit() {
             input.nextElementSibling.innerHTML = '';
         }
     });
-    document.getElementById('submitBtn').innerText = 'Lưu hồ sơ';
+    // Reset UI states
+    const actionBtns = document.getElementById('actionButtonsRow');
+    if(actionBtns) actionBtns.classList.remove('d-none');
+    const readonlyNotice = document.getElementById('readonlyNotice');
+    if(readonlyNotice) readonlyNotice.style.display = 'none';
+    const clearFormBtn = document.getElementById('clearFormBtn');
+    if(clearFormBtn) clearFormBtn.classList.remove('d-none');
     document.getElementById('cancelEditBtn').classList.add('d-none');
     
     const adminCheckArea = document.getElementById('adminCheckArea');

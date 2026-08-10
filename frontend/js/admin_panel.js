@@ -22,6 +22,7 @@ async function fetchSubmissions() {
     if (!res) return;
     
     const tbody = document.getElementById('submissionsTableBody');
+    if (!tbody) return; // safety
     tbody.innerHTML = '';
     
     if (res.data.length === 0) {
@@ -31,35 +32,29 @@ async function fetchSubmissions() {
     
     res.data.forEach(sub => {
         const tr = document.createElement('tr');
-        if (sub.has_errors) {
+        if (sub.has_errors || sub.status === 'rejected') {
             tr.classList.add('table-danger');
         }
+        
+        let statusBadge = '';
+        if (sub.status === 'pending_review') statusBadge = '<span class="badge bg-warning text-dark"><i class="fas fa-hourglass-half"></i> Chờ duyệt</span>';
+        else if (sub.status === 'rejected') statusBadge = '<span class="badge bg-danger"><i class="fas fa-times-circle"></i> Báo lỗi</span>';
+        else if (sub.status === 'approved') statusBadge = '<span class="badge bg-success"><i class="fas fa-check-circle"></i> Đã duyệt</span>';
+        else statusBadge = '<span class="badge bg-secondary"><i class="fas fa-save"></i> Lưu nháp</span>';
+        
         tr.innerHTML = `
             <td>${sub.id}</td>
             <td>${sub.created_at}</td>
-            ${window.location.pathname.includes('admin.html') ? `<td><span class="badge bg-info text-dark"><i class="fas fa-user"></i> ${sub.creator_name || 'Unknown'}</span></td>` : ''}
             <td class="fw-bold text-primary">${sub.ho_ten}</td>
             <td>${sub.so_giay_to}</td>
             <td><span class="badge bg-secondary">${sub.template}</span></td>
             <td>
-                ${sub.pdf_filename ? `<span class="badge bg-success" ${window.location.pathname.includes('admin.html') ? '' : `style="cursor: pointer;" onclick="editSubmission(${sub.id})" title="Nhấn để xem PDF và sửa hồ sơ"`}>${sub.pdf_filename}</span>` : '<span class="text-muted fst-italic">Không</span>'}
+                ${sub.pdf_filename ? `<span class="badge bg-success" style="cursor: pointer;" onclick="editSubmission(${sub.id})" title="Nhấn để xem PDF và sửa hồ sơ">${sub.pdf_filename}</span>` : '<span class="text-muted fst-italic">Không</span>'}
             </td>
-            <td class="text-center">
-                ${window.location.pathname.includes('admin.html') ? `
-                    <div class="form-check d-flex justify-content-center mb-0">
-                        <input class="form-check-input" type="checkbox" ${sub.is_checked ? 'checked' : ''} onchange="toggleCheckSubmission(${sub.id}, this)" style="cursor: pointer; transform: scale(1.3);">
-                    </div>
-                ` : `
-                    ${sub.is_checked ? '<span class="badge bg-primary"><i class="fas fa-check"></i> Đã duyệt</span>' : '<span class="badge bg-secondary">Chưa duyệt</span>'}
-                `}
-            </td>
+            <td class="text-center">${statusBadge}</td>
             <td>
-                ${window.location.pathname.includes('admin.html') ? `
-                    <a class="btn btn-sm btn-outline-primary me-1" href="index.html?check_id=${sub.id}">Xem & Kiểm tra</a>
-                ` : `
-                    <button class="btn btn-sm btn-outline-success me-1" onclick="copySubmission(${sub.id})">Nhân bản</button>
-                    <button class="btn btn-sm btn-outline-primary me-1" onclick="editSubmission(${sub.id})">Sửa</button>
-                `}
+                <button class="btn btn-sm btn-outline-success me-1" onclick="copySubmission(${sub.id})">Nhân bản</button>
+                <button class="btn btn-sm btn-outline-primary me-1" onclick="editSubmission(${sub.id})">Xem/Sửa</button>
                 <button class="btn btn-sm btn-outline-danger" onclick="deleteSubmission(${sub.id})">Xóa</button>
             </td>
         `;
@@ -67,12 +62,80 @@ async function fetchSubmissions() {
     });
 }
 
+async function fetchReviewSubmissions() {
+    let url = new URL('/api/submissions', window.location.origin);
+    url.searchParams.append('status', 'pending_review,rejected');
+    const filterTid = document.getElementById('filterReviewTemplateId');
+    if (filterTid && filterTid.value) url.searchParams.append('template_id', filterTid.value);
+    const res = await apiCall(url.toString());
+    if (!res) return;
+    renderAdminSubmissionsTable(res.data, 'reviewTableBody', true);
+}
+
+async function fetchCompletedSubmissions() {
+    let url = new URL('/api/submissions', window.location.origin);
+    url.searchParams.append('status', 'approved');
+    const filterTid = document.getElementById('filterTemplateId');
+    if (filterTid && filterTid.value) url.searchParams.append('template_id', filterTid.value);
+    const startDate = document.getElementById('filterStartDate');
+    if (startDate && startDate.value) url.searchParams.append('start_date', startDate.value);
+    const endDate = document.getElementById('filterEndDate');
+    if (endDate && endDate.value) url.searchParams.append('end_date', endDate.value);
+    const res = await apiCall(url.toString());
+    if (!res) return;
+    renderAdminSubmissionsTable(res.data, 'submissionsTableBody', false);
+}
+
+function renderAdminSubmissionsTable(data, tbodyId, isReviewTab) {
+    const tbody = document.getElementById(tbodyId);
+    if (!tbody) return;
+    tbody.innerHTML = '';
+    if (data.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="8" class="text-center">Chưa có dữ liệu</td></tr>`;
+        return;
+    }
+    data.forEach(sub => {
+        const tr = document.createElement('tr');
+        if (sub.has_errors || sub.status === 'rejected') tr.classList.add('table-danger');
+        
+        let statusBadge = '';
+        if (sub.status === 'pending_review') statusBadge = '<span class="badge bg-warning text-dark"><i class="fas fa-hourglass-half"></i> Chờ duyệt</span>';
+        else if (sub.status === 'rejected') statusBadge = '<span class="badge bg-danger"><i class="fas fa-times-circle"></i> Báo lỗi</span>';
+        else if (sub.status === 'approved') statusBadge = '<span class="badge bg-success"><i class="fas fa-check-circle"></i> Đã duyệt</span>';
+        
+        let actions = `<a class="btn btn-sm btn-outline-primary me-1" href="index.html?check_id=${sub.id}" target="_blank" title="Mở trong tab mới để kiểm tra chi tiết"><i class="fas fa-search"></i> Kiểm tra</a>`;
+        if (isReviewTab) {
+            actions += `<button class="btn btn-sm btn-success me-1" onclick="approveSubmission(${sub.id})" title="Duyệt hoàn thành hồ sơ này"><i class="fas fa-check"></i> Duyệt</button>`;
+        }
+        actions += `<button class="btn btn-sm btn-outline-danger" onclick="deleteSubmission(${sub.id})" title="Xóa hồ sơ"><i class="fas fa-trash"></i></button>`;
+
+        tr.innerHTML = `
+            <td>${sub.id}</td>
+            <td>${sub.created_at}</td>
+            <td><span class="badge bg-info text-dark"><i class="fas fa-user"></i> ${sub.creator_name || 'Unknown'}</span></td>
+            <td class="fw-bold text-primary">${sub.ho_ten}</td>
+            <td>${sub.so_giay_to}</td>
+            <td><span class="badge bg-secondary">${sub.template}</span></td>
+            <td>${statusBadge}</td>
+            <td>${actions}</td>
+        `;
+        tbody.appendChild(tr);
+    });
+}
+
+async function approveSubmission(id) {
+    const res = await apiCall(`/api/submissions/${id}/toggle_check`, { method: 'PUT' });
+    if (res && res.status === 'ok') {
+        fetchReviewSubmissions();
+    }
+}
+
 async function toggleCheckSubmission(id, checkbox) {
     const res = await apiCall(`/api/submissions/${id}/toggle_check`, { method: 'PUT' });
-    if (res) {
-        // Also update the UI if we are on the admin page list
+    if (res && res.status === 'ok') {
         if (window.location.pathname.includes('admin.html')) {
-            fetchAdminData();
+            fetchReviewSubmissions();
+            fetchCompletedSubmissions();
         }
     } else {
         checkbox.checked = !checkbox.checked; // revert
@@ -127,7 +190,31 @@ async function editSubmission(id) {
     // Set editing state
     currentEditingId = id;
     isEditingFromList = true;
-    document.getElementById('submitBtn').innerText = 'Cập nhật Hồ sơ';
+    
+    // Handle readonly state
+    const actionBtns = document.getElementById('actionButtonsRow');
+    const readonlyNotice = document.getElementById('readonlyNotice');
+    const clearFormBtn = document.getElementById('clearFormBtn');
+    
+    const isAdmin = currentUser && currentUser.role === 'admin';
+    const isLocked = !isAdmin && (res.submission_status === 'pending_review' || res.submission_status === 'approved');
+    
+    if (isLocked) {
+        if(actionBtns) actionBtns.classList.add('d-none');
+        if(clearFormBtn) clearFormBtn.classList.add('d-none');
+        if(readonlyNotice) readonlyNotice.style.display = 'block';
+    } else {
+        if(actionBtns) actionBtns.classList.remove('d-none');
+        if(clearFormBtn) clearFormBtn.classList.remove('d-none');
+        if(readonlyNotice) readonlyNotice.style.display = 'none';
+        
+        // Cập nhật text nút
+        const draftBtn = document.getElementById('draftBtn');
+        const submitBtn = document.getElementById('submitBtn');
+        if (draftBtn) draftBtn.innerHTML = '<i class="fas fa-save"></i> Cập nhật Nháp';
+        if (submitBtn) submitBtn.innerHTML = '<i class="fas fa-paper-plane"></i> Nộp duyệt lại';
+    }
+    
     document.getElementById('cancelEditBtn').classList.remove('d-none');
     
     // Check if there are saved errors
@@ -302,19 +389,18 @@ function filterSubmissions() {
 }
 
 // === POOL & ASSIGNMENT LOGIC ===
-async function fetchDocumentPool() {
-    const data = await apiCall('/api/documents/pool');
-    if (data) {
-        document.getElementById('unassignedCount').innerText = data.unassigned_count;
-        const assignCountInput = document.getElementById('assignCountInput');
-        if(assignCountInput) {
-            assignCountInput.max = data.unassigned_count;
-        }
-        
+async function fetchDocumentStats() {
+    // Populate templates dropdown for assignment
+    if (typeof populateTemplatesDropdown === 'function') {
+        populateTemplatesDropdown('assignTemplateSelect', false);
+    }
+    
+    const data = await apiCall('/api/documents/stats');
+    if (data && data.status === 'ok') {
         const tbody = document.getElementById('poolStatsTableBody');
-        const select = document.getElementById('assignUserSelect');
+        const checkboxesContainer = document.getElementById('assignUserCheckboxes');
         if (tbody) tbody.innerHTML = '';
-        if (select) select.innerHTML = '';
+        if (checkboxesContainer) checkboxesContainer.innerHTML = '';
         
         data.user_stats.forEach(u => {
             const totalAssigned = u.pending + u.completed;
@@ -328,87 +414,93 @@ async function fetchDocumentPool() {
                 tbody.appendChild(tr);
             }
             
-            // Select
-            if (select) {
-                const opt = document.createElement('option');
-                opt.value = u.user_id;
-                opt.innerText = `${u.username} (Đã giao: ${totalAssigned})`;
-                select.appendChild(opt);
+            // Checkboxes
+            if (checkboxesContainer) {
+                const div = document.createElement('div');
+                div.className = 'form-check';
+                div.innerHTML = `
+                    <input class="form-check-input user-checkbox" type="checkbox" value="${u.user_id}" id="chkUser_${u.user_id}">
+                    <label class="form-check-label" for="chkUser_${u.user_id}">
+                        ${u.username} <span class="text-muted small">(Đã nhận: ${totalAssigned})</span>
+                    </label>
+                `;
+                checkboxesContainer.appendChild(div);
             }
         });
     }
 }
 
-async function uploadBatchDocuments() {
-    const fileInput = document.getElementById('batchUploadInput');
-    const statusDiv = document.getElementById('batchUploadStatus');
-    const btn = document.getElementById('btnBatchUpload');
+// Lắng nghe sự kiện chọn file
+document.addEventListener('DOMContentLoaded', () => {
+    const fileInput = document.getElementById('assignFilesInput');
+    const countDiv = document.getElementById('assignFilesCount');
+    if (fileInput && countDiv) {
+        fileInput.addEventListener('change', () => {
+            const count = fileInput.files.length;
+            if (count > 0) {
+                countDiv.innerHTML = `<span class="text-success fw-bold">Đã chọn ${count} file PDF.</span>`;
+            } else {
+                countDiv.innerHTML = 'Chưa chọn file nào.';
+            }
+        });
+    }
+});
+
+async function uploadAndAssign() {
+    const templateId = document.getElementById('assignTemplateSelect').value;
+    const fileInput = document.getElementById('assignFilesInput');
+    const statusDiv = document.getElementById('uploadAssignStatus');
+    const btn = document.getElementById('btnUploadAssign');
     
+    // Get checked users
+    const checkboxes = document.querySelectorAll('.user-checkbox:checked');
+    const userIds = Array.from(checkboxes).map(chk => chk.value);
+    
+    if (!templateId) {
+        alert('Vui lòng chọn 1 Biểu mẫu.');
+        return;
+    }
     if (!fileInput.files || fileInput.files.length === 0) {
-        alert('Vui lòng chọn ít nhất 1 file!');
+        alert('Vui lòng chọn ít nhất 1 file PDF.');
+        return;
+    }
+    if (userIds.length === 0) {
+        alert('Vui lòng chọn ít nhất 1 nhân viên để giao việc.');
         return;
     }
     
     btn.disabled = true;
-    statusDiv.innerHTML = '<div class="spinner-border spinner-border-sm text-primary"></div> Đang tải lên...';
+    statusDiv.innerHTML = '<div class="alert alert-info"><div class="spinner-border spinner-border-sm"></div> Đang xử lý... Tải lên và phân công...</div>';
     
     const formData = new FormData();
+    formData.append('template_id', templateId);
+    formData.append('user_ids', userIds.join(','));
     for (let i = 0; i < fileInput.files.length; i++) {
         formData.append('files', fileInput.files[i]);
     }
     
     try {
-        const res = await authFetch('/api/documents/batch-upload', {
+        const res = await authFetch('/api/documents/upload-assign', {
             method: 'POST',
             body: formData
         });
-        if (!res) return; // authFetch tự động xử lý lỗi 401 và trả về null
+        if (!res) return;
         
         const data = await res.json();
         
         if (data.status === 'ok') {
-            statusDiv.innerHTML = `<div class="alert alert-success">${data.message}</div>`;
-            fileInput.value = '';
-            fetchDocumentPool(); // Refresh stats
+            statusDiv.innerHTML = `<div class="alert alert-success"><i class="fas fa-check-circle"></i> ${data.message}</div>`;
+            fileInput.value = ''; // clear
+            document.getElementById('assignFilesCount').innerHTML = 'Chưa chọn file nào.';
+            fetchDocumentStats(); // Refresh stats
         } else {
-            const errorMsg = data.message || data.detail || 'Lỗi không xác định';
-            statusDiv.innerHTML = `<div class="alert alert-danger">${errorMsg}</div>`;
+            statusDiv.innerHTML = `<div class="alert alert-danger">${data.message}</div>`;
         }
     } catch (err) {
         statusDiv.innerHTML = `<div class="alert alert-danger">Lỗi kết nối: ${err.message}</div>`;
     } finally {
         btn.disabled = false;
     }
-}
-
-async function assignDocuments() {
-    const userId = document.getElementById('assignUserSelect').value;
-    const count = document.getElementById('assignCountInput').value;
-    
-    if (!userId) {
-        alert('Vui lòng chọn nhân viên.');
-        return;
-    }
-    if (!count || parseInt(count) <= 0) {
-        alert('Số lượng phải lớn hơn 0.');
-        return;
-    }
-    
-    const unassignedCount = parseInt(document.getElementById('unassignedCount').innerText);
-    if (parseInt(count) > unassignedCount) {
-        alert(`Kho chỉ còn ${unassignedCount} tài liệu, không thể giao ${count} tài liệu.`);
-        return;
-    }
-    
-    const data = await apiCall('/api/documents/assign', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-            user_id: parseInt(userId),
-            count: parseInt(count)
-        })
-    });
-    
     if (data) {
         alert(data.message);
         document.getElementById('assignCountInput').value = 1;

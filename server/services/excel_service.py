@@ -41,10 +41,11 @@ def load_dictionaries(excel_path):
     
     return dicts
 
-def get_form_schema(excel_path):
+def get_form_schema(excel_path, dicts=None, config=None):
     """
     Reads the first 4 rows of the 'Data' sheet to construct a hierarchical form schema.
-    Also injects dropdown options based on dictionaries.
+    Uses provided dicts or an empty dictionary.
+    Optionally applies dynamic `config` (dict) to override hardcoded behaviors.
     """
     try:
         df_head = pd.read_excel(excel_path, sheet_name='Data', header=[0, 1, 2, 3], nrows=0)
@@ -52,10 +53,8 @@ def get_form_schema(excel_path):
         print(f"Error reading 'Data' sheet from {excel_path}: {e}")
         return []
     
-    # Load dictionaries
-    try:
-        dicts = load_dictionaries(excel_path)
-    except Exception:
+    # Use dicts from DB if provided
+    if dicts is None:
         dicts = {}
 
     schema = []
@@ -101,90 +100,41 @@ def get_form_schema(excel_path):
             category_fields = []
             
         # Determine field type and options
+        # Mặc định tất cả các cột là dạng chữ (text)
         field_type = "text"
         options = []
         extract_mode = "none"
         col_1 = col_idx + 1
         
-        # Check against hardcoded dict keys (e.g. Giới tính)
-        for key in ['Giới tính', 'HGD', 'Người đại diện', 'Là SD chung']:
-            if key in label:
-                field_type = "dropdown"
-                options = dicts.get(key, [])
-                if key == 'Là SD chung':
-                    extract_mode = "left"
-                break
-                
-        # Dictionary mapping for dynamic dropdowns
-        mapping = {
-            'Dân tộc': 'DM_DanToc',
-            'Quốc tịch': 'DM_QuocTich',
-            'Loại GT': 'DM_LoaiGiayToTuyThan',
-            'Loại bản đồ': 'DM_LoaiBanDoDiaChinh',
-            'Loại tài sản': 'DM_LoaiTaiSan',
-            'Loại công trình': 'DM_LoaiTaiSan',
-            'Cấp hạng': 'DM_LoaiCapHang',
-            'ĐTSD': 'DM_DoiTuongSuDungQuanLy',
-            'TSD': 'DM_DoiTuongSuDungQuanLy',
-            'Loại đất': 'DM_LoaiDat',
-            'Mục đích sử dụng': 'DM_LoaiDat',
-            'MĐSD': 'DM_LoaiDat',
-            'Nguồn gốc': 'DM_NguonGocSuDungDat',
-            'Loại GCN': 'DM_LoaiGiayChungNhan',
-            'Trạng thái': 'DM_LoaiTrangThaiDangKyCapGCN',
-            'Loại thửa': 'DM_LoaiThuaDat',
-            'Phân loại thửa đất': 'DM_LoaiThuaDat',
-            'Nghĩa vụ tài chính': 'DM_LoaiNghiaVuTaiChinh',
-            'NVTC': 'DM_LoaiNghiaVuTaiChinh',
-            'Hạn chế': 'LoaiHanChe'
-        }
-        
-        if field_type == "text":
-            if col_1 in [56, 57, 58, 59, 64, 65, 66, 67, 72, 73, 74, 75, 80, 81, 82, 83, 61, 69, 77, 85]:
-                field_type = "text"
-            elif col_1 in [60, 68, 76, 84]:
-                field_type = "dropdown"
-                options = dicts.get('DM_NguonGocSuDungDat', [])
-                extract_mode = "left"
-            elif col_1 == 97:
-                field_type = "dropdown"
-                options = [
-                    "1 - Sử dụng chung (đồng sử dụng, 1 thửa có từ 2 Họ và Tên người sử dụng KHÁC nhau)",
-                    "0 - Sử dụng riêng"
-                ]
-                extract_mode = "left"
-            elif col_1 == 104:
-                field_type = "dropdown"
-                options = [
-                    "1 - Có uỷ quyền",
-                    "0 - Không uỷ quyền"
-                ]
-                extract_mode = "left"
-            elif col_1 == 105:
-                field_type = "dropdown"
-                options = [
-                    "1 - Ký thay",
-                    "0 - Không ký thay"
-                ]
-                extract_mode = "left"
-            else:
-                for keyword, dict_key in mapping.items():
-                    if keyword.lower() in label.lower() and dict_key in dicts:
-                        field_type = "dropdown"
-                        options = dicts.get(dict_key, [])
-                        break
-        
-        if field_type == "dropdown":
-            if col_1 in [6, 7, 8, 10, 27, 54, 55, 62, 63, 70, 71, 78, 79, 172]:
-                extract_mode = "left"
-            elif col_1 in [13, 24, 30, 99]:
-                extract_mode = "right"
-            elif col_1 == 41:
-                extract_mode = "right"
-            elif "quốc tịch" in label.lower():
-                extract_mode = "right"
-            elif "phân loại thửa" in label.lower():
-                extract_mode = "ABCD"
+        # Chỉ áp dụng Từ điển (Dropdown) nếu Admin có cấu hình trong dropdown_rules
+        if config and isinstance(config, dict):
+            dd_rules = config.get("dropdown_rules", [])
+            for rule in dd_rules:
+                if str(rule.get("col")) == str(col_1):
+                    field_type = "dropdown"
+                    dict_name = rule.get("dictionary")
+                    
+                    # Xử lý các từ điển đặc biệt được hardcode trong default config
+                    if dict_name == "DM_Hardcoded_SuDungChung":
+                        options = [
+                            "1 - Sử dụng chung (đồng sử dụng, 1 thửa có từ 2 Họ và Tên người sử dụng KHÁC nhau)",
+                            "0 - Sử dụng riêng"
+                        ]
+                    elif dict_name == "DM_Hardcoded_UyQuyen":
+                        options = [
+                            "1 - Có uỷ quyền",
+                            "0 - Không uỷ quyền"
+                        ]
+                    elif dict_name == "DM_Hardcoded_KyThay":
+                        options = [
+                            "1 - Ký thay",
+                            "0 - Không ký thay"
+                        ]
+                    else:
+                        options = dicts.get(dict_name, [])
+                        
+                    extract_mode = rule.get("extract_mode", "none")
+                    break
                 
         field = {
             "col_index": col_idx,
@@ -193,48 +143,55 @@ def get_form_schema(excel_path):
             "type": field_type,
             "options": options
         }
-        if col_1 == 17:
-            field["separator_above"] = "Địa chỉ sử dụng"
-            field["group_end"] = 22
-        elif col_1 == 34:
-            field["separator_above"] = "Địa chỉ vợ (chồng)"
-            field["group_end"] = 39
-        elif col_1 == 86:
-            field["separator_above"] = "Diện tích hành lang"
-            field["group_end"] = 89
-        elif col_1 == 90:
-            field["separator_above"] = "Địa chỉ thửa đất"
-            field["group_end"] = 94
-        elif col_1 == 111:
-            field["separator_above"] = "Hạn chế quyền"
-            field["group_end"] = 117
-        elif col_1 == 118:
-            field["separator_above"] = "Nghĩa vụ tài chính"
-            field["group_end"] = 123
-        elif col_1 == 124:
-            field["separator_above"] = "Miễn giảm nghĩa vụ tài chính"
-            field["group_end"] = 128
-        elif col_1 == 129:
-            field["separator_above"] = "Nợ nghĩa vụ tài chính"
-            field["group_end"] = 133
-        elif col_1 == 134:
-            field["separator_above"] = "Nhà ở riêng lẻ"
-            field["group_end"] = 141
-        elif col_1 == 142:
-            field["separator_above"] = "Công trình, hạng mục công trình xây dựng"
-            field["group_end"] = 154
-        elif col_1 == 155:
-            field["separator_above"] = "Công trình ngầm"
-            field["group_end"] = 162
-        elif col_1 == 163:
-            field["separator_above"] = "Rừng trồng"
-            field["group_end"] = 165
-        elif col_1 == 166:
-            field["separator_above"] = "Cây lâu năm"
-            field["group_end"] = 168
-        elif col_1 == 179:
-            field["separator_above"] = "Thông tin lưu kho vật lý hồ sơ"
-            field["group_end"] = 182
+        if config and isinstance(config, dict):
+            seps = config.get("separators", {})
+            if str(col_1) in seps:
+                field["separator_above"] = seps[str(col_1)]["title"]
+                field["group_end"] = int(seps[str(col_1)]["group_end"]) if seps[str(col_1)].get("group_end") else None
+        else:
+            # Hardcoded separators fallback
+            if col_1 == 17:
+                field["separator_above"] = "Địa chỉ sử dụng"
+                field["group_end"] = 22
+            elif col_1 == 34:
+                field["separator_above"] = "Địa chỉ vợ (chồng)"
+                field["group_end"] = 39
+            elif col_1 == 86:
+                field["separator_above"] = "Diện tích hành lang"
+                field["group_end"] = 89
+            elif col_1 == 90:
+                field["separator_above"] = "Địa chỉ thửa đất"
+                field["group_end"] = 94
+            elif col_1 == 111:
+                field["separator_above"] = "Hạn chế quyền"
+                field["group_end"] = 117
+            elif col_1 == 118:
+                field["separator_above"] = "Nghĩa vụ tài chính"
+                field["group_end"] = 123
+            elif col_1 == 124:
+                field["separator_above"] = "Miễn giảm nghĩa vụ tài chính"
+                field["group_end"] = 128
+            elif col_1 == 129:
+                field["separator_above"] = "Nợ nghĩa vụ tài chính"
+                field["group_end"] = 133
+            elif col_1 == 134:
+                field["separator_above"] = "Nhà ở riêng lẻ"
+                field["group_end"] = 141
+            elif col_1 == 142:
+                field["separator_above"] = "Công trình, hạng mục công trình xây dựng"
+                field["group_end"] = 154
+            elif col_1 == 155:
+                field["separator_above"] = "Công trình ngầm"
+                field["group_end"] = 162
+            elif col_1 == 163:
+                field["separator_above"] = "Rừng trồng"
+                field["group_end"] = 165
+            elif col_1 == 166:
+                field["separator_above"] = "Cây lâu năm"
+                field["group_end"] = 168
+            elif col_1 == 179:
+                field["separator_above"] = "Thông tin lưu kho vật lý hồ sơ"
+                field["group_end"] = 182
             
         if field_type == "dropdown":
             field["extract_mode"] = extract_mode
@@ -382,11 +339,6 @@ def export_submissions_to_excel(template_file_path: str, submissions: list, down
             if len(parts) == 2 and parts[0].strip().isdigit():
                 val = parts[0].strip()
         
-        if idx == 58 and val and str(val).strip():
-            str_val = str(val).strip()
-            if not str_val.lower().startswith("đến ngày"):
-                val = f"đến ngày {str_val}"
-                
         return val
         
     for sub in submissions:
@@ -396,11 +348,10 @@ def export_submissions_to_excel(template_file_path: str, submissions: list, down
         for key, value in data_dict.items():
             if key.startswith('col_'):
                 idx = int(key.split('_')[1])
+                # Đảm bảo list new_row đủ độ dài để chứa idx
+                if len(new_row) <= idx:
+                    new_row.extend([""] * (idx + 1 - len(new_row)))
                 new_row[idx] = process_value(idx, value)
-                
-        if len(new_row) <= 105:
-            new_row.extend([""] * (106 - len(new_row)))
-        new_row[105] = new_row[101]
             
         ws.append(new_row)
         

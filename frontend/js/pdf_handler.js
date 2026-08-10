@@ -92,7 +92,17 @@ function renderFileQueue() {
     const fileQueueList = document.getElementById('fileQueueList');
     fileQueueList.innerHTML = '';
     
+    let currentTemplateId = -1;
     uploadedFilesQueue.forEach((file, index) => {
+        if (file.template_id && file.template_id !== currentTemplateId) {
+            const header = document.createElement('div');
+            header.className = 'list-group-item bg-light fw-bold text-primary px-2 py-1 mt-1';
+            header.style.fontSize = '0.85rem';
+            header.innerHTML = `<i class="fas fa-folder-open"></i> Biểu mẫu: ${file.template_name || 'Không xác định'}`;
+            fileQueueList.appendChild(header);
+            currentTemplateId = file.template_id;
+        }
+
         const btn = document.createElement('button');
         btn.type = 'button';
         btn.className = 'list-group-item list-group-item-action d-flex align-items-center';
@@ -206,6 +216,15 @@ async function selectFileFromQueue(index) {
     
     renderFileQueue(); // Re-render to update the active class
     
+    // Auto-switch template if needed
+    if (file.template_id && window.activeTemplateId !== undefined && parseInt(file.template_id) !== parseInt(window.activeTemplateId)) {
+        const select = document.getElementById('templateSelect');
+        if (select) {
+            select.value = file.template_id;
+            select.dispatchEvent(new Event('change'));
+        }
+    }
+    
     // Check if we are currently editing from the list. If not, clicking a PDF should start a fresh form.
     if (!currentEditingId || !isEditingFromList) {
         if (typeof resetFormData === 'function') resetFormData(true);
@@ -224,23 +243,27 @@ async function fetchMyQueue() {
         const data = await res.json();
         
         if (data.status === 'ok') {
-            const queue = data.data;
-            if (queue.length === 0) {
+            const queueGroups = data.data;
+            if (queueGroups.length === 0) {
                 alert("Bạn không có tài liệu nào đang chờ xử lý.");
             } else {
-                // Add all assigned docs to queue
                 let added = 0;
-                queue.forEach(doc => {
-                    // Check if already in queue to avoid duplicates
-                    if (!uploadedFilesQueue.find(f => f.url === doc.url)) {
-                        uploadedFilesQueue.push({
-                            name: doc.name,
-                            url: doc.url,
-                            uuid: doc.uuid
-                        });
-                        added++;
-                    }
+                queueGroups.forEach(group => {
+                    group.files.forEach(doc => {
+                        if (!uploadedFilesQueue.find(f => f.url === doc.url)) {
+                            uploadedFilesQueue.push({
+                                name: doc.name,
+                                url: doc.url,
+                                uuid: doc.uuid,
+                                template_id: group.template_id,
+                                template_name: group.template_name
+                            });
+                            added++;
+                        }
+                    });
                 });
+                
+                uploadedFilesQueue.sort((a, b) => (a.template_id || 0) - (b.template_id || 0));
                 
                 saveQueueState();
                 renderFileQueue();

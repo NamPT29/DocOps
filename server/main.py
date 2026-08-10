@@ -7,7 +7,7 @@ import uvicorn
 
 # Initialize database
 from server.database import Base, engine
-from server.models import Template
+from server.models import Template, Dictionary, DictionaryItem
 from server.routers.auth import init_admin
 from server.database import SessionLocal
 import shutil
@@ -41,22 +41,29 @@ app.add_middleware(
 )
 
 # Include routers
-from server.routers import auth, templates, tasks, submissions, documents, processing
+from server.routers import auth, templates, tasks, submissions, documents, processing, dictionaries
 app.include_router(auth.router)
 app.include_router(templates.router)
 app.include_router(tasks.router)
 app.include_router(submissions.router)
 app.include_router(documents.router)
 app.include_router(processing.router)
+app.include_router(dictionaries.template_dict_router)
+app.include_router(dictionaries.router)
 
-# Ensure upload dirs exist
-os.makedirs("uploads", exist_ok=True)
+# Load env
+from dotenv import load_dotenv
+load_dotenv()
+PDF_STORAGE_PATH = os.getenv("PDF_STORAGE_PATH", "uploads")
+os.makedirs(PDF_STORAGE_PATH, exist_ok=True)
+
+# Ensure internal upload dirs exist
 os.makedirs("scratch", exist_ok=True)
 os.makedirs("templates", exist_ok=True)
 
 # Mount static directories
 app.mount("/frontend", StaticFiles(directory="frontend"), name="frontend")
-app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
+app.mount("/uploads", StaticFiles(directory=PDF_STORAGE_PATH), name="uploads")
 
 @app.get("/")
 def serve_index():
