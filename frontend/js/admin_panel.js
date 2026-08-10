@@ -109,8 +109,6 @@ async function editSubmission(id) {
     // Ensure schema is loaded before populating data
     if (res.template_id && window.activeTemplateId !== res.template_id) {
         window.activeTemplateId = res.template_id;
-        await fetchMaXaMapping();
-        await fetchDonViDoMapping();
         await fetchSchema();
     } else if (!document.getElementById('dataForm').innerHTML.trim()) {
         // Form not rendered yet
@@ -214,21 +212,7 @@ async function editSubmission(id) {
     // Check if there is an attached PDF
     const attachedPdf = data._pdf_filename;
     if (attachedPdf) {
-        // Find in the queue
-        let fileIndex = uploadedFilesQueue.findIndex(f => f.name === attachedPdf);
-        if (fileIndex === -1) {
-            // Add it to the queue so we can view and preserve it
-            uploadedFilesQueue.push({
-                name: attachedPdf,
-                url: `/uploads/${attachedPdf}`
-            });
-            fileIndex = uploadedFilesQueue.length - 1;
-            renderFileQueue();
-            saveQueueState();
-        }
-        
-        selectFileFromQueue(fileIndex);
-        isPdfLinked = true;
+        addFileToQueueAndSelect(attachedPdf);
     } else {
         isPdfLinked = false;
     }

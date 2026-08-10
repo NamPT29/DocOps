@@ -263,3 +263,20 @@ async function fetchMyQueue() {
     }
 }
 
+function addFileToQueueAndSelect(attachedPdf) {
+    if (!attachedPdf) return;
+    
+    let fileIndex = uploadedFilesQueue.findIndex(f => f.name === attachedPdf);
+    if (fileIndex === -1) {
+        uploadedFilesQueue.push({
+            name: attachedPdf,
+            url: `/uploads/${attachedPdf}`
+        });
+        fileIndex = uploadedFilesQueue.length - 1;
+        renderFileQueue();
+        saveQueueState();
+    }
+    
+    selectFileFromQueue(fileIndex);
+    isPdfLinked = true;
+}

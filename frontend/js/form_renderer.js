@@ -1,3 +1,17 @@
+function escapeHTML(str) {
+    if (!str) return '';
+    return String(str).replace(/[&<>"']/g, function(match) {
+        const escape = {
+            '&': '&amp;',
+            '<': '&lt;',
+            '>': '&gt;',
+            '"': '&quot;',
+            "'": '&#39;'
+        };
+        return escape[match];
+    });
+}
+
 let debounceTimer;
 async function debounceProcessField(fieldName, value, callback) {
     clearTimeout(debounceTimer);
@@ -78,13 +92,14 @@ function renderForm(schema) {
         const titleLeft = document.createElement('div');
         titleLeft.className = 'd-flex align-items-center text-primary fw-bold fs-5';
         titleLeft.style.cursor = 'pointer';
-        titleLeft.innerHTML = `<i class="fas fa-chevron-down me-2 transition-icon" style="width: 20px; transition: transform 0.2s;"></i>${category.category}`;
+        const safeCategory = escapeHTML(category.category);
+        titleLeft.innerHTML = `<i class="fas fa-chevron-down me-2 transition-icon" style="width: 20px; transition: transform 0.2s;"></i>${safeCategory}`;
         
         const clearCategoryBtn = document.createElement('button');
         clearCategoryBtn.type = 'button';
         clearCategoryBtn.className = 'btn btn-sm btn-outline-danger clear-category-btn';
         clearCategoryBtn.innerHTML = `<i class="fas fa-eraser me-1"></i>Xóa sạch`;
-        clearCategoryBtn.title = `Làm sạch dữ liệu mục ${category.category}`;
+        clearCategoryBtn.title = `Làm sạch dữ liệu mục ${safeCategory}`;
         
         const titleRight = document.createElement('div');
         titleRight.className = 'd-flex align-items-center';
@@ -92,7 +107,7 @@ function renderForm(schema) {
         const errorCheckWrapper = document.createElement('div');
         errorCheckWrapper.className = 'form-check me-3 admin-error-check d-none';
         errorCheckWrapper.innerHTML = `
-            <input class="form-check-input error-checkbox" type="checkbox" id="error_cat_${index}" data-section="${category.category}" style="cursor: pointer; transform: scale(1.2);">
+            <input class="form-check-input error-checkbox" type="checkbox" id="error_cat_${index}" data-section="${safeCategory}" style="cursor: pointer; transform: scale(1.2);">
             <label class="form-check-label text-danger fw-bold ms-1" for="error_cat_${index}" style="cursor: pointer;">Lỗi Sai</label>
         `;
         
@@ -123,7 +138,7 @@ function renderForm(schema) {
         });
         
         clearCategoryBtn.addEventListener('click', () => {
-            if (!confirm(`Bạn có chắc chắn muốn xóa sạch dữ liệu trong mục "${category.category}"?`)) return;
+            if (!confirm(`Bạn có chắc chắn muốn xóa sạch dữ liệu trong mục "${safeCategory}"?`)) return;
             const inputs = categoryContent.querySelectorAll('input');
             inputs.forEach(input => {
                 if (input.type !== 'button' && input.type !== 'submit') {
@@ -156,7 +171,8 @@ function renderForm(schema) {
                 const sepTitle = document.createElement('h5');
                 sepTitle.className = 'text-primary border-bottom pb-2 d-flex align-items-center';
                 sepTitle.style.cursor = 'pointer';
-                sepTitle.innerHTML = `<i class="fas fa-chevron-right me-2 text-secondary fs-6 transition-icon" style="width: 15px; transition: transform 0.2s;"></i>${field.separator_above}`;
+                const safeSeparator = escapeHTML(field.separator_above);
+                sepTitle.innerHTML = `<i class="fas fa-chevron-right me-2 text-secondary fs-6 transition-icon" style="width: 15px; transition: transform 0.2s;"></i>${safeSeparator}`;
                 
                 const subRow = document.createElement('div');
                 subRow.className = 'row g-3 p-2 mt-1 d-none';
@@ -471,8 +487,11 @@ function autocomplete(inp, arr, extractMode = "none") {
             if (arr[i].toLowerCase().includes(val.toLowerCase())) {
                 b = document.createElement("DIV");
                 let matchIdx = arr[i].toLowerCase().indexOf(val.toLowerCase());
-                b.innerHTML = arr[i].substr(0, matchIdx) + "<strong>" + arr[i].substr(matchIdx, val.length) + "</strong>" + arr[i].substr(matchIdx + val.length);
-                b.innerHTML += "<input type='hidden' value='" + arr[i] + "'>";
+                let safeTextBefore = escapeHTML(arr[i].substr(0, matchIdx));
+                let safeTextMatch = escapeHTML(arr[i].substr(matchIdx, val.length));
+                let safeTextAfter = escapeHTML(arr[i].substr(matchIdx + val.length));
+                b.innerHTML = safeTextBefore + "<strong>" + safeTextMatch + "</strong>" + safeTextAfter;
+                b.innerHTML += "<input type='hidden' value='" + escapeHTML(arr[i]) + "'>";
                 b.addEventListener("mousedown", function(e) {
                     e.preventDefault(); // Prevent blur from firing
                     let selectedVal = this.getElementsByTagName("input")[0].value;
@@ -566,8 +585,8 @@ function autocomplete(inp, arr, extractMode = "none") {
         
         for (let i = 0; i < arr.length; i++) {
             let b = document.createElement("DIV");
-            b.innerHTML = arr[i];
-            b.innerHTML += "<input type='hidden' value='" + arr[i] + "'>";
+            b.innerHTML = escapeHTML(arr[i]);
+            b.innerHTML += "<input type='hidden' value='" + escapeHTML(arr[i]) + "'>";
             b.addEventListener("mousedown", function(e) {
                 e.preventDefault();
                 let selectedVal = this.getElementsByTagName("input")[0].value;

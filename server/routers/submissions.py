@@ -99,7 +99,7 @@ def api_get_submissions(template_id: int = None, start_date: str = None, end_dat
         return {"status": "error", "message": str(e)}
 
 @router.get("/submissions/by-pdf")
-def api_get_submission_by_pdf(filename: str, db: Session = Depends(get_db)):
+def api_get_submission_by_pdf(filename: str, current_user: dict = Depends(get_current_user), db: Session = Depends(get_db)):
     try:
         search_str = f'"{filename}"'
         submissions = db.query(Submission).filter(Submission.data_json.contains(search_str)).order_by(Submission.created_at.desc(), Submission.id.desc()).all()
@@ -254,7 +254,7 @@ async def api_export(template_id: int, background_tasks: BackgroundTasks, curren
         return {"status": "error", "message": str(e)}
 
 @router.post("/upload-pdf")
-async def api_upload_pdf(file: UploadFile = File(...)):
+async def api_upload_pdf(file: UploadFile = File(...), current_user: dict = Depends(get_current_user)):
     try:
         os.makedirs("uploads", exist_ok=True)
         # Sử dụng nguyên bản tên gốc

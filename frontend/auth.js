@@ -86,13 +86,29 @@ async function authFetch(url, options = {}) {
     return res;
 }
 
+const apiCache = {};
+
 async function apiCall(url, options = {}, errorMessage = "Lỗi kết nối máy chủ") {
     try {
+        // Simple caching for specific static GET requests
+        const method = options.method || 'GET';
+        if (method === 'GET' && (url.includes('/api/templates') || url.includes('/api/users'))) {
+            const cacheKey = url;
+            const now = Date.now();
+            if (apiCache[cacheKey] && now - apiCache[cacheKey].timestamp < 5000) {
+                // Return cached data if younger than 5 seconds
+                return apiCache[cacheKey].data;
+            }
+        }
+        
         const res = await authFetch(url, options);
         if (!res) return null; // 401 was handled by authFetch
         
         const data = await res.json();
         if (data.status === 'ok') {
+            if (method === 'GET' && (url.includes('/api/templates') || url.includes('/api/users'))) {
+                apiCache[url] = { data: data, timestamp: Date.now() };
+            }
             return data;
         } else {
             alert('Lỗi: ' + (data.message || data.detail || 'Lỗi không xác định'));

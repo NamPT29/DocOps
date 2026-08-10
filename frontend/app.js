@@ -1,8 +1,6 @@
 function initApp() {
     // Only run form-related stuff if form-container exists (i.e. not on admin.html)
     if (document.getElementById('form-container')) {
-        fetchMaXaMapping();
-        fetchDonViDoMapping();
         fetchSchema();
         setupPdfUpload();
         restoreQueue();
