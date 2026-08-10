@@ -3,7 +3,7 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from server.database import get_db
 from server.models import Task, User, Template
-from server.routers.auth import get_current_user
+from server.routers.auth import get_current_user, get_admin_user
 
 router = APIRouter(prefix="/api/tasks", tags=["tasks"])
 
@@ -14,9 +14,7 @@ class CreateTaskRequest(BaseModel):
     target_quantity: int
 
 @router.post("")
-def api_create_task(req: CreateTaskRequest, current_user: dict = Depends(get_current_user), db: Session = Depends(get_db)):
-    if current_user["role"] != "admin":
-        return {"status": "error", "message": "Access denied"}
+def api_create_task(req: CreateTaskRequest, current_user: dict = Depends(get_admin_user), db: Session = Depends(get_db)):
     
     # Check if template exists
     template = db.query(Template).filter(Template.id == req.template_id).first()

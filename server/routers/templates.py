@@ -1,6 +1,7 @@
 import os
 import shutil
 from fastapi import APIRouter, Depends, UploadFile, File, HTTPException
+from fastapi.concurrency import run_in_threadpool
 from sqlalchemy.orm import Session
 from server.database import get_db
 from server.models import Template
@@ -35,38 +36,38 @@ def get_templates(db: Session = Depends(get_db)):
     return {"status": "ok", "data": [{"id": t.id, "name": t.name, "filename": t.filename} for t in templates]}
 
 @router.get("/{template_id}/schema")
-def get_template_schema(template_id: int, db: Session = Depends(get_db)):
+async def get_template_schema(template_id: int, db: Session = Depends(get_db)):
     template = db.query(Template).filter(Template.id == template_id).first()
     if not template:
         return {"status": "error", "message": "Template not found"}
     
     file_path = os.path.join(TEMPLATES_DIR, template.filename)
     try:
-        schema = get_form_schema(file_path)
+        schema = await run_in_threadpool(get_form_schema, file_path)
         return {"status": "ok", "data": schema}
     except Exception as e:
         return {"status": "error", "message": str(e)}
 
 @router.get("/{template_id}/maxa_mapping")
-def get_template_maxa_mapping(template_id: int, db: Session = Depends(get_db)):
+async def get_template_maxa_mapping(template_id: int, db: Session = Depends(get_db)):
     template = db.query(Template).filter(Template.id == template_id).first()
     if not template:
         return {"status": "error", "message": "Template not found"}
     file_path = os.path.join(TEMPLATES_DIR, template.filename)
     try:
-        mapping = get_ma_xa_mapping(file_path)
+        mapping = await run_in_threadpool(get_ma_xa_mapping, file_path)
         return {"status": "ok", "data": mapping}
     except Exception as e:
         return {"status": "error", "message": str(e)}
 
 @router.get("/{template_id}/don_vi_do_mapping")
-def get_template_don_vi_do_mapping(template_id: int, db: Session = Depends(get_db)):
+async def get_template_don_vi_do_mapping(template_id: int, db: Session = Depends(get_db)):
     template = db.query(Template).filter(Template.id == template_id).first()
     if not template:
         return {"status": "error", "message": "Template not found"}
     file_path = os.path.join(TEMPLATES_DIR, template.filename)
     try:
-        mapping = get_don_vi_do_mapping(file_path)
+        mapping = await run_in_threadpool(get_don_vi_do_mapping, file_path)
         return {"status": "ok", "data": mapping}
     except Exception as e:
         return {"status": "error", "message": str(e)}

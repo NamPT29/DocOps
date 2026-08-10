@@ -8,9 +8,13 @@ def load_dictionaries(excel_path):
     """
     Load dictionaries from the DM_* sheets to provide dropdown options.
     """
-    xl = pd.ExcelFile(excel_path)
-    sheets = [s for s in xl.sheet_names if s.startswith('DM_') or s.strip() == 'LoaiHanChe']
-    
+    try:
+        xl = pd.ExcelFile(excel_path)
+        sheets = [s for s in xl.sheet_names if s.startswith('DM_') or s.strip() == 'LoaiHanChe']
+    except Exception as e:
+        print(f"Error loading dictionaries from {excel_path}: {e}")
+        return {}
+        
     dicts = {}
     for s in sheets:
         df = pd.read_excel(xl, sheet_name=s)
@@ -42,7 +46,11 @@ def get_form_schema(excel_path):
     Reads the first 4 rows of the 'Data' sheet to construct a hierarchical form schema.
     Also injects dropdown options based on dictionaries.
     """
-    df_head = pd.read_excel(excel_path, sheet_name='Data', header=[0, 1, 2, 3], nrows=0)
+    try:
+        df_head = pd.read_excel(excel_path, sheet_name='Data', header=[0, 1, 2, 3], nrows=0)
+    except Exception as e:
+        print(f"Error reading 'Data' sheet from {excel_path}: {e}")
+        return []
     
     # Load dictionaries
     try:

@@ -62,3 +62,4 @@ scratch/
 tai_lieu_mau/~$*.xlsx
 
 .agents/
+.grapuco/

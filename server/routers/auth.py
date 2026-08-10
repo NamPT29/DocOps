@@ -1,22 +1,28 @@
 from fastapi import APIRouter, Depends, HTTPException, Header
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
-import secrets
+import jwt
+from datetime import datetime, timedelta
 from server.database import get_db, SessionLocal
 from server.models import User, AssignedDocument
 
 router = APIRouter(prefix="/api", tags=["auth"])
 
-# Simple in-memory session store
-SESSIONS = {}
+SECRET_KEY = "1b2d3c4e5f6g7h8i9j0k"
+ALGORITHM = "HS256"
+ACCESS_TOKEN_EXPIRE_MINUTES = 1440 # 24 hours
 
 def get_current_user(authorization: str = Header(None)):
     if not authorization or not authorization.startswith("Bearer "):
         raise HTTPException(status_code=401, detail="Unauthorized")
     token = authorization.split(" ")[1]
-    if token not in SESSIONS:
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        return payload
+    except jwt.ExpiredSignatureError:
+        raise HTTPException(status_code=401, detail="Token has expired")
+    except jwt.InvalidTokenError:
         raise HTTPException(status_code=401, detail="Invalid token")
-    return SESSIONS[token]
 
 def get_admin_user(current_user: dict = Depends(get_current_user)):
     if current_user.get("role") != "admin":
@@ -43,9 +49,14 @@ def api_login(req: LoginRequest, db: Session = Depends(get_db)):
     user = db.query(User).filter(User.username == req.username, User.password == req.password).first()
     if not user:
         return {"status": "error", "message": "Sai tên đăng nhập hoặc mật khẩu"}
-    token = secrets.token_hex(16)
-    SESSIONS[token] = {"id": user.id, "username": user.username, "role": user.role}
-    return {"status": "ok", "token": token, "user": SESSIONS[token]}
+    
+    user_data = {"id": user.id, "username": user.username, "role": user.role}
+    expire = datetime.utcnow() + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    to_encode = user_data.copy()
+    to_encode.update({"exp": expire})
+    token = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+    
+    return {"status": "ok", "token": token, "user": user_data}
 
 class CreateUserRequest(BaseModel):
     username: str

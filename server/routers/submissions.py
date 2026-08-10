@@ -215,8 +215,10 @@ def api_copy_submission(sub_id: int, current_user: dict = Depends(get_current_us
         db.rollback()
         return {"status": "error", "message": str(e)}
 
+from fastapi.concurrency import run_in_threadpool
+
 @router.get("/export")
-def api_export(template_id: int, background_tasks: BackgroundTasks, current_user: dict = Depends(get_admin_user), db: Session = Depends(get_db)):
+async def api_export(template_id: int, background_tasks: BackgroundTasks, current_user: dict = Depends(get_admin_user), db: Session = Depends(get_db)):
     try:
         import openpyxl
         
@@ -237,7 +239,7 @@ def api_export(template_id: int, background_tasks: BackgroundTasks, current_user
         if not submissions:
             raise Exception("Không có dữ liệu hồ sơ nào trong hệ thống để xuất báo cáo cho mẫu này.")
             
-        export_submissions_to_excel(template_file_path, submissions, download_path)
+        await run_in_threadpool(export_submissions_to_excel, template_file_path, submissions, download_path)
         
         def remove_file(path):
             try:
