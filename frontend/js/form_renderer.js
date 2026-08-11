@@ -12,6 +12,33 @@ function escapeHTML(str) {
     });
 }
 
+function getDraftStorageKey() {
+    const userKey = currentUser && (currentUser.id || currentUser.username);
+    const templateKey = window.activeTemplateId || 'none';
+    return `formDraft_${userKey || 'anonymous'}_${templateKey}`;
+}
+
+function removeCurrentFormDraft() {
+    localStorage.removeItem(getDraftStorageKey());
+}
+
+function applySyncRule(rule, sourceValue) {
+    const targetInput = document.getElementById('col_' + (rule.target - 1));
+    if (targetInput) targetInput.value = sourceValue;
+}
+
+function applyConcatRule(rule) {
+    const source1 = document.getElementById('col_' + (rule.source_1 - 1));
+    const source2 = document.getElementById('col_' + (rule.source_2 - 1));
+    const target = document.getElementById('col_' + (rule.target - 1));
+    if (!target) return;
+
+    target.value = [source1, source2]
+        .filter(source => source && source.value.trim())
+        .map(source => source.value.trim())
+        .join(', ');
+}
+
 let debounceTimer;
 async function debounceProcessField(fieldName, value, callback) {
     clearTimeout(debounceTimer);
@@ -78,7 +105,7 @@ function renderForm(schema, config = {}) {
     // Load draft from localStorage
     let draftData = {};
     try {
-        const stored = localStorage.getItem('formDraft');
+        const stored = localStorage.getItem(getDraftStorageKey());
         if (stored) draftData = JSON.parse(stored);
     } catch (e) {}
     
@@ -234,13 +261,9 @@ function renderForm(schema, config = {}) {
             const syncRules = config.sync_cols || [];
             syncRules.forEach(rule => {
                 if (field.col_index + 1 === rule.source) {
-                    input.addEventListener('input', function() {
-                        const targetId = 'col_' + (rule.target - 1);
-                        const targetInput = document.getElementById(targetId);
-                        if (targetInput) {
-                            targetInput.value = this.value;
-                        }
-                    });
+                    const applyRule = () => applySyncRule(rule, input.value);
+                    input.addEventListener('input', applyRule);
+                    input.addEventListener('change', applyRule);
                 }
             });
             
@@ -272,17 +295,9 @@ function renderForm(schema, config = {}) {
             const concatRules = config.concat_rules || [];
             concatRules.forEach(rule => {
                 if (field.col_index + 1 === rule.source_1 || field.col_index + 1 === rule.source_2) {
-                    input.addEventListener('input', function() {
-                        let f1 = document.getElementById('col_' + (rule.source_1 - 1));
-                        let f2 = document.getElementById('col_' + (rule.source_2 - 1));
-                        let target = document.getElementById('col_' + (rule.target - 1));
-                        if (target) {
-                            let parts = [];
-                            if (f1 && f1.value.trim()) parts.push(f1.value.trim());
-                            if (f2 && f2.value.trim()) parts.push(f2.value.trim());
-                            target.value = parts.join(', ');
-                        }
-                    });
+                    const applyRule = () => applyConcatRule(rule);
+                    input.addEventListener('input', applyRule);
+                    input.addEventListener('change', applyRule);
                 }
             });
 
@@ -433,7 +448,7 @@ function saveFormDraft() {
     inputs.forEach(input => {
         data[input.name] = input.value;
     });
-    localStorage.setItem('formDraft', JSON.stringify(data));
+    localStorage.setItem(getDraftStorageKey(), JSON.stringify(data));
 }
 
 function autocomplete(inp, arr, extractMode = "none") {
@@ -477,9 +492,8 @@ function autocomplete(inp, arr, extractMode = "none") {
                     
                     inp.value = selectedVal;
                     closeAllLists();
-                    // Trigger draft save
-                    saveFormDraft();
                     inp.dispatchEvent(new Event('change'));
+                    saveFormDraft();
                 });
                 a.appendChild(b);
             }
@@ -572,8 +586,8 @@ function autocomplete(inp, arr, extractMode = "none") {
                 
                 inputEl.value = selectedVal;
                 closeAllLists();
-                saveFormDraft();
                 inputEl.dispatchEvent(new Event('change'));
+                saveFormDraft();
             });
             a.appendChild(b);
         }

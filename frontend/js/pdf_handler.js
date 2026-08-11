@@ -1,6 +1,15 @@
 let formDataCache = {};
 let uploadedFilesQueue = [];
 let iframeCurrentIndex = -1;
+let currentPdfObjectUrl = null;
+
+function normalizePdfUrl(url) {
+    if (!url) return null;
+    if (url.startsWith('/uploads/')) {
+        return '/api/files/' + url.substring('/uploads/'.length);
+    }
+    return url;
+}
 
 function saveQueueState() {
     if (!currentUser) return;
@@ -51,7 +60,7 @@ function setupPdfUpload() {
             if (uploadedFilesQueue.length === 0) {
                 iframe.style.display = 'none';
                 placeholder.style.display = 'block';
-                placeholder.innerHTML = `Đang tải ${file.name}...`;
+                placeholder.textContent = `Đang tải ${file.name}...`;
             }
             
             try {
@@ -59,12 +68,14 @@ function setupPdfUpload() {
                     method: 'POST',
                     body: formData
                 });
+                if (!response) return;
                 const res = await response.json();
                 
                 if (res.status === 'ok') {
                     const fileItem = {
-                        name: file.name,
-                        url: res.url
+                        name: res.name || file.name,
+                        url: res.url,
+                        uuid: res.uuid
                     };
                     uploadedFilesQueue.push(fileItem);
                     saveQueueState();
@@ -98,7 +109,10 @@ function renderFileQueue() {
             const header = document.createElement('div');
             header.className = 'list-group-item bg-light fw-bold text-primary px-2 py-1 mt-1';
             header.style.fontSize = '0.85rem';
-            header.innerHTML = `<i class="fas fa-folder-open"></i> Biểu mẫu: ${file.template_name || 'Không xác định'}`;
+            const icon = document.createElement('i');
+            icon.className = 'fas fa-folder-open';
+            header.appendChild(icon);
+            header.appendChild(document.createTextNode(` Biểu mẫu: ${file.template_name || 'Không xác định'}`));
             fileQueueList.appendChild(header);
             currentTemplateId = file.template_id;
         }
@@ -207,8 +221,26 @@ async function selectFileFromQueue(index) {
     const file = uploadedFilesQueue[index];
     const iframe = document.getElementById('pdfIframe');
     const placeholder = document.getElementById('pdfPlaceholder');
-    
-    iframe.src = file.url;
+
+    const protectedUrl = normalizePdfUrl(file.url);
+    if (!protectedUrl) return;
+    placeholder.style.display = 'block';
+    placeholder.textContent = 'Đang tải tài liệu...';
+    iframe.style.display = 'none';
+
+    try {
+        const response = await authFetch(protectedUrl);
+        if (!response) return;
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const blob = await response.blob();
+        if (currentPdfObjectUrl) URL.revokeObjectURL(currentPdfObjectUrl);
+        currentPdfObjectUrl = URL.createObjectURL(blob);
+        iframe.src = currentPdfObjectUrl;
+    } catch (error) {
+        placeholder.textContent = 'Không thể tải tài liệu.';
+        console.error('Lỗi tải tài liệu:', error);
+        return;
+    }
     iframe.onload = () => {
         placeholder.style.display = 'none';
         iframe.style.display = 'block';
@@ -240,6 +272,7 @@ async function fetchMyQueue() {
         if(btn) btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Đang tải...';
         
         const res = await authFetch('/api/documents/my-queue');
+        if (!res) return;
         const data = await res.json();
         
         if (data.status === 'ok') {
@@ -286,17 +319,40 @@ async function fetchMyQueue() {
     }
 }
 
-function addFileToQueueAndSelect(attachedPdf) {
+function addFileToQueueAndSelect(attachedPdf, attachedPdfUuid, attachedPdfUrl) {
     if (!attachedPdf) return;
-    
-    let fileIndex = uploadedFilesQueue.findIndex(f => f.name === attachedPdf);
+
+    const resolvedUrl = attachedPdfUrl || (attachedPdfUuid
+        ? `/api/files/${encodeURIComponent(attachedPdfUuid)}`
+        : null);
+    if (!resolvedUrl) {
+        alert(`Không tìm thấy file PDF đã liên kết: ${attachedPdf}`);
+        return;
+    }
+
+    let fileIndex = uploadedFilesQueue.findIndex(f =>
+        (attachedPdfUuid && f.uuid === attachedPdfUuid) || f.url === resolvedUrl
+    );
+    if (fileIndex === -1) {
+        const legacyMatches = uploadedFilesQueue
+            .map((file, index) => ({ file, index }))
+            .filter(({ file }) => file.name === attachedPdf && !file.uuid);
+        if (legacyMatches.length === 1) {
+            fileIndex = legacyMatches[0].index;
+        }
+    }
     if (fileIndex === -1) {
         uploadedFilesQueue.push({
             name: attachedPdf,
-            url: `/uploads/${attachedPdf}`
+            uuid: attachedPdfUuid,
+            url: resolvedUrl
         });
         fileIndex = uploadedFilesQueue.length - 1;
         renderFileQueue();
+        saveQueueState();
+    } else {
+        uploadedFilesQueue[fileIndex].uuid = attachedPdfUuid || uploadedFilesQueue[fileIndex].uuid;
+        uploadedFilesQueue[fileIndex].url = resolvedUrl;
         saveQueueState();
     }
     

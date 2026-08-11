@@ -18,6 +18,11 @@ class ProcessFieldRequest(BaseModel):
 # In-memory cache to avoid reading Excel file on every keystroke
 MAPPING_CACHE = {}
 
+
+def invalidate_mappings(template_id: int) -> None:
+    MAPPING_CACHE.pop(template_id, None)
+
+
 def get_mappings(template_id: int, db: Session):
     if template_id in MAPPING_CACHE:
         return MAPPING_CACHE[template_id]

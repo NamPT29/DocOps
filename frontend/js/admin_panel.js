@@ -32,6 +32,12 @@ async function fetchSubmissions() {
     
     res.data.forEach(sub => {
         const tr = document.createElement('tr');
+        const safeId = Number(sub.id);
+        const safeCreatedAt = escapeHTML(sub.created_at);
+        const safeName = escapeHTML(sub.ho_ten);
+        const safeDocumentNumber = escapeHTML(sub.so_giay_to);
+        const safeTemplate = escapeHTML(sub.template);
+        const safePdfFilename = escapeHTML(sub.pdf_filename);
         if (sub.has_errors || sub.status === 'rejected') {
             tr.classList.add('table-danger');
         }
@@ -43,19 +49,19 @@ async function fetchSubmissions() {
         else statusBadge = '<span class="badge bg-secondary"><i class="fas fa-save"></i> Lưu nháp</span>';
         
         tr.innerHTML = `
-            <td>${sub.id}</td>
-            <td>${sub.created_at}</td>
-            <td class="fw-bold text-primary">${sub.ho_ten}</td>
-            <td>${sub.so_giay_to}</td>
-            <td><span class="badge bg-secondary">${sub.template}</span></td>
+            <td>${safeId}</td>
+            <td>${safeCreatedAt}</td>
+            <td class="fw-bold text-primary">${safeName}</td>
+            <td>${safeDocumentNumber}</td>
+            <td><span class="badge bg-secondary">${safeTemplate}</span></td>
             <td>
-                ${sub.pdf_filename ? `<span class="badge bg-success" style="cursor: pointer;" onclick="editSubmission(${sub.id})" title="Nhấn để xem PDF và sửa hồ sơ">${sub.pdf_filename}</span>` : '<span class="text-muted fst-italic">Không</span>'}
+                ${sub.pdf_filename ? `<span class="badge bg-success" style="cursor: pointer;" onclick="editSubmission(${safeId})" title="Nhấn để xem PDF và sửa hồ sơ">${safePdfFilename}</span>` : '<span class="text-muted fst-italic">Không</span>'}
             </td>
             <td class="text-center">${statusBadge}</td>
             <td>
-                <button class="btn btn-sm btn-outline-success me-1" onclick="copySubmission(${sub.id})">Nhân bản</button>
-                <button class="btn btn-sm btn-outline-primary me-1" onclick="editSubmission(${sub.id})">Xem/Sửa</button>
-                <button class="btn btn-sm btn-outline-danger" onclick="deleteSubmission(${sub.id})">Xóa</button>
+                <button class="btn btn-sm btn-outline-success me-1" onclick="copySubmission(${safeId})">Nhân bản</button>
+                <button class="btn btn-sm btn-outline-primary me-1" onclick="editSubmission(${safeId})">Xem/Sửa</button>
+                <button class="btn btn-sm btn-outline-danger" onclick="deleteSubmission(${safeId})">Xóa</button>
             </td>
         `;
         tbody.appendChild(tr);
@@ -96,6 +102,12 @@ function renderAdminSubmissionsTable(data, tbodyId, isReviewTab) {
     }
     data.forEach(sub => {
         const tr = document.createElement('tr');
+        const safeId = Number(sub.id);
+        const safeCreatedAt = escapeHTML(sub.created_at);
+        const safeCreator = escapeHTML(sub.creator_name || 'Unknown');
+        const safeName = escapeHTML(sub.ho_ten);
+        const safeDocumentNumber = escapeHTML(sub.so_giay_to);
+        const safeTemplate = escapeHTML(sub.template);
         if (sub.has_errors || sub.status === 'rejected') tr.classList.add('table-danger');
         
         let statusBadge = '';
@@ -103,19 +115,19 @@ function renderAdminSubmissionsTable(data, tbodyId, isReviewTab) {
         else if (sub.status === 'rejected') statusBadge = '<span class="badge bg-danger"><i class="fas fa-times-circle"></i> Báo lỗi</span>';
         else if (sub.status === 'approved') statusBadge = '<span class="badge bg-success"><i class="fas fa-check-circle"></i> Đã duyệt</span>';
         
-        let actions = `<a class="btn btn-sm btn-outline-primary me-1" href="index.html?check_id=${sub.id}" target="_blank" title="Mở trong tab mới để kiểm tra chi tiết"><i class="fas fa-search"></i> Kiểm tra</a>`;
+        let actions = `<a class="btn btn-sm btn-outline-primary me-1" href="index.html?check_id=${safeId}" target="_blank" title="Mở trong tab mới để kiểm tra chi tiết"><i class="fas fa-search"></i> Kiểm tra</a>`;
         if (isReviewTab) {
-            actions += `<button class="btn btn-sm btn-success me-1" onclick="approveSubmission(${sub.id})" title="Duyệt hoàn thành hồ sơ này"><i class="fas fa-check"></i> Duyệt</button>`;
+            actions += `<button class="btn btn-sm btn-success me-1" onclick="approveSubmission(${safeId})" title="Duyệt hoàn thành hồ sơ này"><i class="fas fa-check"></i> Duyệt</button>`;
         }
-        actions += `<button class="btn btn-sm btn-outline-danger" onclick="deleteSubmission(${sub.id})" title="Xóa hồ sơ"><i class="fas fa-trash"></i></button>`;
+        actions += `<button class="btn btn-sm btn-outline-danger" onclick="deleteSubmission(${safeId})" title="Xóa hồ sơ"><i class="fas fa-trash"></i></button>`;
 
         tr.innerHTML = `
-            <td>${sub.id}</td>
-            <td>${sub.created_at}</td>
-            <td><span class="badge bg-info text-dark"><i class="fas fa-user"></i> ${sub.creator_name || 'Unknown'}</span></td>
-            <td class="fw-bold text-primary">${sub.ho_ten}</td>
-            <td>${sub.so_giay_to}</td>
-            <td><span class="badge bg-secondary">${sub.template}</span></td>
+            <td>${safeId}</td>
+            <td>${safeCreatedAt}</td>
+            <td><span class="badge bg-info text-dark"><i class="fas fa-user"></i> ${safeCreator}</span></td>
+            <td class="fw-bold text-primary">${safeName}</td>
+            <td>${safeDocumentNumber}</td>
+            <td><span class="badge bg-secondary">${safeTemplate}</span></td>
             <td>${statusBadge}</td>
             <td>${actions}</td>
         `;
@@ -299,7 +311,7 @@ async function editSubmission(id) {
     // Check if there is an attached PDF
     const attachedPdf = data._pdf_filename;
     if (attachedPdf) {
-        addFileToQueueAndSelect(attachedPdf);
+        addFileToQueueAndSelect(attachedPdf, data._pdf_uuid, data._pdf_url);
     } else {
         isPdfLinked = false;
     }
@@ -489,15 +501,15 @@ async function uploadAndAssign() {
         const data = await res.json();
         
         if (data.status === 'ok') {
-            statusDiv.innerHTML = `<div class="alert alert-success"><i class="fas fa-check-circle"></i> ${data.message}</div>`;
+            statusDiv.innerHTML = `<div class="alert alert-success"><i class="fas fa-check-circle"></i> ${escapeHTML(data.message)}</div>`;
             fileInput.value = ''; // clear
             document.getElementById('assignFilesCount').innerHTML = 'Chưa chọn file nào.';
             fetchDocumentStats(); // Refresh stats
         } else {
-            statusDiv.innerHTML = `<div class="alert alert-danger">${data.message}</div>`;
+            statusDiv.innerHTML = `<div class="alert alert-danger">${escapeHTML(data.message)}</div>`;
         }
     } catch (err) {
-        statusDiv.innerHTML = `<div class="alert alert-danger">Lỗi kết nối: ${err.message}</div>`;
+        statusDiv.innerHTML = `<div class="alert alert-danger">Lỗi kết nối: ${escapeHTML(err.message)}</div>`;
     } finally {
         btn.disabled = false;
     }

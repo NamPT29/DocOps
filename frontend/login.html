@@ -59,15 +59,9 @@
             }
         }
         
-        // Check if already logged in
+        // Luôn cho phép đăng nhập lại để người dùng có thể đổi tài khoản.
         document.addEventListener('DOMContentLoaded', () => {
-            const token = localStorage.getItem('token');
-            const userStr = localStorage.getItem('user');
-            if (token && userStr) {
-                const user = JSON.parse(userStr);
-                if (user.role === 'admin') window.location.href = '/admin.html';
-                else window.location.href = '/index.html';
-            }
+            document.getElementById('loginUsername').focus();
         });
     </script>
 </body>

@@ -4,10 +4,11 @@ from sqlalchemy import func
 from typing import List
 import os
 import uuid
-import shutil
+from urllib.parse import quote
 from server.database import get_db
 from server.routers.auth import get_current_user, get_admin_user
 from server.models import AssignedDocument, User, Template
+from server.services.upload_service import save_validated_upload
 from pydantic import BaseModel
 
 router = APIRouter(prefix="/api", tags=["documents"])
@@ -32,26 +33,36 @@ async def upload_and_assign_documents(
     load_dotenv()
     PDF_STORAGE_PATH = os.getenv("PDF_STORAGE_PATH", "uploads")
     os.makedirs(PDF_STORAGE_PATH, exist_ok=True)
+
+    template = db.query(Template).filter(Template.id == template_id).first()
+    if not template:
+        raise HTTPException(status_code=404, detail="Biểu mẫu không tồn tại")
+    users = db.query(User).filter(User.id.in_(user_id_list)).all()
+    valid_user_ids = {user.id for user in users}
+    if valid_user_ids != set(user_id_list):
+        raise HTTPException(status_code=400, detail="Danh sách nhân viên không hợp lệ")
     
     uploaded_count = 0
     assigned_stats = {uid: 0 for uid in user_id_list}
+    created_paths = []
     
     try:
         for i, file in enumerate(files):
             if not file.filename:
                 continue
-                
-            uuid_name = str(uuid.uuid4()) + "_" + file.filename
+
+            original_filename = os.path.basename(file.filename)
+            uuid_name = str(uuid.uuid4()) + "_" + original_filename
             filepath = os.path.join(PDF_STORAGE_PATH, uuid_name)
-            
-            with open(filepath, "wb") as buffer:
-                shutil.copyfileobj(file.file, buffer)
+
+            save_validated_upload(file, filepath, kind="document")
+            created_paths.append(filepath)
                 
             # Round-robin assignment
-            assignee_id = user_id_list[i % len(user_id_list)]
+            assignee_id = user_id_list[uploaded_count % len(user_id_list)]
             
             doc = AssignedDocument(
-                original_filename=file.filename,
+                original_filename=original_filename,
                 uuid_filename=uuid_name,
                 assigned_to_user_id=assignee_id,
                 template_id=template_id,
@@ -66,9 +77,18 @@ async def upload_and_assign_documents(
             "status": "ok", 
             "message": f"Đã tải lên và chia đều {uploaded_count} tài liệu cho {len(user_id_list)} nhân viên."
         }
-    except Exception as e:
+    except HTTPException:
         db.rollback()
-        return {"status": "error", "message": f"Lỗi trong quá trình phân công: {str(e)}"}
+        for path in created_paths:
+            if os.path.exists(path):
+                os.remove(path)
+        raise
+    except Exception:
+        db.rollback()
+        for path in created_paths:
+            if os.path.exists(path):
+                os.remove(path)
+        raise HTTPException(status_code=500, detail="Không thể tải lên và phân công tài liệu")
 
 @router.get("/documents/stats")
 def get_document_stats(current_user: dict = Depends(get_admin_user), db: Session = Depends(get_db)):
@@ -120,7 +140,7 @@ def get_my_queue(current_user: dict = Depends(get_current_user), db: Session = D
             
         grouped[tid]["files"].append({
             "name": d.original_filename,
-            "url": f"/uploads/{d.uuid_filename}",
+            "url": f"/api/files/{quote(d.uuid_filename, safe='')}",
             "uuid": d.uuid_filename
         })
         

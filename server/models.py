@@ -7,7 +7,7 @@ class User(Base):
     
     id = Column(Integer, primary_key=True, index=True)
     username = Column(String(255), unique=True, index=True, nullable=False)
-    password = Column(String(255), nullable=False) # Plain text per user request
+    password = Column(String(255), nullable=False) # Scrypt hash; legacy values migrate on login
     role = Column(String(255), default="user") # 'admin' or 'user'
     created_at = Column(DateTime, default=datetime.utcnow)
 

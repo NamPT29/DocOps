@@ -7,7 +7,10 @@ async function submitData(targetStatus = 'draft') {
     
     // Attach PDF filename if linked
     if (isPdfLinked && iframeCurrentIndex >= 0 && iframeCurrentIndex < uploadedFilesQueue.length) {
-        data['_pdf_filename'] = uploadedFilesQueue[iframeCurrentIndex].name;
+        const linkedPdf = uploadedFilesQueue[iframeCurrentIndex];
+        data['_pdf_filename'] = linkedPdf.name;
+        if (linkedPdf.uuid) data['_pdf_uuid'] = linkedPdf.uuid;
+        if (linkedPdf.url) data['_pdf_url'] = linkedPdf.url;
     }
     
     const isEditing = currentEditingId !== null;
@@ -42,7 +45,7 @@ async function submitData(targetStatus = 'draft') {
             } else {
                 // Clear form and draft
                 inputs.forEach(input => input.value = '');
-                localStorage.removeItem('formDraft');
+                if (typeof removeCurrentFormDraft === 'function') removeCurrentFormDraft();
                 fetchSubmissions();
                 
                 // Xử lý hàng đợi: loại bỏ file hiện tại khỏi queue vì đã nhập xong
@@ -130,7 +133,7 @@ function resetFormData(silent = false) {
     
     // Remove drafting if it exists
     if (typeof localStorage !== 'undefined') {
-        localStorage.removeItem('formDraft');
+        if (typeof removeCurrentFormDraft === 'function') removeCurrentFormDraft();
     }
 }
 

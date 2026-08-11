@@ -68,9 +68,23 @@ async function doLogin() {
 }
 
 function doLogout() {
+    try {
+        const storedUser = currentUser || JSON.parse(localStorage.getItem('user') || 'null');
+        if (storedUser) {
+            const userKey = storedUser.id || storedUser.username;
+            const prefix = `formDraft_${userKey}_`;
+            for (let index = localStorage.length - 1; index >= 0; index--) {
+                const key = localStorage.key(index);
+                if (key && key.startsWith(prefix)) localStorage.removeItem(key);
+            }
+        }
+        localStorage.removeItem('formDraft');
+    } catch (error) {
+        console.error('Không thể xóa bản nháp khi đăng xuất:', error);
+    }
     localStorage.removeItem('token');
     localStorage.removeItem('user');
-    window.location.reload();
+    window.location.href = '/login.html';
 }
 
 async function authFetch(url, options = {}) {
@@ -134,11 +148,13 @@ async function fetchAdminData() {
         tbody.innerHTML = '';
         data.data.forEach(u => {
             let badge = u.role === 'admin' ? '<span class="badge bg-danger">Admin</span>' : '<span class="badge bg-primary">Nhân viên</span>';
-            let deleteBtn = u.id === currentUser.id ? '' : `<button class="btn btn-sm btn-danger" onclick="deleteUser(${u.id})"><i class="fas fa-trash"></i> Xóa</button>`;
+            const safeId = Number(u.id);
+            const safeUsername = escapeHTML(u.username);
+            let deleteBtn = safeId === currentUser.id ? '' : `<button class="btn btn-sm btn-danger" onclick="deleteUser(${safeId})"><i class="fas fa-trash"></i> Xóa</button>`;
             tbody.innerHTML += `
                 <tr>
-                    <td>${u.id}</td>
-                    <td>${u.username}</td>
+                    <td>${safeId}</td>
+                    <td>${safeUsername}</td>
                     <td>${badge}</td>
                     <td>${deleteBtn}</td>
                 </tr>
@@ -205,17 +221,20 @@ async function fetchAdminTemplates() {
         return;
     }
     data.data.forEach(t => {
-        const safeName = t.name.replace(/'/g, "\\'");
+        const safeId = Number(t.id);
+        const safeName = escapeHTML(t.name);
+        const safeFilename = escapeHTML(t.filename);
+        const encodedName = encodeURIComponent(t.name).replace(/'/g, '%27');
         tbody.innerHTML += `
             <tr>
-                <td>${t.id}</td>
-                <td><b>${t.name}</b></td>
-                <td>${t.filename}</td>
+                <td>${safeId}</td>
+                <td><b>${safeName}</b></td>
+                <td>${safeFilename}</td>
                 <td>
-                    <button class="btn btn-sm btn-outline-primary me-1" onclick="openConfigModal(${t.id}, '${safeName}')">
+                    <button class="btn btn-sm btn-outline-primary me-1" onclick="openConfigModal(${safeId}, decodeURIComponent('${encodedName}'))">
                         <i class="fas fa-cog"></i> Cấu hình
                     </button>
-                    <button class="btn btn-sm btn-outline-danger" onclick="deleteTemplate(${t.id}, '${safeName}')">
+                    <button class="btn btn-sm btn-outline-danger" onclick="deleteTemplate(${safeId}, decodeURIComponent('${encodedName}'))">
                         <i class="fas fa-trash"></i> Xóa
                     </button>
                 </td>
@@ -235,7 +254,7 @@ async function deleteTemplate(id, name) {
 async function uploadTemplate() {
     const fileInput = document.getElementById('newTemplateFile');
     if (!fileInput.files || fileInput.files.length === 0) {
-        return alert("Vui lòng chọn 1 file Excel mẫu (.xlsx)");
+        return alert("Vui lòng chọn 1 file Excel mẫu (.xlsx hoặc .xlsm)");
     }
     
     const formData = new FormData();
@@ -322,9 +341,16 @@ async function populateTemplateDropdown() {
         const select = document.getElementById('templateSelect');
         const container = document.getElementById('templateSelectContainer');
         if (select && container) {
-            select.innerHTML = '<option value="">-- Chọn Biểu mẫu --</option>';
+            select.replaceChildren();
+            const placeholder = document.createElement('option');
+            placeholder.value = '';
+            placeholder.textContent = '-- Chọn Biểu mẫu --';
+            select.appendChild(placeholder);
             data.data.forEach(t => {
-                select.innerHTML += `<option value="${t.id}">${t.name}</option>`;
+                const option = document.createElement('option');
+                option.value = Number(t.id);
+                option.textContent = t.name;
+                select.appendChild(option);
             });
             container.style.display = 'block';
             

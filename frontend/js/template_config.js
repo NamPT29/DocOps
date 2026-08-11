@@ -15,7 +15,24 @@ function initConfigModal() {
 
 async function openConfigModal(templateId, templateName) {
     initConfigModal();
-    currentConfigTemplateId = templateId;
+    const requestedTemplateId = Number(templateId);
+    currentConfigTemplateId = requestedTemplateId;
+    currentDictId = null;
+    const dictionaryTemplateName = document.getElementById('dictionaryTemplateName');
+    if (dictionaryTemplateName) dictionaryTemplateName.textContent = templateName;
+    const dictionaryEditor = document.getElementById('dictionaryItemForm');
+    if (dictionaryEditor) dictionaryEditor.style.display = 'none';
+    const currentDictionaryName = document.getElementById('currentDictionaryName');
+    if (currentDictionaryName) currentDictionaryName.textContent = 'Chưa chọn';
+    const dictionaryItemsBody = document.getElementById('dictionaryItemsTableBody');
+    if (dictionaryItemsBody) {
+        dictionaryItemsBody.innerHTML = '<tr><td colspan="3" class="text-center text-muted">Vui lòng chọn 1 Từ điển bên trái</td></tr>';
+    }
+    const dictionaryList = document.getElementById('dictionaryListGroup');
+    if (dictionaryList) {
+        dictionaryList.innerHTML = '<div class="text-center p-2 text-muted">Đang tải...</div>';
+    }
+    resetBulkDictionaryImport();
     
     document.getElementById('configModalTitle').innerText = templateName;
     document.getElementById('configJsonError').style.display = 'none';
@@ -36,10 +53,12 @@ async function openConfigModal(templateId, templateName) {
     }
 
     const [schemaRes, dictRes, configRes] = await Promise.all([
-        silentFetch(`/api/templates/${templateId}/schema`),
-        silentFetch(`/api/templates/${templateId}/dictionaries`),
-        silentFetch(`/api/templates/${templateId}/config`)
+        silentFetch(`/api/templates/${requestedTemplateId}/schema`),
+        silentFetch(`/api/templates/${requestedTemplateId}/dictionaries`),
+        silentFetch(`/api/templates/${requestedTemplateId}/config`)
     ]);
+
+    if (currentConfigTemplateId !== requestedTemplateId) return;
     
     if (!schemaRes) {
         alert('Không thể đọc cấu trúc file Excel của biểu mẫu này. Kiểm tra lại file.');
@@ -84,30 +103,35 @@ function populateColDropdowns() {
         if (!container) return;
         container.innerHTML = templateFields.map(f => `
             <div class="form-check">
-                <input class="form-check-input" type="checkbox" value="${f.col}" id="chk_${panelId}_${f.col}">
-                <label class="form-check-label small" for="chk_${panelId}_${f.col}">${f.label}</label>
+                <input class="form-check-input" type="checkbox" value="${Number(f.col)}" id="chk_${panelId}_${Number(f.col)}">
+                <label class="form-check-label small" for="chk_${panelId}_${Number(f.col)}">${escapeHTML(f.label)}</label>
             </div>
         `).join('');
     });
 
     // Single selects / col-dropdowns in other tabs
-    const optionsHtml = templateFields.map(f => `<option value="${f.col}">${f.label}</option>`).join('');
+    const optionsHtml = templateFields.map(f => `<option value="${Number(f.col)}">${escapeHTML(f.label)}</option>`).join('');
     const singles = document.querySelectorAll('.col-dropdown');
     singles.forEach(sel => {
         // Preserve the first placeholder option if it exists, else use generic
         const firstOpt = sel.querySelector('option[value=""]');
         const placeholder = firstOpt ? firstOpt.textContent : '-- Chọn --';
-        sel.innerHTML = `<option value="">${placeholder}</option>` + optionsHtml;
+        sel.innerHTML = `<option value="">${escapeHTML(placeholder)}</option>` + optionsHtml;
     });
 }
 
 function populateDictDropdowns() {
-    const optionsHtml = allDictionaries.map(d => `<option value="${d.name}">${d.name}${d.description && d.description !== d.name ? ' (' + d.description + ')' : ''}</option>`).join('');
+    const optionsHtml = allDictionaries.map(d => {
+        const description = d.description && d.description !== d.name
+            ? ` (${escapeHTML(d.description)})`
+            : '';
+        return `<option value="${escapeHTML(d.name)}">${escapeHTML(d.name)}${description}</option>`;
+    }).join('');
     const singles = document.querySelectorAll('.dict-dropdown');
     singles.forEach(sel => {
         const firstOpt = sel.querySelector('option[value=""]');
         const placeholder = firstOpt ? firstOpt.textContent : '-- Chọn Từ Điển --';
-        sel.innerHTML = `<option value="">${placeholder}</option>` + optionsHtml;
+        sel.innerHTML = `<option value="">${escapeHTML(placeholder)}</option>` + optionsHtml;
     });
 }
 
@@ -177,8 +201,8 @@ function renderVisualUiFromJSON() {
         obj.dropdown_rules.forEach((r, idx) => {
             dictBody.innerHTML += `
                 <tr>
-                    <td>${getFieldName(r.col)}</td>
-                    <td><span class="badge bg-success">${r.dictionary}</span></td>
+                    <td>${escapeHTML(getFieldName(r.col))}</td>
+                    <td><span class="badge bg-success">${escapeHTML(r.dictionary)}</span></td>
                     <td>${r.extract_mode === 'left' ? 'Bên trái' : r.extract_mode === 'right' ? 'Bên phải' : 'Cả hai'}</td>
                     <td><button class="btn btn-sm btn-danger py-0" onclick="removeRule('dropdown_rules', ${idx})"><i class="fas fa-times"></i></button></td>
                 </tr>
@@ -195,7 +219,7 @@ function renderVisualUiFromJSON() {
         obj.sync_cols.forEach((r, idx) => {
             syncBody.innerHTML += `
                 <li class="list-group-item d-flex justify-content-between align-items-center py-1">
-                    <span>${getFieldName(r.source)} <i class="fas fa-arrow-right text-muted mx-2"></i> ${getFieldName(r.target)}</span>
+                    <span>${escapeHTML(getFieldName(r.source))} <i class="fas fa-arrow-right text-muted mx-2"></i> ${escapeHTML(getFieldName(r.target))}</span>
                     <button class="btn btn-sm btn-outline-danger py-0 px-2" onclick="removeRule('sync_cols', ${idx})"><i class="fas fa-times"></i></button>
                 </li>
             `;
@@ -209,7 +233,7 @@ function renderVisualUiFromJSON() {
         obj.concat_rules.forEach((r, idx) => {
             concatBody.innerHTML += `
                 <li class="list-group-item d-flex justify-content-between align-items-center py-1">
-                    <span>${getFieldName(r.source_1)} <b class="text-warning">+</b> ${getFieldName(r.source_2)} <i class="fas fa-arrow-right text-muted mx-2"></i> <b>${getFieldName(r.target)}</b></span>
+                    <span>${escapeHTML(getFieldName(r.source_1))} <b class="text-warning">+</b> ${escapeHTML(getFieldName(r.source_2))} <i class="fas fa-arrow-right text-muted mx-2"></i> <b>${escapeHTML(getFieldName(r.target))}</b></span>
                     <button class="btn btn-sm btn-outline-danger py-0 px-2" onclick="removeRule('concat_rules', ${idx})"><i class="fas fa-times"></i></button>
                 </li>
             `;
@@ -400,14 +424,22 @@ async function fetchTemplateDictionaries() {
                 listGroup.innerHTML = '<div class="text-center p-3 text-muted">Chưa có từ điển nào</div>';
             } else {
                 res.data.forEach(d => {
-                    const btn = document.createElement('button');
-                    btn.className = `list-group-item list-group-item-action d-flex justify-content-between align-items-center ${currentDictId === d.id ? 'active' : ''}`;
-                    btn.innerHTML = `
-                        <span><strong>${d.name}</strong></span>
-                        <button class="btn btn-sm btn-outline-danger" onclick="deleteDictionary(${d.id}, event)"><i class="fas fa-trash"></i></button>
-                    `;
-                    btn.onclick = () => selectDictionary(d.id, d.name);
-                    listGroup.appendChild(btn);
+                    const safeId = Number(d.id);
+                    const row = document.createElement('div');
+                    row.className = `list-group-item list-group-item-action d-flex justify-content-between align-items-center ${currentDictId === safeId ? 'active' : ''}`;
+                    row.setAttribute('role', 'button');
+                    const label = document.createElement('strong');
+                    label.textContent = d.name;
+                    const deleteButton = document.createElement('button');
+                    deleteButton.type = 'button';
+                    deleteButton.className = 'btn btn-sm btn-outline-danger';
+                    deleteButton.setAttribute('aria-label', 'Xóa từ điển');
+                    deleteButton.innerHTML = '<i class="fas fa-trash"></i>';
+                    deleteButton.onclick = event => deleteDictionary(safeId, event);
+                    row.onclick = () => selectDictionary(safeId, d.name);
+                    row.appendChild(label);
+                    row.appendChild(deleteButton);
+                    listGroup.appendChild(row);
                 });
             }
         }
@@ -416,11 +448,12 @@ async function fetchTemplateDictionaries() {
 }
 
 function selectDictionary(id, name) {
-    currentDictId = id;
+    currentDictId = Number(id);
     const nameEl = document.getElementById('currentDictionaryName');
     const formEl = document.getElementById('dictionaryItemForm');
     if (nameEl) nameEl.innerText = name;
-    if (formEl) formEl.style.display = 'flex';
+    if (formEl) formEl.style.display = 'block';
+    resetBulkDictionaryImport();
     fetchTemplateDictionaries(); // Re-render to show active
     fetchDictionaryItems();
 }
@@ -469,12 +502,13 @@ async function fetchDictionaryItems() {
             return;
         }
         data.data.forEach(item => {
+            const safeId = Number(item.id);
             tbody.innerHTML += `
                 <tr>
-                    <td>${item.code || ''}</td>
-                    <td>${item.value}</td>
+                    <td>${escapeHTML(item.code || '')}</td>
+                    <td>${escapeHTML(item.value)}</td>
                     <td>
-                        <button class="btn btn-sm btn-outline-danger" onclick="deleteDictionaryItem(${item.id})"><i class="fas fa-trash"></i></button>
+                        <button class="btn btn-sm btn-outline-danger" onclick="deleteDictionaryItem(${safeId})"><i class="fas fa-trash"></i></button>
                     </td>
                 </tr>
             `;
@@ -499,6 +533,163 @@ async function createDictionaryItem() {
         document.getElementById('newDictItemValue').value = '';
         fetchDictionaryItems();
     }
+}
+
+function parseBulkDictionaryText(text) {
+    const lines = String(text || '').split(/\r?\n/);
+    const items = [];
+    const errors = [];
+    const seenCodes = new Map();
+
+    if (lines.length > 5000) {
+        return { items, errors: ['Mỗi lần chỉ được nhập tối đa 5.000 dòng.'] };
+    }
+
+    lines.forEach((rawLine, index) => {
+        const lineNumber = index + 1;
+        const line = rawLine.trim();
+        if (!line) return;
+
+        let code = '';
+        let value = '';
+        const match = line.match(/^(.*?)\s+-\s+(.+?)$/);
+        if (match) {
+            code = match[1].trim();
+            value = match[2].trim();
+        } else if (line.includes('\t')) {
+            const tabIndex = line.indexOf('\t');
+            code = line.slice(0, tabIndex).trim();
+            value = line.slice(tabIndex + 1).trim();
+        } else {
+            errors.push(`Dòng ${lineNumber}: cần định dạng "id - value".`);
+            return;
+        }
+
+        if (!code) {
+            errors.push(`Dòng ${lineNumber}: id không được để trống.`);
+            return;
+        }
+        if (!value) {
+            errors.push(`Dòng ${lineNumber}: value không được để trống.`);
+            return;
+        }
+        if (code.length > 50) {
+            errors.push(`Dòng ${lineNumber}: id vượt quá 50 ký tự.`);
+            return;
+        }
+        if (value.length > 255) {
+            errors.push(`Dòng ${lineNumber}: value vượt quá 255 ký tự.`);
+            return;
+        }
+
+        const normalizedCode = code.toLocaleLowerCase('vi');
+        if (seenCodes.has(normalizedCode)) {
+            errors.push(`Dòng ${lineNumber}: id "${code}" trùng với dòng ${seenCodes.get(normalizedCode)}.`);
+            return;
+        }
+        seenCodes.set(normalizedCode, lineNumber);
+        items.push({ code, value, lineNumber });
+    });
+
+    if (items.length === 0 && errors.length === 0) {
+        errors.push('Không có dữ liệu để nhập.');
+    }
+    return { items, errors };
+}
+
+function renderBulkDictionaryPreview(parsed) {
+    const tbody = document.getElementById('bulkDictionaryPreviewBody');
+    const status = document.getElementById('bulkDictionaryStatus');
+    const importButton = document.getElementById('bulkDictionaryImportButton');
+    if (!tbody || !status || !importButton) return;
+
+    tbody.replaceChildren();
+    parsed.items.slice(0, 200).forEach(item => {
+        const row = document.createElement('tr');
+        const lineCell = document.createElement('td');
+        const codeCell = document.createElement('td');
+        const valueCell = document.createElement('td');
+        lineCell.textContent = item.lineNumber;
+        codeCell.textContent = item.code;
+        valueCell.textContent = item.value;
+        row.appendChild(lineCell);
+        row.appendChild(codeCell);
+        row.appendChild(valueCell);
+        tbody.appendChild(row);
+    });
+
+    if (parsed.errors.length > 0) {
+        status.className = 'small text-danger mt-2';
+        status.textContent = parsed.errors.slice(0, 10).join(' ');
+        if (parsed.errors.length > 10) {
+            status.textContent += ` Và ${parsed.errors.length - 10} lỗi khác.`;
+        }
+        importButton.disabled = true;
+        return;
+    }
+
+    status.className = 'small text-success mt-2';
+    status.textContent = `Hợp lệ ${parsed.items.length} dòng`;
+    if (parsed.items.length > 200) {
+        status.textContent += ' (bảng xem trước hiển thị 200 dòng đầu).';
+    }
+    importButton.disabled = parsed.items.length === 0;
+}
+
+function previewBulkDictionaryItems() {
+    const textarea = document.getElementById('bulkDictionaryText');
+    const parsed = parseBulkDictionaryText(textarea ? textarea.value : '');
+    renderBulkDictionaryPreview(parsed);
+    return parsed;
+}
+
+function resetBulkDictionaryImport() {
+    const textarea = document.getElementById('bulkDictionaryText');
+    const status = document.getElementById('bulkDictionaryStatus');
+    const tbody = document.getElementById('bulkDictionaryPreviewBody');
+    const importButton = document.getElementById('bulkDictionaryImportButton');
+    if (textarea) textarea.value = '';
+    if (status) {
+        status.className = 'small text-muted mt-2';
+        status.textContent = 'Dán dữ liệu rồi nhấn Xem trước.';
+    }
+    if (tbody) tbody.replaceChildren();
+    if (importButton) importButton.disabled = true;
+}
+
+async function importBulkDictionaryItems() {
+    if (!currentConfigTemplateId || !currentDictId) return;
+    const textarea = document.getElementById('bulkDictionaryText');
+    const duplicateMode = document.getElementById('bulkDictionaryDuplicateMode');
+    const status = document.getElementById('bulkDictionaryStatus');
+    const parsed = previewBulkDictionaryItems();
+    if (parsed.errors.length > 0 || parsed.items.length === 0) return;
+
+    const data = await apiCall(
+        `/api/templates/${currentConfigTemplateId}/dictionaries/${currentDictId}/items/bulk`,
+        {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                text: textarea.value,
+                duplicate_mode: duplicateMode ? duplicateMode.value : 'skip',
+            }),
+        },
+        'Lỗi nhập hàng loạt từ điển'
+    );
+    if (!data) return;
+
+    const result = data.data;
+    if (status) {
+        status.className = 'small text-success mt-2';
+        status.textContent = `Đã thêm ${result.added}, cập nhật ${result.updated}, bỏ qua ${result.skipped}.`;
+    }
+    if (textarea) textarea.value = '';
+    const previewBody = document.getElementById('bulkDictionaryPreviewBody');
+    if (previewBody) previewBody.replaceChildren();
+    const importButton = document.getElementById('bulkDictionaryImportButton');
+    if (importButton) importButton.disabled = true;
+    fetchDictionaryItems();
 }
 
 async function deleteDictionaryItem(id) {

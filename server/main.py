@@ -1,16 +1,20 @@
 import os
-from fastapi import FastAPI
+from pathlib import Path
+from fastapi import FastAPI, HTTPException
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
+from dotenv import load_dotenv
 import uvicorn
+
+# Environment-backed settings must be available before database/auth modules import.
+load_dotenv()
 
 # Initialize database
 from server.database import Base, engine
 from server.models import Template, Dictionary, DictionaryItem
 from server.routers.auth import init_admin
 from server.database import SessionLocal
-import shutil
 
 Base.metadata.create_all(bind=engine)
 init_admin()
@@ -32,10 +36,15 @@ seed_default_template()
 
 app = FastAPI()
 
+cors_origins = [
+    origin.strip()
+    for origin in os.getenv("CORS_ORIGINS", "").split(",")
+    if origin.strip()
+]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
+    allow_origins=cors_origins,
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -51,9 +60,6 @@ app.include_router(processing.router)
 app.include_router(dictionaries.template_dict_router)
 app.include_router(dictionaries.router)
 
-# Load env
-from dotenv import load_dotenv
-load_dotenv()
 PDF_STORAGE_PATH = os.getenv("PDF_STORAGE_PATH", "uploads")
 os.makedirs(PDF_STORAGE_PATH, exist_ok=True)
 
@@ -63,7 +69,6 @@ os.makedirs("templates", exist_ok=True)
 
 # Mount static directories
 app.mount("/frontend", StaticFiles(directory="frontend"), name="frontend")
-app.mount("/uploads", StaticFiles(directory=PDF_STORAGE_PATH), name="uploads")
 
 @app.get("/")
 def serve_index():
@@ -71,7 +76,12 @@ def serve_index():
 
 @app.get("/{filename:path}")
 def serve_root_files(filename: str):
-    file_path = os.path.join("frontend", filename)
-    if os.path.exists(file_path):
+    frontend_dir = Path("frontend").resolve()
+    file_path = (frontend_dir / filename).resolve()
+    try:
+        file_path.relative_to(frontend_dir)
+    except ValueError:
+        raise HTTPException(status_code=404, detail="File not found")
+    if file_path.is_file():
         return FileResponse(file_path)
-    return {"status": "error", "message": "File not found"}
+    raise HTTPException(status_code=404, detail="File not found")

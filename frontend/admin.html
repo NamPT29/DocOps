@@ -168,7 +168,7 @@
                     <div class="row mb-3">
                         <div class="col-md-6">
                             <div class="input-group">
-                                <input type="file" id="newTemplateFile" class="form-control" accept=".xlsx">
+                                <input type="file" id="newTemplateFile" class="form-control" accept=".xlsx,.xlsm">
                                 <button class="btn btn-primary" onclick="uploadTemplate()">Tải mẫu lên</button>
                             </div>
                         </div>
@@ -343,17 +343,55 @@
                         </div>
                         <div class="col-md-7">
                             <div class="card shadow-sm mb-3">
-                                <div class="card-header bg-info text-white fw-bold"><i class="fas fa-list"></i> Nội dung: <span id="currentDictionaryName">Chưa chọn</span></div>
+                                <div class="card-header bg-info text-white fw-bold">
+                                    <i class="fas fa-list"></i> Nội dung: <span id="currentDictionaryName">Chưa chọn</span>
+                                    <div class="small fw-normal mt-1">Kho riêng của biểu mẫu: <span id="dictionaryTemplateName"></span></div>
+                                </div>
                                 <div class="card-body">
-                                    <div class="row g-1 mb-3" id="dictionaryItemForm" style="display: none;">
-                                        <div class="col-3">
-                                            <input type="text" id="newDictItemCode" class="form-control form-control-sm" placeholder="Mã (Code)">
+                                    <div id="dictionaryItemForm" style="display: none;">
+                                        <div class="row g-1 mb-3">
+                                            <div class="col-3">
+                                                <input type="text" id="newDictItemCode" class="form-control form-control-sm" placeholder="Mã (Code)">
+                                            </div>
+                                            <div class="col-7">
+                                                <input type="text" id="newDictItemValue" class="form-control form-control-sm" placeholder="Giá trị (Value)">
+                                            </div>
+                                            <div class="col-2">
+                                                <button class="btn btn-sm btn-success w-100" onclick="createDictionaryItem()">Thêm</button>
+                                            </div>
                                         </div>
-                                        <div class="col-7">
-                                            <input type="text" id="newDictItemValue" class="form-control form-control-sm" placeholder="Giá trị (Value)">
-                                        </div>
-                                        <div class="col-2">
-                                            <button class="btn btn-sm btn-success w-100" onclick="createDictionaryItem()">Thêm</button>
+
+                                        <div class="border rounded bg-light p-2 mb-3">
+                                            <label for="bulkDictionaryText" class="form-label fw-bold mb-1">
+                                                <i class="fas fa-paste"></i> Copy/Paste hàng loạt
+                                            </label>
+                                            <textarea id="bulkDictionaryText" class="form-control form-control-sm" rows="6" placeholder="01 - Kinh&#10;02 - Tày&#10;03 - Thái"></textarea>
+                                            <div class="form-text">Mỗi dòng theo định dạng <code>id - value</code>. Cũng hỗ trợ hai cột copy trực tiếp từ Excel.</div>
+                                            <div class="row g-2 mt-1">
+                                                <div class="col-md-5">
+                                                    <select id="bulkDictionaryDuplicateMode" class="form-select form-select-sm">
+                                                        <option value="skip">Bỏ qua mã đã tồn tại</option>
+                                                        <option value="update">Cập nhật giá trị của mã trùng</option>
+                                                    </select>
+                                                </div>
+                                                <div class="col-md-7 text-end">
+                                                    <button type="button" class="btn btn-sm btn-outline-primary" onclick="previewBulkDictionaryItems()">
+                                                        <i class="fas fa-search"></i> Xem trước
+                                                    </button>
+                                                    <button type="button" id="bulkDictionaryImportButton" class="btn btn-sm btn-primary" onclick="importBulkDictionaryItems()" disabled>
+                                                        <i class="fas fa-file-import"></i> Thêm hàng loạt
+                                                    </button>
+                                                </div>
+                                            </div>
+                                            <div id="bulkDictionaryStatus" class="small text-muted mt-2">Dán dữ liệu rồi nhấn Xem trước.</div>
+                                            <div class="table-responsive mt-2" style="max-height: 180px; overflow-y: auto;">
+                                                <table class="table table-sm table-bordered mb-0 bg-white">
+                                                    <thead class="table-light sticky-top">
+                                                        <tr><th style="width: 60px;">Dòng</th><th style="width: 130px;">ID</th><th>Value</th></tr>
+                                                    </thead>
+                                                    <tbody id="bulkDictionaryPreviewBody"></tbody>
+                                                </table>
+                                            </div>
                                         </div>
                                     </div>
                                     <div style="max-height: 400px; overflow-y: auto;">
@@ -486,12 +524,12 @@
 
     <!-- JS -->
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
-    <script src="auth.js?v=6.30"></script>
-    <script src="js/pdf_handler.js?v=6.30"></script>
-    <script src="js/form_renderer.js?v=6.30"></script>
-    <script src="js/submission.js?v=6.30"></script>
-    <script src="js/admin_panel.js?v=6.30"></script>
-    <script src="js/template_config.js?v=6.30"></script>
+    <script src="auth.js?v=7.0"></script>
+    <script src="js/pdf_handler.js?v=7.0"></script>
+    <script src="js/form_renderer.js?v=7.0"></script>
+    <script src="js/submission.js?v=7.0"></script>
+    <script src="js/admin_panel.js?v=7.0"></script>
+    <script src="js/template_config.js?v=7.1"></script>
     <script src="app.js?v=6.30"></script>
     <script>
         document.addEventListener("DOMContentLoaded", () => {

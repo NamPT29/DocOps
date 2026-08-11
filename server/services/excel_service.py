@@ -3,55 +3,67 @@ import os
 import json
 import shutil
 import openpyxl
+from copy import copy
 
-def load_dictionaries(excel_path):
-    """
-    Load dictionaries from the DM_* sheets to provide dropdown options.
-    """
+
+def _detect_excel_layout(excel_path):
+    """Return the worksheet and zero-based header rows used by a template."""
+    workbook = openpyxl.load_workbook(excel_path, read_only=True, data_only=True)
     try:
-        xl = pd.ExcelFile(excel_path)
-        sheets = [s for s in xl.sheet_names if s.startswith('DM_') or s.strip() == 'LoaiHanChe']
-    except Exception as e:
-        print(f"Error loading dictionaries from {excel_path}: {e}")
-        return {}
-        
-    dicts = {}
-    for s in sheets:
-        df = pd.read_excel(xl, sheet_name=s)
-        df = df.astype(str)  # Prevent fillna error on float64 columns
-        df.fillna('', inplace=True)
-        # We assume column 0 is code, column 1 is value
-        if len(df.columns) >= 2:
-            options = []
-            for _, row in df.iterrows():
-                code = str(row.iloc[0]).strip()
-                val = str(row.iloc[1]).strip()
-                if code.endswith('.0'): code = code[:-2] # clean float parses
-                if code and val:
-                    options.append(f"{code} - {val}")
-                elif val:
-                    options.append(val)
-            dicts[s] = options
-            
-    # Hardcode some known logical dropdowns based on HuongDan
-    dicts['Giới tính'] = ["1 - Nam", "0 - Nữ"]
-    dicts['HGD'] = ["1 - Hộ ông/bà", "0 - Ông/Bà"]
-    dicts['Người đại diện'] = ["1 - Có đại diện", "0 - Không đại diện"]
-    dicts['Là SD chung'] = ["1 - Sử dụng chung", "0 - Sử dụng riêng"]
-    
-    return dicts
+        data_sheet = next(
+            (
+                name
+                for name in workbook.sheetnames
+                if name.strip().lower() == 'data'
+                and workbook[name].sheet_state == 'visible'
+            ),
+            None,
+        )
+        sheet_name = data_sheet or next(
+            (sheet.title for sheet in workbook.worksheets if sheet.sheet_state == 'visible'),
+            workbook.sheetnames[0],
+        )
+    finally:
+        workbook.close()
+
+    preview = pd.read_excel(excel_path, sheet_name=sheet_name, header=None, nrows=50)
+    row_counts = preview.notna().sum(axis=1).astype(int).tolist()
+    candidates = [
+        index
+        for index in range(len(row_counts) - 1)
+        if row_counts[index] > 0
+        and row_counts[index + 1] > row_counts[index]
+        and (index == 0 or row_counts[index - 1] <= row_counts[index])
+    ]
+    if not candidates:
+        raise ValueError(f"Không nhận diện được các hàng tiêu đề trong sheet '{sheet_name}'.")
+
+    header_start = max(candidates, key=lambda index: row_counts[index + 1] - row_counts[index])
+    header_depth = 4 if data_sheet and header_start == 0 else 3
+    header_rows = list(
+        range(header_start, min(header_start + header_depth, len(row_counts)))
+    )
+    if len(header_rows) < 2:
+        raise ValueError(f"Sheet '{sheet_name}' không có đủ hàng tiêu đề.")
+    return sheet_name, header_rows
+
 
 def get_form_schema(excel_path, dicts=None, config=None):
     """
-    Reads the first 4 rows of the 'Data' sheet to construct a hierarchical form schema.
+    Detects the data worksheet and its header rows to construct a hierarchical form schema.
     Uses provided dicts or an empty dictionary.
     Optionally applies dynamic `config` (dict) to override hardcoded behaviors.
     """
     try:
-        df_head = pd.read_excel(excel_path, sheet_name='Data', header=[0, 1, 2, 3], nrows=0)
+        sheet_name, header_rows = _detect_excel_layout(excel_path)
+        df_head = pd.read_excel(
+            excel_path,
+            sheet_name=sheet_name,
+            header=header_rows,
+            nrows=0,
+        )
     except Exception as e:
-        print(f"Error reading 'Data' sheet from {excel_path}: {e}")
-        return []
+        raise ValueError(f"Không thể tự nhận diện biểu mẫu Excel: {e}") from e
     
     # Use dicts from DB if provided
     if dicts is None:
@@ -62,28 +74,27 @@ def get_form_schema(excel_path, dicts=None, config=None):
     category_fields = []
     
     for col_idx, col_tuple in enumerate(df_head.columns):
-        cat = str(col_tuple[0]).strip()
-        field1 = str(col_tuple[1]).strip()
-        field2 = str(col_tuple[2]).strip()
-        field3 = str(col_tuple[3]).strip()
+        levels = list(col_tuple) if isinstance(col_tuple, tuple) else [col_tuple]
+        levels = [str(value).strip() for value in levels]
+        levels = ["" if value.startswith('Unnamed:') else value for value in levels]
+        cat = levels[0] if levels else ""
+        field1 = levels[1] if len(levels) > 1 else ""
+        field2 = levels[2] if len(levels) > 2 else ""
+        field3 = levels[3] if len(levels) > 3 else ""
         
         # Skip 'Số TT' as user requested
         if 'số tt' in cat.lower() or 'số tt' in field1.lower():
             continue
         
-        if 'Unnamed:' in cat: cat = ""
-        if 'Unnamed:' in field1: field1 = ""
-        if 'Unnamed:' in field2: field2 = ""
-        if 'Unnamed:' in field3: field3 = ""
-        
-        if not cat and not field1 and not field2 and not field3:
+        if not any(levels):
             continue
-            
+
         col_1 = col_idx + 1
-        if (17 <= col_1 <= 22) or (34 <= col_1 <= 39) or (86 <= col_1 <= 89) or (90 <= col_1 <= 94) or (111 <= col_1 <= 168) or (179 <= col_1 <= 182):
+        is_legacy_data_sheet = sheet_name.strip().lower() == 'data'
+        if is_legacy_data_sheet and ((17 <= col_1 <= 22) or (34 <= col_1 <= 39) or (86 <= col_1 <= 89) or (90 <= col_1 <= 94) or (111 <= col_1 <= 168) or (179 <= col_1 <= 182)):
             label_parts = [p for p in [field2, field3] if p]
         else:
-            label_parts = [p for p in [field1, field2, field3] if p]
+            label_parts = [value for value in levels[1:] if value]
             
         label = " - ".join(label_parts) if label_parts else cat
         
@@ -114,24 +125,7 @@ def get_form_schema(excel_path, dicts=None, config=None):
                     field_type = "dropdown"
                     dict_name = rule.get("dictionary")
                     
-                    # Xử lý các từ điển đặc biệt được hardcode trong default config
-                    if dict_name == "DM_Hardcoded_SuDungChung":
-                        options = [
-                            "1 - Sử dụng chung (đồng sử dụng, 1 thửa có từ 2 Họ và Tên người sử dụng KHÁC nhau)",
-                            "0 - Sử dụng riêng"
-                        ]
-                    elif dict_name == "DM_Hardcoded_UyQuyen":
-                        options = [
-                            "1 - Có uỷ quyền",
-                            "0 - Không uỷ quyền"
-                        ]
-                    elif dict_name == "DM_Hardcoded_KyThay":
-                        options = [
-                            "1 - Ký thay",
-                            "0 - Không ký thay"
-                        ]
-                    else:
-                        options = dicts.get(dict_name, [])
+                    options = dicts.get(dict_name, [])
                         
                     extract_mode = rule.get("extract_mode", "none")
                     break
@@ -148,7 +142,7 @@ def get_form_schema(excel_path, dicts=None, config=None):
             if str(col_1) in seps:
                 field["separator_above"] = seps[str(col_1)]["title"]
                 field["group_end"] = int(seps[str(col_1)]["group_end"]) if seps[str(col_1)].get("group_end") else None
-        else:
+        elif is_legacy_data_sheet:
             # Hardcoded separators fallback
             if col_1 == 17:
                 field["separator_above"] = "Địa chỉ sử dụng"
@@ -322,16 +316,26 @@ def export_submissions_to_excel(template_file_path: str, submissions: list, down
     Exports a list of submissions into a provided Excel template.
     Returns the path to the exported file.
     """
+    sheet_name, header_rows = _detect_excel_layout(template_file_path)
     shutil.copy(template_file_path, download_path)
-    wb = openpyxl.load_workbook(download_path)
+    keep_vba = os.path.splitext(template_file_path)[1].lower() == '.xlsm'
+    wb = openpyxl.load_workbook(download_path, keep_vba=keep_vba)
     
-    sht_name = next((s for s in wb.sheetnames if s.strip().lower() == 'data'), None)
-    if not sht_name:
-        raise Exception("Không tìm thấy sheet 'Data' trong file mẫu.")
-    ws = wb[sht_name]
-    
-    if ws.max_row >= 5:
-        ws.delete_rows(5, ws.max_row - 4)
+    ws = wb[sheet_name]
+    data_start_row = max(header_rows) + 2
+
+    # Capture only the cell frames before deleting sample/old data. Exported
+    # values should use Excel's default font/fill/alignment/number format while
+    # retaining the border layout designed by the template. Header rows above
+    # data_start_row remain untouched.
+    template_column_count = ws.max_column
+    template_borders = [
+        copy(ws.cell(data_start_row, column).border)
+        for column in range(1, template_column_count + 1)
+    ]
+
+    if ws.max_row >= data_start_row:
+        ws.delete_rows(data_start_row, ws.max_row - data_start_row + 1)
     
     def process_value(idx, val):
         if val and " - " in str(val):
@@ -341,19 +345,26 @@ def export_submissions_to_excel(template_file_path: str, submissions: list, down
         
         return val
         
-    for sub in submissions:
+    for row_offset, sub in enumerate(submissions):
         data_dict = json.loads(sub.data_json)
-        new_row = [""] * (ws.max_column + 10)
-        
+        target_row = data_start_row + row_offset
+
+        for column, cell_border in enumerate(template_borders, start=1):
+            ws.cell(target_row, column).border = copy(cell_border)
+        target_dimension = ws.row_dimensions[target_row]
+        target_dimension.height = None
+        target_dimension.hidden = False
+        target_dimension.outlineLevel = 0
+        target_dimension.collapsed = False
+
         for key, value in data_dict.items():
             if key.startswith('col_'):
                 idx = int(key.split('_')[1])
-                # Đảm bảo list new_row đủ độ dài để chứa idx
-                if len(new_row) <= idx:
-                    new_row.extend([""] * (idx + 1 - len(new_row)))
-                new_row[idx] = process_value(idx, value)
-            
-        ws.append(new_row)
+                ws.cell(
+                    row=target_row,
+                    column=idx + 1,
+                    value=process_value(idx, value),
+                )
         
     wb.save(download_path)
     wb.close()

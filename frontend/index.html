@@ -88,7 +88,7 @@
                                         <label for="pdfUploadInput" class="form-label btn btn-outline-primary w-100 mb-0">
                                             + Tải tài liệu thủ công
                                         </label>
-                                        <input class="form-control d-none" type="file" id="pdfUploadInput" accept=".pdf,image/*" multiple>
+                                        <input class="form-control d-none" type="file" id="pdfUploadInput" accept=".pdf,.png,.jpg,.jpeg,.webp" multiple>
                                     </div>
                                     <div style="height: 80vh; overflow-y: auto;">
                                         <div class="list-group" id="fileQueueList">
@@ -101,7 +101,7 @@
                                 <div class="col-md-9" id="pdfViewerCol">
                                     <div class="border rounded bg-light d-flex align-items-center justify-content-center" id="pdfViewerContainer" style="height: 85vh; overflow: hidden;">
                                         <p class="text-muted text-center" id="pdfPlaceholder">Chưa có tài liệu nào được tải lên.<br>Vui lòng chọn tệp PDF hoặc hình ảnh ở cột bên trái.</p>
-                                        <iframe id="pdfIframe" style="width: 100%; height: 100%; display: none;" frameborder="0"></iframe>
+                                        <iframe id="pdfIframe" style="width: 100%; height: 100%; display: none;" frameborder="0" referrerpolicy="no-referrer"></iframe>
                                     </div>
                                 </div>
                             </div>
@@ -212,11 +212,11 @@
             }
         }
     </script>
-    <script src="auth.js?v=6.26"></script>
-    <script src="js/pdf_handler.js?v=6.26"></script>
-    <script src="js/form_renderer.js?v=6.26"></script>
-    <script src="js/submission.js?v=6.26"></script>
-    <script src="js/admin_panel.js?v=6.26"></script>
+    <script src="auth.js?v=7.0"></script>
+    <script src="js/pdf_handler.js?v=7.0"></script>
+    <script src="js/form_renderer.js?v=7.0"></script>
+    <script src="js/submission.js?v=7.0"></script>
+    <script src="js/admin_panel.js?v=7.0"></script>
     <script src="app.js?v=6.26"></script>
 </body>
 </html>
