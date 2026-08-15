@@ -1,14 +1,56 @@
 import os
+import logging
+import logging.handlers
 from pathlib import Path
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
 import uvicorn
 
 # Environment-backed settings must be available before database/auth modules import.
 load_dotenv()
+
+# ---------------------------------------------------------------------------
+# Logging configuration
+# ---------------------------------------------------------------------------
+LOG_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "logs")
+os.makedirs(LOG_DIR, exist_ok=True)
+
+# Root logger — captures all loggers (uvicorn, sqlalchemy, app routers, etc.)
+root_logger = logging.getLogger()
+root_logger.setLevel(logging.INFO)
+
+# Formatter with timestamp, level, module, and message
+_fmt = logging.Formatter(
+    "%(asctime)s | %(levelname)-8s | %(name)s:%(funcName)s:%(lineno)d | %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
+)
+
+# File handler — ERROR+ only, rotates at 5 MB, keeps 5 backups
+_error_file = logging.handlers.RotatingFileHandler(
+    os.path.join(LOG_DIR, "error.log"),
+    maxBytes=5 * 1024 * 1024,
+    backupCount=5,
+    encoding="utf-8",
+)
+_error_file.setLevel(logging.ERROR)
+_error_file.setFormatter(_fmt)
+root_logger.addHandler(_error_file)
+
+# File handler — ALL levels, for full audit trail
+_all_file = logging.handlers.RotatingFileHandler(
+    os.path.join(LOG_DIR, "app.log"),
+    maxBytes=10 * 1024 * 1024,
+    backupCount=3,
+    encoding="utf-8",
+)
+_all_file.setLevel(logging.INFO)
+_all_file.setFormatter(_fmt)
+root_logger.addHandler(_all_file)
+
+logger = logging.getLogger("server")
 
 # Initialize database
 from server.database import Base, engine
@@ -42,6 +84,24 @@ def seed_default_template():
 seed_default_template()
 
 app = FastAPI(title="Số hóa All in One")
+
+# ---------------------------------------------------------------------------
+# Global exception handler — catches any unhandled error in API endpoints
+# ---------------------------------------------------------------------------
+@app.exception_handler(Exception)
+async def _global_exception_handler(request: Request, exc: Exception):
+    if isinstance(exc, HTTPException):
+        raise exc
+    logger.error(
+        "Unhandled exception: %s %s",
+        request.method,
+        request.url.path,
+        exc_info=exc,
+    )
+    return JSONResponse(
+        status_code=500,
+        content={"status": "error", "message": "Lỗi máy chủ nội bộ"},
+    )
 
 cors_origins = [
     origin.strip()
@@ -92,3 +152,6 @@ def serve_root_files(filename: str):
     if file_path.is_file():
         return FileResponse(file_path)
     raise HTTPException(status_code=404, detail="File not found")
+
+logger.info("Server initialized successfully")
+

@@ -1,3 +1,4 @@
+import logging
 import os
 import uuid
 from fastapi import APIRouter, Depends, UploadFile, File, HTTPException
@@ -11,6 +12,7 @@ from server.services.upload_service import save_validated_upload
 from server.repositories import DictionaryRepository, TemplateRepository
 
 router = APIRouter(prefix="/api/templates", tags=["templates"])
+logger = logging.getLogger(__name__)
 
 TEMPLATES_DIR = "templates"
 os.makedirs(TEMPLATES_DIR, exist_ok=True)
@@ -99,6 +101,7 @@ async def get_template_schema(template_id: int, db: Session = Depends(get_db)):
         schema = await run_in_threadpool(get_form_schema, file_path, dicts, config)
         return {"status": "ok", "data": schema, "config": config}
     except Exception as e:
+        logger.exception("API error: %s", e)
         return {"status": "error", "message": str(e)}
 
 @router.get("/{template_id}/maxa_mapping")
@@ -111,6 +114,7 @@ async def get_template_maxa_mapping(template_id: int, db: Session = Depends(get_
         mapping = await run_in_threadpool(get_ma_xa_mapping, file_path)
         return {"status": "ok", "data": mapping}
     except Exception as e:
+        logger.exception("API error: %s", e)
         return {"status": "error", "message": str(e)}
 
 @router.get("/{template_id}/don_vi_do_mapping")
@@ -123,6 +127,7 @@ async def get_template_don_vi_do_mapping(template_id: int, db: Session = Depends
         mapping = await run_in_threadpool(get_don_vi_do_mapping, file_path)
         return {"status": "ok", "data": mapping}
     except Exception as e:
+        logger.exception("API error: %s", e)
         return {"status": "error", "message": str(e)}
 
 @router.get("/{template_id}/config")

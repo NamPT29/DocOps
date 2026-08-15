@@ -1,5 +1,6 @@
 import os
 import json
+import logging
 import uuid
 from typing import Literal, Optional
 from urllib.parse import quote
@@ -37,6 +38,7 @@ from server.services.submission_metadata_service import (
 from fastapi import HTTPException
 
 router = APIRouter(prefix="/api", tags=["submissions"])
+logger = logging.getLogger(__name__)
 PDF_STORAGE_PATH = os.getenv("PDF_STORAGE_PATH", "uploads")
 COMPLETED_WITHOUT_FOLDER = NO_FOLDER_SENTINEL
 
@@ -330,6 +332,7 @@ def api_submit(req: SubmitRequest, current_user: dict = Depends(get_input_user),
         db.rollback()
         raise
     except Exception as e:
+        logger.exception("API error: %s", e)
         db.rollback()
         return {"status": "error", "message": str(e)}
 
@@ -872,6 +875,7 @@ def api_update_submission(sub_id: int, req: SubmitRequest, current_user: dict = 
         db.rollback()
         raise
     except Exception as e:
+        logger.exception("API error: %s", e)
         db.rollback()
         return {"status": "error", "message": str(e)}
 
@@ -914,6 +918,7 @@ def api_update_review_content(
         db.rollback()
         raise
     except Exception as e:
+        logger.exception("API error: %s", e)
         db.rollback()
         return {"status": "error", "message": str(e)}
 
@@ -935,6 +940,7 @@ def api_toggle_check(sub_id: int, current_user: dict = Depends(get_reviewer_user
         db.rollback()
         raise
     except Exception as e:
+        logger.exception("API error: %s", e)
         db.rollback()
         return {"status": "error", "message": str(e)}
 
@@ -999,6 +1005,7 @@ def api_update_errors(sub_id: int, req: ErrorSectionsRequest, current_user: dict
         db.rollback()
         raise
     except Exception as e:
+        logger.exception("API error: %s", e)
         db.rollback()
         return {"status": "error", "message": str(e)}
 
@@ -1016,6 +1023,12 @@ def api_delete_submission(sub_id: int, current_user: dict = Depends(get_current_
             if sub.status != "draft":
                 raise HTTPException(status_code=409, detail="Nhân viên chỉ có thể xóa hồ sơ đang lưu nháp")
 
+        # Reset the linked document status so it reappears in the input queue
+        if sub.assigned_document_id:
+            document = DocumentRepository(db).get(sub.assigned_document_id)
+            if document and document.status == "completed":
+                document.status = "pending"
+
         ReviewRepository(db).delete_for_submissions([sub_id])
         submission_repository.delete(sub)
         db.commit()
@@ -1024,6 +1037,7 @@ def api_delete_submission(sub_id: int, current_user: dict = Depends(get_current_
         db.rollback()
         raise
     except Exception as e:
+        logger.exception("API error: %s", e)
         db.rollback()
         return {"status": "error", "message": str(e)}
 
@@ -1058,6 +1072,14 @@ def api_bulk_submission_action(
                     status_code=409,
                     detail="Chỉ có thể xóa hàng loạt các hồ sơ đang lưu nháp",
                 )
+            # Reset linked documents so they reappear in the input queue
+            doc_ids = [s.assigned_document_id for s in selected if s.assigned_document_id]
+            if doc_ids:
+                doc_repo = DocumentRepository(db)
+                for doc_id in doc_ids:
+                    document = doc_repo.get(doc_id)
+                    if document and document.status == "completed":
+                        document.status = "pending"
             ReviewRepository(db).delete_for_submissions(submission_ids)
             for submission in selected:
                 submission_repository.delete(submission)
@@ -1099,6 +1121,7 @@ def api_bulk_submission_action(
         db.rollback()
         raise
     except Exception as e:
+        logger.exception("API error: %s", e)
         db.rollback()
         return {"status": "error", "message": str(e)}
 
@@ -1131,6 +1154,7 @@ def api_copy_submission(sub_id: int, current_user: dict = Depends(get_current_us
     except HTTPException as e:
         raise e
     except Exception as e:
+        logger.exception("API error: %s", e)
         db.rollback()
         return {"status": "error", "message": str(e)}
 

@@ -145,7 +145,7 @@ async function openConfigModal(templateId, templateName) {
 
 function populateColDropdowns() {
     // Render checkboxes for the special-column panels
-    const checkboxPanels = ['roColSelect', 'dateColSelect', 'yearColSelect', 'hiddenColSelect'];
+    const checkboxPanels = ['roColSelect', 'dateColSelect', 'yearColSelect', 'hiddenColSelect', 'coverColSelect'];
     checkboxPanels.forEach(panelId => {
         const container = document.getElementById(panelId);
         if (!container) return;
@@ -202,7 +202,7 @@ function populateDictDropdowns() {
 
 function resetVisualUi() {
     // Reset checkboxes
-    ['roColSelect', 'dateColSelect', 'yearColSelect', 'hiddenColSelect'].forEach(id => {
+    ['roColSelect', 'dateColSelect', 'yearColSelect', 'hiddenColSelect', 'coverColSelect'].forEach(id => {
         const el = document.getElementById(id);
         if (el) el.querySelectorAll('input[type=checkbox]').forEach(cb => cb.checked = false);
     });
@@ -246,6 +246,7 @@ function buildConfigFromUI() {
     currentConfigObj.date_cols = getMultiVals('dateColSelect');
     currentConfigObj.year_cols = getMultiVals('yearColSelect');
     currentConfigObj.hidden_cols = getMultiVals('hiddenColSelect');
+    currentConfigObj.cover_cols = getMultiVals('coverColSelect');
     const placeholderContainer = document.getElementById('placeholderColSelect');
     currentConfigObj.placeholder_rules = placeholderContainer
         ? Array.from(placeholderContainer.querySelectorAll('.placeholder-rule-enabled:checked'))
@@ -292,6 +293,7 @@ function renderVisualUiFromJSON() {
     setMultiVals('dateColSelect', obj.date_cols);
     setMultiVals('yearColSelect', obj.year_cols);
     setMultiVals('hiddenColSelect', obj.hidden_cols);
+    setMultiVals('coverColSelect', obj.cover_cols);
     const placeholderContainer = document.getElementById('placeholderColSelect');
     if (placeholderContainer) {
         const rules = Array.isArray(obj.placeholder_rules) ? obj.placeholder_rules : [];

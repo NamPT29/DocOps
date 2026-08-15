@@ -102,8 +102,22 @@ async function submitData(targetStatus = 'draft') {
                 const dataTabBtn = document.getElementById('data-tab');
                 if (dataTabBtn) dataTabBtn.click();
             } else {
-                // Clear form and draft
-                inputs.forEach(input => input.value = '');
+                // Clear form and draft, but preserve cover columns
+                const coverCols = window.activeTemplateConfig && window.activeTemplateConfig.cover_cols ? window.activeTemplateConfig.cover_cols : [];
+                inputs.forEach(input => {
+                    const match = input.name ? input.name.match(/^col_(\d+)$/) : null;
+                    const colIndex = match ? parseInt(match[1], 10) + 1 : -1;
+                    if (!coverCols.includes(colIndex)) {
+                        input.value = '';
+                    }
+                });
+                // Clear autocomplete dropdown visuals
+                inputs.forEach(input => {
+                    if(input.nextElementSibling && input.nextElementSibling.classList.contains('autocomplete-items')) {
+                        input.nextElementSibling.innerHTML = '';
+                    }
+                });
+                
                 if (typeof removeCurrentFormDraft === 'function') removeCurrentFormDraft();
                 fetchSubmissions();
             }

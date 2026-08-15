@@ -490,12 +490,26 @@
                             </div>
                         </div>
                     </div>
-                    <div class="card shadow-sm mb-3 border-danger">
-                        <div class="card-header bg-danger text-white fw-bold"><i class="fas fa-eye-slash"></i> Ẩn ô nhập</div>
-                        <div class="card-body">
-                            <p class="text-muted small mb-2">Các ô được chọn sẽ không xuất hiện trên biểu mẫu nhập. Những ô còn hiển thị vẫn giữ nguyên vị trí cột khi xuất Excel.</p>
-                            <div id="hiddenColSelect" class="border rounded p-2 bg-white" style="max-height: 320px; overflow-y: auto;"></div>
-                            <button class="btn btn-sm btn-outline-danger w-100 mt-2" onclick="clearCheckboxes('hiddenColSelect')">Bỏ chọn tất cả</button>
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="card shadow-sm mb-3 border-primary">
+                                <div class="card-header bg-primary text-white fw-bold"><i class="fas fa-book"></i> Cột Thông Tin Bìa</div>
+                                <div class="card-body">
+                                    <p class="text-muted small mb-2">Các ô được chọn sẽ không bị xóa khi bấm Nộp hồ sơ mới. Dùng chung cho nhiều tài liệu.</p>
+                                    <div id="coverColSelect" class="border rounded p-2 bg-white" style="max-height: 320px; overflow-y: auto;"></div>
+                                    <button class="btn btn-sm btn-outline-danger w-100 mt-2" onclick="clearCheckboxes('coverColSelect')">Bỏ chọn tất cả</button>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="card shadow-sm mb-3 border-danger">
+                                <div class="card-header bg-danger text-white fw-bold"><i class="fas fa-eye-slash"></i> Ẩn ô nhập</div>
+                                <div class="card-body">
+                                    <p class="text-muted small mb-2">Các ô được chọn sẽ không xuất hiện trên biểu mẫu nhập. Những ô còn hiển thị vẫn giữ nguyên vị trí cột khi xuất Excel.</p>
+                                    <div id="hiddenColSelect" class="border rounded p-2 bg-white" style="max-height: 320px; overflow-y: auto;"></div>
+                                    <button class="btn btn-sm btn-outline-danger w-100 mt-2" onclick="clearCheckboxes('hiddenColSelect')">Bỏ chọn tất cả</button>
+                                </div>
+                            </div>
                         </div>
                     </div>
                     <div class="card shadow-sm mb-3 border-success">

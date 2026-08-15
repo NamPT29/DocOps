@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
+import logging
 import os
 
 from server.database import get_db
@@ -10,6 +11,7 @@ from server.routers.auth import get_current_user
 from server.repositories import TemplateRepository
 
 router = APIRouter(prefix="/api/templates", tags=["processing"])
+logger = logging.getLogger(__name__)
 
 class ProcessFieldRequest(BaseModel):
     field_name: str
@@ -62,4 +64,5 @@ def api_process_field(template_id: int, req: ProcessFieldRequest, current_user: 
     except HTTPException as e:
         raise e
     except Exception as e:
+        logger.exception("API error: %s", e)
         return {"status": "error", "message": str(e)}
