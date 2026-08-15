@@ -1,6 +1,5 @@
 from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Boolean, Text
-from datetime import datetime
-from server.database import Base
+from server.database import Base, get_utc_now
 
 class User(Base):
     __tablename__ = "users"
@@ -9,7 +8,7 @@ class User(Base):
     username = Column(String(255), unique=True, index=True, nullable=False)
     password = Column(String(255), nullable=False) # Scrypt hash; legacy values migrate on login
     role = Column(String(255), default="user") # 'admin' or 'user'
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=get_utc_now)
 
 
 class UserCapability(Base):
@@ -18,7 +17,7 @@ class UserCapability(Base):
     user_id = Column(Integer, ForeignKey("users.id"), primary_key=True)
     can_input = Column(Boolean, nullable=False, default=True)
     can_review = Column(Boolean, nullable=False, default=False)
-    updated_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    updated_at = Column(DateTime, nullable=False, default=get_utc_now)
 
 class Template(Base):
     __tablename__ = "templates"
@@ -26,7 +25,7 @@ class Template(Base):
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String(255), nullable=False)
     filename = Column(String(255), nullable=False)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=get_utc_now)
     is_active = Column(Boolean, default=True)
     config_json = Column(Text, nullable=True) # Lưu cấu hình JSON của biểu mẫu
 
@@ -39,14 +38,14 @@ class Task(Base):
     title = Column(String(255), nullable=False)
     target_quantity = Column(Integer, nullable=False)
     current_quantity = Column(Integer, default=0)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=get_utc_now)
     status = Column(String(255), default="in_progress") # in_progress, completed
 
 class Submission(Base):
     __tablename__ = "submissions"
 
     id = Column(Integer, primary_key=True, index=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=get_utc_now)
     
     # Store the dynamically filled JSON
     data_json = Column(Text, nullable=False)
@@ -85,14 +84,14 @@ class SubmissionReviewAssignment(Base):
         primary_key=True,
     )
     reviewer_user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
-    assigned_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    assigned_at = Column(DateTime, nullable=False, default=get_utc_now)
 
 class SubmissionViewPresence(Base):
     __tablename__ = 'submission_view_presence'
 
     submission_id = Column(Integer, ForeignKey('submissions.id'), primary_key=True)
     viewer_user_id = Column(Integer, ForeignKey('users.id'), nullable=False, index=True)
-    last_seen_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    last_seen_at = Column(DateTime, nullable=False, default=get_utc_now)
 
 class AssignedDocument(Base):
     __tablename__ = "assigned_documents"
@@ -103,7 +102,7 @@ class AssignedDocument(Base):
     assigned_to_user_id = Column(Integer, ForeignKey("users.id"), nullable=True) # null = unassigned
     template_id = Column(Integer, ForeignKey("templates.id"), nullable=True)
     status = Column(String(255), default="pending") # pending, assigned, completed
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=get_utc_now)
 
 
 class AssignedDocumentReviewAssignment(Base):
@@ -115,7 +114,7 @@ class AssignedDocumentReviewAssignment(Base):
         primary_key=True,
     )
     reviewer_user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
-    assigned_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    assigned_at = Column(DateTime, nullable=False, default=get_utc_now)
 
 class AssignedDocumentPath(Base):
     """Logical folder metadata for independently assigned documents."""
@@ -132,7 +131,7 @@ class AssignedDocumentPath(Base):
     )
     relative_path = Column(String(1024), nullable=False)
     upload_id = Column(String(100), nullable=False, unique=True, index=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=get_utc_now)
 
 class AssignedDocumentFolder(Base):
     __tablename__ = "assigned_document_folders"
@@ -146,7 +145,7 @@ class AssignedDocumentFolder(Base):
         index=True,
     )
     folder_group = Column(String(1024), nullable=False)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=get_utc_now)
 
 class ServerFolderImportJob(Base):
     __tablename__ = "server_folder_import_jobs"
@@ -165,7 +164,7 @@ class ServerFolderImportJob(Base):
     failed_files = Column(Integer, nullable=False, default=0)
     current_path = Column(String(1024), nullable=True)
     error_message = Column(String(1000), nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=get_utc_now)
     completed_at = Column(DateTime, nullable=True)
 
 

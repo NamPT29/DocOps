@@ -6,7 +6,7 @@ import os
 import secrets
 import uuid
 from urllib.parse import quote
-from server.database import get_db
+from server.database import get_db, get_utc_now
 from server.routers.auth import (
     get_admin_user,
     get_input_user,
@@ -437,7 +437,7 @@ def revoke_user_assignments(
                     result["reviews_blocked"] += 1
                     continue
                 assignment.reviewer_user_id = current_user["id"]
-                assignment.assigned_at = datetime.utcnow()
+                assignment.assigned_at = get_utc_now()
                 document = _find_submission_document(db, submission)
                 if document:
                     document_mapping = review_repository.get_document_assignment(
@@ -445,7 +445,7 @@ def revoke_user_assignments(
                     )
                     if document_mapping:
                         document_mapping.reviewer_user_id = current_user["id"]
-                        document_mapping.assigned_at = datetime.utcnow()
+                        document_mapping.assigned_at = get_utc_now()
                     else:
                         document_repository.add_review_assignment(
                             AssignedDocumentReviewAssignment(

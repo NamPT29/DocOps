@@ -3,7 +3,11 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import declarative_base, sessionmaker
 from dotenv import load_dotenv
 
-load_dotenv()
+from dotenv import load_dotenv
+from datetime import datetime, timezone
+
+def get_utc_now():
+    return datetime.now(timezone.utc).replace(tzinfo=None)
 
 # Use DATABASE_URL from .env or fallback to default
 SQLALCHEMY_DATABASE_URL = os.environ.get(

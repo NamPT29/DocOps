@@ -10,7 +10,7 @@ from pathlib import Path, PurePosixPath
 from fastapi import HTTPException, UploadFile
 from sqlalchemy.orm import Session
 
-from server.database import SessionLocal
+from server.database import SessionLocal, get_utc_now
 from server.models import (
     AssignedDocument,
     AssignedDocumentFolder,
@@ -271,7 +271,7 @@ def process_server_folder_import(
                     )
                     if review_assignment:
                         review_assignment.reviewer_user_id = reviewer_id
-                        review_assignment.assigned_at = datetime.utcnow()
+                        review_assignment.assigned_at = get_utc_now()
                     else:
                         document_repository.add_review_assignment(
                             AssignedDocumentReviewAssignment(
@@ -347,7 +347,7 @@ def process_server_folder_import(
         else:
             job.status = "completed" if job.failed_files == 0 else "completed_with_errors"
         job.current_path = None
-        job.completed_at = datetime.utcnow()
+        job.completed_at = get_utc_now()
         db.commit()
     except Exception as error:
         db.rollback()
@@ -356,7 +356,7 @@ def process_server_folder_import(
             detail = error.detail if isinstance(error, HTTPException) else str(error)
             job.status = "failed"
             job.error_message = detail[:1000]
-            job.completed_at = datetime.utcnow()
+            job.completed_at = get_utc_now()
             db.commit()
     finally:
         db.close()

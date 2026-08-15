@@ -3,6 +3,7 @@ from datetime import datetime, timedelta
 from sqlalchemy.orm import Session
 
 from server.models import SubmissionViewPresence, User
+from server.database import get_utc_now
 
 
 VIEWER_PRESENCE_TIMEOUT = timedelta(seconds=90)
@@ -13,7 +14,7 @@ class SubmissionViewRepository:
         self.session = session
 
     def claim(self, submission_id: int, user_id: int) -> SubmissionViewPresence:
-        now = datetime.utcnow()
+        now = get_utc_now()
         presence = self.session.get(SubmissionViewPresence, submission_id)
         if presence is None:
             presence = SubmissionViewPresence(
@@ -45,7 +46,7 @@ class SubmissionViewRepository:
     def active_map(self, submission_ids: list[int] | set[int]) -> dict[int, dict]:
         if not submission_ids:
             return {}
-        cutoff = datetime.utcnow() - VIEWER_PRESENCE_TIMEOUT
+        cutoff = get_utc_now() - VIEWER_PRESENCE_TIMEOUT
         rows = self.session.query(
             SubmissionViewPresence.submission_id,
             SubmissionViewPresence.viewer_user_id,
