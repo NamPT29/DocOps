@@ -8,7 +8,7 @@ from server.models import Template
 from server.routers.auth import get_admin_user
 from server.services.excel_service import get_form_schema, get_ma_xa_mapping, get_don_vi_do_mapping
 from server.services.upload_service import save_validated_upload
-from server.models import Dictionary, DictionaryItem
+from server.repositories import DictionaryRepository, TemplateRepository
 
 router = APIRouter(prefix="/api/templates", tags=["templates"])
 
@@ -27,11 +27,12 @@ def upload_template(file: UploadFile = File(...), current_user: dict = Depends(g
     installed = False
 
     try:
+        repository = TemplateRepository(db)
         save_validated_upload(file, staging_path, kind="excel")
-        template = db.query(Template).filter(Template.filename == filename).first()
+        template = repository.get_by_filename(filename)
         if not template:
             template = Template(name=filename, filename=filename)
-            db.add(template)
+            repository.add(template)
         else:
             template.is_active = True
         db.flush()
@@ -72,12 +73,12 @@ def upload_template(file: UploadFile = File(...), current_user: dict = Depends(g
 
 @router.get("")
 def get_templates(db: Session = Depends(get_db)):
-    templates = db.query(Template).filter(Template.is_active == True).all()
+    templates = TemplateRepository(db).list_active()
     return {"status": "ok", "data": [{"id": t.id, "name": t.name, "filename": t.filename} for t in templates]}
 
 @router.get("/{template_id}/schema")
 async def get_template_schema(template_id: int, db: Session = Depends(get_db)):
-    template = db.query(Template).filter(Template.id == template_id).first()
+    template = TemplateRepository(db).get(template_id)
     if not template:
         return {"status": "error", "message": "Template not found"}
     
@@ -93,17 +94,7 @@ async def get_template_schema(template_id: int, db: Session = Depends(get_db)):
             
     try:
         # Load dictionaries from DB
-        dicts = {}
-        all_dicts = db.query(Dictionary).filter(Dictionary.template_id == template_id).all()
-        for d in all_dicts:
-            items = db.query(DictionaryItem).filter(DictionaryItem.dictionary_id == d.id).order_by(DictionaryItem.id).all()
-            options = []
-            for item in items:
-                if item.code:
-                    options.append(f"{item.code} - {item.value}")
-                else:
-                    options.append(item.value)
-            dicts[d.name] = options
+        dicts = DictionaryRepository(db).option_map_for_template(template_id)
             
         schema = await run_in_threadpool(get_form_schema, file_path, dicts, config)
         return {"status": "ok", "data": schema, "config": config}
@@ -112,7 +103,7 @@ async def get_template_schema(template_id: int, db: Session = Depends(get_db)):
 
 @router.get("/{template_id}/maxa_mapping")
 async def get_template_maxa_mapping(template_id: int, db: Session = Depends(get_db)):
-    template = db.query(Template).filter(Template.id == template_id).first()
+    template = TemplateRepository(db).get(template_id)
     if not template:
         return {"status": "error", "message": "Template not found"}
     file_path = os.path.join(TEMPLATES_DIR, template.filename)
@@ -124,7 +115,7 @@ async def get_template_maxa_mapping(template_id: int, db: Session = Depends(get_
 
 @router.get("/{template_id}/don_vi_do_mapping")
 async def get_template_don_vi_do_mapping(template_id: int, db: Session = Depends(get_db)):
-    template = db.query(Template).filter(Template.id == template_id).first()
+    template = TemplateRepository(db).get(template_id)
     if not template:
         return {"status": "error", "message": "Template not found"}
     file_path = os.path.join(TEMPLATES_DIR, template.filename)
@@ -136,7 +127,7 @@ async def get_template_don_vi_do_mapping(template_id: int, db: Session = Depends
 
 @router.get("/{template_id}/config")
 def get_template_config(template_id: int, db: Session = Depends(get_db)):
-    template = db.query(Template).filter(Template.id == template_id).first()
+    template = TemplateRepository(db).get(template_id)
     if not template:
         raise HTTPException(status_code=404, detail="Template not found")
     
@@ -152,7 +143,7 @@ def get_template_config(template_id: int, db: Session = Depends(get_db)):
 
 @router.post("/{template_id}/config")
 def save_template_config(template_id: int, data: dict, current_user: dict = Depends(get_admin_user), db: Session = Depends(get_db)):
-    template = db.query(Template).filter(Template.id == template_id).first()
+    template = TemplateRepository(db).get(template_id)
     if not template:
         raise HTTPException(status_code=404, detail="Template not found")
         
@@ -164,7 +155,7 @@ def save_template_config(template_id: int, data: dict, current_user: dict = Depe
 
 @router.delete("/{template_id}")
 def delete_template(template_id: int, current_user: dict = Depends(get_admin_user), db: Session = Depends(get_db)):
-    template = db.query(Template).filter(Template.id == template_id).first()
+    template = TemplateRepository(db).get(template_id)
     if not template:
         raise HTTPException(status_code=404, detail="Template not found")
     # Soft-delete: mark inactive instead of actual removal to preserve references

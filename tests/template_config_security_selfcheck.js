@@ -54,7 +54,7 @@ async function checkAuthTemplateRendering() {
 }
 
 async function checkTemplateConfigRendering() {
-    const controls = ['roColSelect', 'dateColSelect', 'yearColSelect'];
+    const controls = ['roColSelect', 'dateColSelect', 'yearColSelect', 'hiddenColSelect', 'placeholderColSelect'];
     const elements = Object.fromEntries(controls.map(id => [id, {
         innerHTML: '',
         querySelectorAll() { return []; },
@@ -102,6 +102,8 @@ async function checkTemplateConfigRendering() {
     `, sandbox);
 
     assert(!elements.roColSelect.innerHTML.includes('<img src=x'));
+    assert(!elements.hiddenColSelect.innerHTML.includes('<img src=x'));
+    assert(!elements.placeholderColSelect.innerHTML.includes('<img src=x'));
     assert(!colSelect.innerHTML.includes('<img src=x'));
     assert(!dictSelect.innerHTML.includes('<script>'));
     assert(!elements.dictRulesBody.innerHTML.includes('<img src=x>'));

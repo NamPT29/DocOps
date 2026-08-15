@@ -1,6 +1,61 @@
 let currentUser = null;
 let currentToken = null;
 
+function currentUserCanInput() {
+    if (!currentUser) return false;
+    return currentUser.role === 'admin' || currentUser.can_input === true;
+}
+
+function currentUserCanReview() {
+    if (!currentUser) return false;
+    return currentUser.role === 'admin' || currentUser.can_review === true;
+}
+
+function configureCapabilityUI() {
+    const canInput = currentUserCanInput();
+    const canReview = currentUserCanReview();
+    const hasCheckId = new URLSearchParams(window.location.search).has('check_id');
+    const inputTabItem = document.getElementById('inputTabItem');
+    const dataTabItem = document.getElementById('dataTabItem');
+    const reviewTabItem = document.getElementById('reviewTabItem');
+    const employeeTabs = document.getElementById('employeeTabs');
+    const noAssignmentNotice = document.getElementById('noAssignmentNotice');
+    const formPane = document.getElementById('form-pane');
+    const dataPane = document.getElementById('data-pane');
+    const hasAssignment = canInput || canReview;
+
+    if (inputTabItem) inputTabItem.classList.toggle('d-none', !canInput);
+    if (dataTabItem) dataTabItem.classList.toggle('d-none', !canInput);
+    if (reviewTabItem) reviewTabItem.classList.toggle('d-none', !canReview);
+    if (employeeTabs) employeeTabs.classList.toggle('d-none', !hasAssignment && !hasCheckId);
+    if (noAssignmentNotice) {
+        noAssignmentNotice.classList.toggle('d-none', hasAssignment || hasCheckId);
+    }
+    if (canReview && !hasCheckId && window.location.hash === '#review') {
+        const reviewTab = document.getElementById('employee-review-tab');
+        if (reviewTab) reviewTab.click();
+    } else if (!canInput && canReview && !hasCheckId) {
+        if (formPane) formPane.classList.remove('show', 'active');
+        if (dataPane) dataPane.classList.remove('show', 'active');
+        const reviewTab = document.getElementById('employee-review-tab');
+        if (reviewTab) reviewTab.click();
+    } else if (!hasAssignment && !hasCheckId) {
+        document.querySelectorAll('#appTabsContent > .tab-pane').forEach(pane => {
+            pane.classList.remove('show', 'active');
+        });
+    }
+}
+
+async function refreshCurrentUserProfile() {
+    const data = await apiCall('/api/me', { cache: 'no-store' }, 'Không thể tải quyền được phân');
+    if (!data || !data.user) return false;
+    currentUser = data.user;
+    localStorage.setItem('user', JSON.stringify(currentUser));
+    const userNameText = document.getElementById('userNameText');
+    if (userNameText) userNameText.innerText = currentUser.username;
+    return true;
+}
+
 function checkAuth() {
     const token = localStorage.getItem('token');
     const userStr = localStorage.getItem('user');
@@ -27,12 +82,22 @@ function checkAuth() {
 }
 
 async function handlePostAuthInit() {
-    if (document.getElementById('templateSelectContainer')) {
+    if (!(await refreshCurrentUserProfile())) return;
+    configureCapabilityUI();
+    const hasCheckId = new URLSearchParams(window.location.search).has('check_id');
+    if (
+        document.getElementById('templateSelectContainer')
+        && (currentUserCanInput() || hasCheckId)
+    ) {
         await populateTemplateDropdown();
     }
     
-    if (typeof initApp === 'function') {
+    if (typeof initApp === 'function' && (currentUserCanInput() || hasCheckId)) {
         initApp();
+    }
+
+    if (!currentUserCanInput() && currentUserCanReview() && !hasCheckId) {
+        await fetchReviewSubmissions();
     }
 }
 
@@ -102,6 +167,23 @@ async function authFetch(url, options = {}) {
 
 const apiCache = {};
 
+function formatApiErrorDetail(detail) {
+    if (Array.isArray(detail)) {
+        return detail.map(error => {
+            if (typeof error === 'string') return error;
+            if (!error || typeof error !== 'object') return String(error);
+
+            const field = Array.isArray(error.loc)
+                ? error.loc.filter(part => part !== 'body').join('.')
+                : '';
+            const message = error.msg || JSON.stringify(error);
+            return field ? `${field}: ${message}` : message;
+        }).join('\n');
+    }
+    if (detail && typeof detail === 'object') return detail.msg || JSON.stringify(detail);
+    return detail || 'Lỗi không xác định';
+}
+
 async function apiCall(url, options = {}, errorMessage = "Lỗi kết nối máy chủ") {
     try {
         // Simple caching for specific static GET requests
@@ -125,7 +207,7 @@ async function apiCall(url, options = {}, errorMessage = "Lỗi kết nối máy
             }
             return data;
         } else {
-            alert('Lỗi: ' + (data.message || data.detail || 'Lỗi không xác định'));
+            alert('Lỗi: ' + formatApiErrorDetail(data.message || data.detail));
             return null;
         }
     } catch (err) {
@@ -147,15 +229,19 @@ async function fetchAdminData() {
     if (tbody) {
         tbody.innerHTML = '';
         data.data.forEach(u => {
-            let badge = u.role === 'admin' ? '<span class="badge bg-danger">Admin</span>' : '<span class="badge bg-primary">Nhân viên</span>';
             const safeId = Number(u.id);
             const safeUsername = escapeHTML(u.username);
+            const badges = [];
+            if (u.role === 'admin') badges.push('<span class="badge bg-danger">Admin</span>');
+            if (u.can_input) badges.push('<span class="badge bg-primary">Nhập liệu</span>');
+            if (u.can_review) badges.push('<span class="badge bg-warning text-dark">Kiểm tra</span>');
+            if (badges.length === 0) badges.push('<span class="badge bg-secondary">Chưa phân công</span>');
             let deleteBtn = safeId === currentUser.id ? '' : `<button class="btn btn-sm btn-danger" onclick="deleteUser(${safeId})"><i class="fas fa-trash"></i> Xóa</button>`;
             tbody.innerHTML += `
                 <tr>
                     <td>${safeId}</td>
                     <td>${safeUsername}</td>
-                    <td>${badge}</td>
+                    <td><div class="d-flex flex-wrap gap-1">${badges.join('')}</div></td>
                     <td>${deleteBtn}</td>
                 </tr>
             `;
@@ -163,26 +249,218 @@ async function fetchAdminData() {
     }
 }
 
+function invalidateUsersCache() {
+    delete apiCache['/api/users'];
+}
+
 async function deleteUser(userId) {
     if(!confirm("Bạn có chắc chắn muốn xóa tài khoản này? Toàn bộ tài liệu chưa xử lý của họ sẽ trở về trạng thái trống.")) return;
     
     const data = await apiCall(`/api/users/${userId}`, { method: 'DELETE' });
     if (data) {
+        invalidateUsersCache();
         alert('Đã xóa thành công!');
         fetchAdminData();
         if (typeof fetchDocumentPool === 'function') fetchDocumentPool();
     }
 }
 
+function getVietnamToday() {
+    const parts = new Intl.DateTimeFormat('en', {
+        timeZone: 'Asia/Ho_Chi_Minh',
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+    }).formatToParts(new Date());
+    const values = Object.fromEntries(parts.map(part => [part.type, part.value]));
+    return `${values.year}-${values.month}-${values.day}`;
+}
+
+function formatDashboardCalendarDate(date) {
+    const year = date.getUTCFullYear();
+    const month = String(date.getUTCMonth() + 1).padStart(2, '0');
+    const day = String(date.getUTCDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+}
+
+function parseDashboardCalendarDate(value) {
+    const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(value || ''));
+    if (!match) return null;
+    const date = new Date(Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3])));
+    return formatDashboardCalendarDate(date) === value ? date : null;
+}
+
+function getDashboardPeriodRange(period, referenceDate) {
+    const reference = parseDashboardCalendarDate(referenceDate)
+        || parseDashboardCalendarDate(getVietnamToday());
+    const start = new Date(reference.getTime());
+    const endExclusive = new Date(reference.getTime());
+
+    if (period === 'week') {
+        const daysFromMonday = (start.getUTCDay() + 6) % 7;
+        start.setUTCDate(start.getUTCDate() - daysFromMonday);
+        endExclusive.setTime(start.getTime());
+        endExclusive.setUTCDate(endExclusive.getUTCDate() + 7);
+    } else if (period === 'month') {
+        start.setUTCDate(1);
+        endExclusive.setUTCFullYear(start.getUTCFullYear(), start.getUTCMonth() + 1, 1);
+    } else {
+        endExclusive.setUTCDate(endExclusive.getUTCDate() + 1);
+    }
+
+    const startDate = formatDashboardCalendarDate(start);
+    const endDateValue = new Date(endExclusive.getTime());
+    endDateValue.setUTCDate(endDateValue.getUTCDate() - 1);
+    const endDate = formatDashboardCalendarDate(endDateValue);
+    const startBoundary = new Date(`${startDate}T00:00:00+07:00`);
+    const endBoundary = new Date(`${formatDashboardCalendarDate(endExclusive)}T00:00:00+07:00`);
+    endBoundary.setMilliseconds(endBoundary.getMilliseconds() - 1);
+
+    return {
+        startDate,
+        endDate,
+        startUtc: startBoundary.toISOString().replace('Z', ''),
+        endUtc: endBoundary.toISOString().replace('Z', ''),
+    };
+}
+
+function getDashboardCustomRange(startDate, endDate) {
+    const start = parseDashboardLocalDateTime(startDate);
+    const end = parseDashboardLocalDateTime(endDate);
+    if (!start || !end || start.boundary.getTime() > end.boundary.getTime()) return null;
+
+    return {
+        startDateTime: start.value,
+        endDateTime: end.value,
+        startUtc: start.boundary.toISOString().replace('Z', ''),
+        endUtc: end.boundary.toISOString().replace('Z', ''),
+    };
+}
+
+function parseDashboardLocalDateTime(value) {
+    const match = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})$/.exec(String(value || ''));
+    if (!match) return null;
+
+    const [, year, month, day, hour, minute] = match;
+    const calendarDate = new Date(Date.UTC(Number(year), Number(month) - 1, Number(day)));
+    if (
+        formatDashboardCalendarDate(calendarDate) !== `${year}-${month}-${day}`
+        || Number(hour) > 23
+        || Number(minute) > 59
+    ) return null;
+
+    const normalized = `${year}-${month}-${day}T${hour}:${minute}`;
+    const boundary = new Date(`${normalized}:00+07:00`);
+    if (Number.isNaN(boundary.getTime())) return null;
+    return { value: normalized, boundary };
+}
+
+function getVietnamNowLocal() {
+    const parts = new Intl.DateTimeFormat('en', {
+        timeZone: 'Asia/Ho_Chi_Minh',
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        hourCycle: 'h23',
+    }).formatToParts(new Date());
+    const values = Object.fromEntries(parts.map(part => [part.type, part.value]));
+    return `${values.year}-${values.month}-${values.day}T${values.hour}:${values.minute}`;
+}
+
+function formatDashboardDateLabel(value) {
+    const [year, month, day] = value.split('-');
+    return `${day}/${month}/${year}`;
+}
+
+function formatDashboardDateTimeLabel(value) {
+    const [date, time] = value.split('T');
+    return `${time} ${formatDashboardDateLabel(date)}`;
+}
+
 async function fetchDashboardStats() {
-    if (currentUser.role !== 'admin') return;
-    
-    const data = await apiCall('/api/submissions');
+    if (!currentUser || currentUser.role !== 'admin') return;
+
+    const periodFilter = document.getElementById('dashboardPeriodFilter');
+    const referenceInput = document.getElementById('dashboardReferenceDate');
+    const referenceGroup = document.getElementById('dashboardReferenceDateGroup');
+    const dateRangeFields = document.getElementById('dashboardDateRangeFields');
+    const startInput = document.getElementById('dashboardStartDate');
+    const endInput = document.getElementById('dashboardEndDate');
+    const periodCount = document.getElementById('dashPeriodDocs');
+    const periodTitle = document.getElementById('dashPeriodTitle');
+    const periodRange = document.getElementById('dashPeriodRange');
+    let range = null;
+    let periodRequest = Promise.resolve(null);
+
+    if (periodFilter && periodCount) {
+        const today = getVietnamToday();
+        const period = ['day', 'week', 'month', 'range'].includes(periodFilter.value)
+            ? periodFilter.value
+            : 'day';
+        const isCustomRange = period === 'range';
+        if (referenceGroup) referenceGroup.classList.toggle('d-none', isCustomRange);
+        if (dateRangeFields) dateRangeFields.classList.toggle('d-none', !isCustomRange);
+
+        if (referenceInput) {
+            if (!referenceInput.value) referenceInput.value = today;
+            referenceInput.max = today;
+        }
+        if (startInput && endInput) {
+            const now = getVietnamNowLocal();
+            if (!endInput.value) endInput.value = now;
+            if (!startInput.value) {
+                startInput.value = `${getDashboardPeriodRange('month', today).startDate}T00:00`;
+            }
+            startInput.max = endInput.value || now;
+            endInput.min = startInput.value || '';
+            endInput.max = now;
+        }
+
+        range = isCustomRange
+            ? getDashboardCustomRange(startInput && startInput.value, endInput && endInput.value)
+            : getDashboardPeriodRange(period, referenceInput && referenceInput.value);
+        const labels = {
+            day: 'Hồ sơ nhập trong ngày',
+            week: 'Hồ sơ nhập trong tuần',
+            month: 'Hồ sơ nhập trong tháng',
+            range: 'Hồ sơ nhập từ ngày đến ngày',
+        };
+        if (periodTitle) periodTitle.textContent = labels[period];
+        if (periodRange) {
+            periodRange.textContent = range
+                ? (isCustomRange
+                    ? `${formatDashboardDateTimeLabel(range.startDateTime)} – ${formatDashboardDateTimeLabel(range.endDateTime)}`
+                    : `${formatDashboardDateLabel(range.startDate)} – ${formatDashboardDateLabel(range.endDate)}`)
+                : 'Khoảng ngày không hợp lệ';
+        }
+        if (range) {
+            periodCount.innerText = '...';
+            const params = new URLSearchParams({
+                page: '1',
+                page_size: '1',
+                start_date: range.startUtc,
+                end_date: range.endUtc,
+            });
+            periodRequest = apiCall(`/api/submissions?${params.toString()}`);
+        } else {
+            periodCount.innerText = '—';
+        }
+    }
+
+    const [data, periodData] = await Promise.all([
+        apiCall('/api/submissions'),
+        periodRequest,
+    ]);
     if (data) {
         const el = document.getElementById('dashTotalDocs');
         if (el) {
-            el.innerText = data.data.length;
+            el.innerText = data.pagination.total;
         }
+    }
+    if (periodCount && periodData) {
+        periodCount.innerText = periodData.pagination.total;
     }
     
     // Also load templates dropdown so export/filter works
@@ -276,14 +554,18 @@ async function createUser() {
     const u = document.getElementById('newUsername').value.trim();
     const p = document.getElementById('newPassword').value.trim();
     if (!u || !p) return alert("Vui lòng nhập tên và mật khẩu");
-    
+    if (p.length < 8) return alert("Mật khẩu phải có ít nhất 8 ký tự");
     const data = await apiCall('/api/users', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({username: u, password: p})
+        body: JSON.stringify({
+            username: u,
+            password: p,
+        })
     });
     
     if (data) {
+        invalidateUsersCache();
         alert("Tạo tài khoản thành công!");
         document.getElementById('newUsername').value = '';
         document.getElementById('newPassword').value = '';
@@ -296,15 +578,27 @@ async function createUser() {
 async function exportExcelByTemplate() {
     const tid = document.getElementById('filterTemplateId').value;
     if (!tid) return alert("Vui lòng chọn 1 biểu mẫu ở ô bên cạnh để xuất dữ liệu!");
+    const folderPath = typeof activeCompletedFolderPath !== 'undefined'
+        ? activeCompletedFolderPath
+        : null;
+    if (!folderPath) return alert("Vui lòng chọn 1 folder hồ sơ hoàn chỉnh để xuất dữ liệu!");
+    const params = new URLSearchParams({
+        template_id: tid,
+        folder_path: folderPath,
+    });
+    const startDate = document.getElementById('filterStartDate');
+    const endDate = document.getElementById('filterEndDate');
+    if (startDate && startDate.value) params.set('start_date', startDate.value);
+    if (endDate && endDate.value) params.set('end_date', endDate.value);
     
     // We can do a fetch but since it's downloading a file, we can just redirect to the download URL
     // since the API is protected by tokens, it's better to fetch and create a blob URL
     try {
-        const res = await authFetch(`/api/export?template_id=${tid}`);
+        const res = await authFetch(`/api/export?${params.toString()}`);
         if (!res) return;
         if (!res.ok) {
             const data = await res.json();
-            return alert("Lỗi: " + data.message);
+            return alert("Lỗi: " + formatApiErrorDetail(data.detail || data.message));
         }
         
         // Get filename from header

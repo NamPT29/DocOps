@@ -148,6 +148,31 @@ def test_export_uses_detected_sheet_and_data_start(mocker):
     worksheet.delete_rows.assert_called_once_with(6, 1)
 
 
+def test_export_keeps_original_excel_columns_when_an_input_column_is_absent(tmp_path):
+    workbook = Workbook()
+    worksheet = workbook.active
+    worksheet.title = 'Data'
+    worksheet.append(['Nhóm', None, None])
+    worksheet.append(['Cột A', 'Cột ẩn', 'Cột C'])
+    worksheet.append(['Nhãn A', 'Nhãn ẩn', 'Nhãn C'])
+    worksheet.append(['Chi tiết A', 'Chi tiết ẩn', 'Chi tiết C'])
+    template_path = tmp_path / 'hidden-column-template.xlsx'
+    output_path = tmp_path / 'hidden-column-output.xlsx'
+    workbook.save(template_path)
+
+    submissions = [MagicMock(data_json='{"col_0":"Giá trị A","col_2":"Giá trị C"}')]
+    export_submissions_to_excel(template_path, submissions, output_path)
+
+    exported = openpyxl.load_workbook(output_path)
+    exported_sheet = exported['Data']
+    assert [exported_sheet.cell(5, column).value for column in range(1, 4)] == [
+        'Giá trị A',
+        None,
+        'Giá trị C',
+    ]
+    exported.close()
+
+
 def test_export_copies_template_cell_styles_to_every_output_row(tmp_path):
     workbook = Workbook()
     worksheet = workbook.active

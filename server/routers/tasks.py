@@ -1,9 +1,10 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from server.database import get_db
-from server.models import Task, User, Template
+from server.models import Task
 from server.routers.auth import get_current_user, get_admin_user
+from server.repositories import TaskRepository, TemplateRepository
 
 router = APIRouter(prefix="/api/tasks", tags=["tasks"])
 
@@ -17,31 +18,28 @@ class CreateTaskRequest(BaseModel):
 def api_create_task(req: CreateTaskRequest, current_user: dict = Depends(get_admin_user), db: Session = Depends(get_db)):
     
     # Check if template exists
-    template = db.query(Template).filter(Template.id == req.template_id).first()
+    template = TemplateRepository(db).get(req.template_id)
     if not template:
         return {"status": "error", "message": "Template not found"}
         
     task = Task(user_id=req.user_id, template_id=req.template_id, title=req.title, target_quantity=req.target_quantity)
-    db.add(task)
+    TaskRepository(db).add(task)
     db.commit()
     return {"status": "ok"}
 
 @router.get("")
 def api_get_tasks(current_user: dict = Depends(get_current_user), db: Session = Depends(get_db)):
-    if current_user["role"] == "admin":
-        tasks = db.query(Task).order_by(Task.created_at.desc()).all()
-    else:
-        tasks = db.query(Task).filter(Task.user_id == current_user["id"]).order_by(Task.created_at.desc()).all()
+    rows = TaskRepository(db).list_with_names(
+        None if current_user["role"] == "admin" else current_user["id"]
+    )
     
     res = []
-    for t in tasks:
-        user = db.query(User).filter(User.id == t.user_id).first()
-        template = db.query(Template).filter(Template.id == t.template_id).first()
+    for t, username, template_name in rows:
         res.append({
             "id": t.id,
-            "username": user.username if user else "Unknown",
-            "template_id": template.id if template else None,
-            "template_name": template.name if template else "Unknown",
+            "username": username or "Unknown",
+            "template_id": t.template_id if template_name is not None else None,
+            "template_name": template_name or "Unknown",
             "title": t.title,
             "target_quantity": t.target_quantity,
             "current_quantity": t.current_quantity,

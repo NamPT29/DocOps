@@ -39,6 +39,15 @@ function applyConcatRule(rule) {
         .join(', ');
 }
 
+function getConfiguredPlaceholder(config, colNumber, fallback = '') {
+    const rules = Array.isArray(config && config.placeholder_rules)
+        ? config.placeholder_rules
+        : [];
+    const rule = rules.find(item => Number(item.col) === Number(colNumber));
+    if (!rule || typeof rule.text !== 'string') return fallback;
+    return rule.text.trim() || fallback;
+}
+
 let debounceTimer;
 async function debounceProcessField(fieldName, value, callback) {
     clearTimeout(debounceTimer);
@@ -97,6 +106,43 @@ async function onTemplateSelected() {
     }
 }
 
+function getVisibleFormSchema(schema, config = {}) {
+    const hiddenCols = new Set(
+        (Array.isArray(config.hidden_cols) ? config.hidden_cols : [])
+            .map(Number)
+            .filter(col => Number.isInteger(col) && col > 0),
+    );
+
+    return (Array.isArray(schema) ? schema : [])
+        .map(category => ({
+            ...category,
+            fields: (Array.isArray(category.fields) ? category.fields : [])
+                .filter(field => !hiddenCols.has(Number(field.col_index) + 1)),
+        }))
+        .filter(category => category.fields.length > 0);
+}
+
+function resizeDynamicFormInput(input) {
+    if (!input || !input.classList || !input.classList.contains('dynamic-height-input')) return;
+
+    let minHeight = Number(input.dataset.dynamicMinHeight) || 0;
+    if (!minHeight) {
+        minHeight = Number(input.clientHeight) || 0;
+        if (minHeight > 0) input.dataset.dynamicMinHeight = String(minHeight);
+    }
+
+    // Reset first so the field can shrink when text is removed, then fit wrapped content.
+    input.style.height = 'auto';
+    const contentHeight = Number(input.scrollHeight) || 0;
+    const targetHeight = Math.max(minHeight, contentHeight > minHeight ? contentHeight + 2 : contentHeight);
+    if (targetHeight > 0) input.style.height = `${Math.ceil(targetHeight)}px`;
+}
+
+function resizeDynamicFormInputs(root = document) {
+    if (!root || typeof root.querySelectorAll !== 'function') return;
+    root.querySelectorAll('.dynamic-height-input').forEach(resizeDynamicFormInput);
+}
+
 function renderForm(schema, config = {}) {
     const container = document.getElementById('form-container');
     if (!container) return; // Guard for pages without form-container
@@ -109,7 +155,7 @@ function renderForm(schema, config = {}) {
         if (stored) draftData = JSON.parse(stored);
     } catch (e) {}
     
-    schema.forEach((category, index) => {
+    getVisibleFormSchema(schema, config).forEach((category, index) => {
         const section = document.createElement('div');
         section.className = 'form-section';
         
@@ -131,15 +177,6 @@ function renderForm(schema, config = {}) {
         
         const titleRight = document.createElement('div');
         titleRight.className = 'd-flex align-items-center';
-
-        const errorCheckWrapper = document.createElement('div');
-        errorCheckWrapper.className = 'form-check me-3 admin-error-check d-none';
-        errorCheckWrapper.innerHTML = `
-            <input class="form-check-input error-checkbox" type="checkbox" id="error_cat_${index}" data-section="${safeCategory}" style="cursor: pointer; transform: scale(1.2);">
-            <label class="form-check-label text-danger fw-bold ms-1" for="error_cat_${index}" style="cursor: pointer;">Lỗi Sai</label>
-        `;
-        
-        titleRight.appendChild(errorCheckWrapper);
         titleRight.appendChild(clearCategoryBtn);
         
         titleContainer.appendChild(titleLeft);
@@ -162,15 +199,17 @@ function renderForm(schema, config = {}) {
                 icon.classList.replace('fa-chevron-down', 'fa-chevron-right');
             } else {
                 icon.classList.replace('fa-chevron-right', 'fa-chevron-down');
+                resizeDynamicFormInputs(categoryContent);
             }
         });
         
         clearCategoryBtn.addEventListener('click', () => {
             if (!confirm(`Bạn có chắc chắn muốn xóa sạch dữ liệu trong mục "${safeCategory}"?`)) return;
-            const inputs = categoryContent.querySelectorAll('input');
+            const inputs = categoryContent.querySelectorAll('input, textarea');
             inputs.forEach(input => {
                 if (input.type !== 'button' && input.type !== 'submit') {
                     input.value = '';
+                    resizeDynamicFormInput(input);
                 }
             });
             const selects = categoryContent.querySelectorAll('select');
@@ -238,21 +277,54 @@ function renderForm(schema, config = {}) {
             const formGroup = document.createElement('div');
             formGroup.className = 'position-relative';
             
+            const labelRow = document.createElement('div');
+            labelRow.className = 'd-flex justify-content-between align-items-center gap-2';
+
             const label = document.createElement('label');
             label.className = 'form-label fw-semibold';
             label.innerText = field.label;
-            formGroup.appendChild(label);
+            label.htmlFor = field.name;
+            labelRow.appendChild(label);
+
+            // Error markers exist only for fields that survived hidden_cols
+            // filtering because renderForm iterates getVisibleFormSchema().
+            const errorCheckWrapper = document.createElement('div');
+            errorCheckWrapper.className = 'form-check review-field-error-check d-none flex-shrink-0';
+            const checkbox = document.createElement('input');
+            checkbox.type = 'checkbox';
+            checkbox.className = 'form-check-input field-error-checkbox';
+            checkbox.id = `error_field_${field.col_index}`;
+            checkbox.dataset.field = field.name;
+            const checkboxLabel = document.createElement('label');
+            checkboxLabel.className = 'form-check-label text-danger fw-semibold ms-1';
+            checkboxLabel.htmlFor = checkbox.id;
+            checkboxLabel.textContent = 'Lỗi sai';
+            errorCheckWrapper.appendChild(checkbox);
+            errorCheckWrapper.appendChild(checkboxLabel);
+            labelRow.appendChild(errorCheckWrapper);
+            formGroup.appendChild(labelRow);
             
-            const input = document.createElement('input');
-            input.type = 'text';
-            input.className = 'form-control';
+            const input = document.createElement('textarea');
+            input.className = 'form-control dynamic-height-input';
             input.name = field.name;
             input.id = field.name;
+            input.rows = 1;
             input.setAttribute('autocomplete', 'off');
+            input.style.width = '100%';
+            input.style.resize = 'none';
+            input.style.overflowY = 'hidden';
+            input.style.transition = 'height 0.12s ease';
+            const resizeInput = () => resizeDynamicFormInput(input);
+            input.addEventListener('input', resizeInput);
+            input.addEventListener('change', resizeInput);
+            input.addEventListener('focus', resizeInput);
             
             // Make auto-generated fields read-only based on config
             const roCols = config.readonly_cols || [];
-            if (roCols.includes(field.col_index + 1)) {
+            const linkedPathConfig = config.linked_pdf_path || {};
+            const isLinkedPdfPath = linkedPathConfig.enabled === true
+                && Number(linkedPathConfig.col) === field.col_index + 1;
+            if (roCols.includes(field.col_index + 1) || isLinkedPdfPath) {
                 input.readOnly = true;
                 input.style.backgroundColor = '#e9ecef';
             }
@@ -376,7 +448,13 @@ function renderForm(schema, config = {}) {
                     if (typeof saveFormDraft === 'function') saveFormDraft();
                 });
             }
-            
+
+            input.placeholder = getConfiguredPlaceholder(
+                config,
+                field.col_index + 1,
+                input.placeholder,
+            );
+
             if (draftData[field.name]) {
                 input.value = draftData[field.name];
             }
@@ -392,6 +470,7 @@ function renderForm(schema, config = {}) {
         
         section.appendChild(categoryContent);
         container.appendChild(section);
+        resizeDynamicFormInputs(categoryContent);
     });
     
     // Attach listener for real-time draft saving
@@ -440,10 +519,13 @@ function renderForm(schema, config = {}) {
 }
 
 function saveFormDraft() {
+    const dataForm = document.getElementById('dataForm');
+    if (typeof resizeDynamicFormInputs === 'function') resizeDynamicFormInputs(dataForm);
+
     // Do not save draft if we are editing an existing record
     if (currentEditingId !== null) return;
     
-    const inputs = document.querySelectorAll('#dataForm input[type="text"]');
+    const inputs = document.querySelectorAll('#dataForm input[type="text"], #dataForm textarea');
     const data = {};
     inputs.forEach(input => {
         data[input.name] = input.value;

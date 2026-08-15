@@ -4,10 +4,10 @@ from pydantic import BaseModel
 import os
 
 from server.database import get_db
-from server.models import Template
 from server.services.excel_service import get_ma_xa_mapping, get_don_vi_do_mapping
 from server.services.address_service import process_address
 from server.routers.auth import get_current_user
+from server.repositories import TemplateRepository
 
 router = APIRouter(prefix="/api/templates", tags=["processing"])
 
@@ -27,7 +27,7 @@ def get_mappings(template_id: int, db: Session):
     if template_id in MAPPING_CACHE:
         return MAPPING_CACHE[template_id]
         
-    template = db.query(Template).filter(Template.id == template_id).first()
+    template = TemplateRepository(db).get(template_id)
     if not template:
         raise HTTPException(status_code=404, detail="Template not found")
         

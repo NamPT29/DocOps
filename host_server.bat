@@ -1,6 +1,6 @@
 @echo off
 echo ==============================================
-echo KHOI DONG MAY CHU QUAN LY HO SO (SCAN TO EXCEL)
+echo KHOI DONG MAY CHU SO HOA ALL IN ONE
 echo ==============================================
 
 echo Kiem tra ket noi MySQL...
@@ -10,6 +10,14 @@ if errorlevel 1 (
     echo Vui long mo XAMPP Control Panel va Start MySQL.
     echo Bam phim bat ky de tiep tuc sau khi da Start MySQL...
     pause >nul
+)
+
+netstat -ano | findstr /R /C:":80 .*LISTENING" >nul
+if not errorlevel 1 (
+    echo [THONG BAO] May chu da chay hoac cong 80 dang duoc su dung.
+    echo Dang mo trang quan ly hien tai...
+    start "" http://127.0.0.1
+    exit /b 0
 )
 
 echo.

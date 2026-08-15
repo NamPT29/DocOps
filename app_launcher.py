@@ -39,7 +39,7 @@ if __name__ == "__main__":
     port = int(os.environ.get("PORT", "80"))
     
     print("=" * 50)
-    print("  HE THONG QUAN LY DU LIEU GCN")
+    print("  SO HOA ALL IN ONE")
     print("  Dang khoi dong may chu...")
     print("=" * 50)
     

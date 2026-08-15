@@ -15,8 +15,15 @@ from server.database import Base, engine
 from server.models import Template, Dictionary, DictionaryItem
 from server.routers.auth import init_admin
 from server.database import SessionLocal
+from server.services.submission_metadata_service import (
+    backfill_submission_metadata,
+    ensure_submission_metadata_schema,
+)
 
 Base.metadata.create_all(bind=engine)
+ensure_submission_metadata_schema(engine)
+with SessionLocal() as metadata_db:
+    backfill_submission_metadata(metadata_db)
 init_admin()
 
 # Seed the default template
@@ -34,7 +41,7 @@ def seed_default_template():
 
 seed_default_template()
 
-app = FastAPI()
+app = FastAPI(title="Số hóa All in One")
 
 cors_origins = [
     origin.strip()

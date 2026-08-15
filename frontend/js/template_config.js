@@ -13,6 +13,54 @@ function initConfigModal() {
     }
 }
 
+function closeConfigModal(onClosed) {
+    const modalEl = document.getElementById('configModal');
+    let completed = false;
+    const finishClosing = () => {
+        if (completed) return;
+        completed = true;
+
+        if (modalEl) {
+            modalEl.classList.remove('show');
+            modalEl.style.display = 'none';
+            modalEl.setAttribute('aria-hidden', 'true');
+            modalEl.removeAttribute('aria-modal');
+            modalEl.removeAttribute('role');
+        }
+        const hasOpenModal = typeof document.querySelector === 'function'
+            && document.querySelector('.modal.show');
+        if (!hasOpenModal && document.body) {
+            document.body.classList.remove('modal-open');
+            document.body.style.removeProperty('overflow');
+            document.body.style.removeProperty('padding-right');
+            if (typeof document.querySelectorAll === 'function') {
+                document.querySelectorAll('.modal-backdrop').forEach(backdrop => backdrop.remove());
+            }
+        }
+        currentConfigTemplateId = null;
+        if (typeof onClosed === 'function') onClosed();
+    };
+
+    if (!modalEl) {
+        finishClosing();
+        return;
+    }
+
+    const modal = configModalInstance
+        || (typeof bootstrap.Modal.getInstance === 'function'
+            ? bootstrap.Modal.getInstance(modalEl)
+            : null);
+    if (!modal) {
+        finishClosing();
+        return;
+    }
+
+    modalEl.addEventListener('hidden.bs.modal', finishClosing, { once: true });
+    modal.hide();
+    // Fallback cleanup if a blocked transition prevents Bootstrap's hidden event.
+    setTimeout(finishClosing, 500);
+}
+
 async function openConfigModal(templateId, templateName) {
     initConfigModal();
     const requestedTemplateId = Number(templateId);
@@ -96,8 +144,8 @@ async function openConfigModal(templateId, templateName) {
 }
 
 function populateColDropdowns() {
-    // Render checkboxes for the 3 special-col panels
-    const checkboxPanels = ['roColSelect', 'dateColSelect', 'yearColSelect'];
+    // Render checkboxes for the special-column panels
+    const checkboxPanels = ['roColSelect', 'dateColSelect', 'yearColSelect', 'hiddenColSelect'];
     checkboxPanels.forEach(panelId => {
         const container = document.getElementById(panelId);
         if (!container) return;
@@ -108,6 +156,23 @@ function populateColDropdowns() {
             </div>
         `).join('');
     });
+
+    const placeholderContainer = document.getElementById('placeholderColSelect');
+    if (placeholderContainer) {
+        placeholderContainer.innerHTML = templateFields.map(f => `
+            <div class="row g-2 align-items-center border-bottom py-2 placeholder-rule-row">
+                <div class="col-md-5">
+                    <div class="form-check">
+                        <input class="form-check-input placeholder-rule-enabled" type="checkbox" value="${Number(f.col)}" id="chk_placeholder_${Number(f.col)}">
+                        <label class="form-check-label small" for="chk_placeholder_${Number(f.col)}">${escapeHTML(f.label)}</label>
+                    </div>
+                </div>
+                <div class="col-md-7">
+                    <input type="text" class="form-control form-control-sm placeholder-rule-text" data-col="${Number(f.col)}" maxlength="255" placeholder="Nhập chữ gợi ý hiển thị mờ">
+                </div>
+            </div>
+        `).join('');
+    }
 
     // Single selects / col-dropdowns in other tabs
     const optionsHtml = templateFields.map(f => `<option value="${Number(f.col)}">${escapeHTML(f.label)}</option>`).join('');
@@ -137,10 +202,21 @@ function populateDictDropdowns() {
 
 function resetVisualUi() {
     // Reset checkboxes
-    ['roColSelect', 'dateColSelect', 'yearColSelect'].forEach(id => {
+    ['roColSelect', 'dateColSelect', 'yearColSelect', 'hiddenColSelect'].forEach(id => {
         const el = document.getElementById(id);
         if (el) el.querySelectorAll('input[type=checkbox]').forEach(cb => cb.checked = false);
     });
+    const linkedPathEnabled = document.getElementById('linkedPdfPathEnabled');
+    const linkedPathCol = document.getElementById('linkedPdfPathCol');
+    const linkedPathLevels = document.getElementById('linkedPdfPathFolderLevels');
+    if (linkedPathEnabled) linkedPathEnabled.checked = false;
+    if (linkedPathCol) linkedPathCol.value = '';
+    if (linkedPathLevels) linkedPathLevels.value = '0';
+    const placeholderContainer = document.getElementById('placeholderColSelect');
+    if (placeholderContainer) {
+        placeholderContainer.querySelectorAll('.placeholder-rule-enabled').forEach(cb => cb.checked = false);
+        placeholderContainer.querySelectorAll('.placeholder-rule-text').forEach(input => input.value = '');
+    }
     
     document.getElementById('dictRulesBody').innerHTML = '<tr><td colspan="4" class="text-center text-muted">Chưa có luật nào</td></tr>';
     document.getElementById('syncRulesList').innerHTML = '';
@@ -169,6 +245,24 @@ function buildConfigFromUI() {
     currentConfigObj.readonly_cols = getMultiVals('roColSelect');
     currentConfigObj.date_cols = getMultiVals('dateColSelect');
     currentConfigObj.year_cols = getMultiVals('yearColSelect');
+    currentConfigObj.hidden_cols = getMultiVals('hiddenColSelect');
+    const placeholderContainer = document.getElementById('placeholderColSelect');
+    currentConfigObj.placeholder_rules = placeholderContainer
+        ? Array.from(placeholderContainer.querySelectorAll('.placeholder-rule-enabled:checked'))
+            .map(checkbox => {
+                const col = parseInt(checkbox.value, 10);
+                const input = placeholderContainer.querySelector(`.placeholder-rule-text[data-col="${col}"]`);
+                return { col, text: input ? input.value.trim() : '' };
+            })
+            .filter(rule => Number.isInteger(rule.col) && rule.text.length > 0)
+        : [];
+    const linkedPathCol = parseInt(document.getElementById('linkedPdfPathCol')?.value || '', 10);
+    const folderLevels = parseInt(document.getElementById('linkedPdfPathFolderLevels')?.value || '0', 10);
+    currentConfigObj.linked_pdf_path = {
+        enabled: !!document.getElementById('linkedPdfPathEnabled')?.checked,
+        col: Number.isInteger(linkedPathCol) ? linkedPathCol : null,
+        folder_levels: Number.isInteger(folderLevels) ? Math.min(20, Math.max(0, folderLevels)) : 0,
+    };
     
     // (Dict, Sync, Concat are already updated in real-time within currentConfigObj arrays when added/deleted)
     
@@ -182,17 +276,46 @@ function renderVisualUiFromJSON() {
     // Basic
     // Basic - set checkboxes from saved values
     const setMultiVals = (id, arr) => {
-        if (!arr) return;
         const el = document.getElementById(id);
         if (!el) return;
+        const selectedValues = new Set(
+            (Array.isArray(arr) ? arr : [])
+                .map(Number)
+                .filter(Number.isInteger),
+        );
         el.querySelectorAll('input[type=checkbox]').forEach(cb => {
-            if (arr.includes(parseInt(cb.value))) cb.checked = true;
+            cb.checked = selectedValues.has(parseInt(cb.value, 10));
         });
     };
     
     setMultiVals('roColSelect', obj.readonly_cols);
     setMultiVals('dateColSelect', obj.date_cols);
     setMultiVals('yearColSelect', obj.year_cols);
+    setMultiVals('hiddenColSelect', obj.hidden_cols);
+    const placeholderContainer = document.getElementById('placeholderColSelect');
+    if (placeholderContainer) {
+        const rules = Array.isArray(obj.placeholder_rules) ? obj.placeholder_rules : [];
+        placeholderContainer.querySelectorAll('.placeholder-rule-enabled').forEach(cb => cb.checked = false);
+        placeholderContainer.querySelectorAll('.placeholder-rule-text').forEach(input => input.value = '');
+        rules.forEach(rule => {
+            const col = Number(rule.col);
+            const checkbox = placeholderContainer.querySelector(`#chk_placeholder_${col}`);
+            const input = placeholderContainer.querySelector(`.placeholder-rule-text[data-col="${col}"]`);
+            if (checkbox && input && typeof rule.text === 'string' && rule.text.trim()) {
+                checkbox.checked = true;
+                input.value = rule.text.trim();
+            }
+        });
+    }
+    const linkedPath = obj.linked_pdf_path || {};
+    const linkedPathEnabled = document.getElementById('linkedPdfPathEnabled');
+    const linkedPathCol = document.getElementById('linkedPdfPathCol');
+    const linkedPathLevels = document.getElementById('linkedPdfPathFolderLevels');
+    if (linkedPathEnabled) linkedPathEnabled.checked = linkedPath.enabled === true;
+    if (linkedPathCol) linkedPathCol.value = linkedPath.col || '';
+    if (linkedPathLevels) linkedPathLevels.value = Number.isInteger(linkedPath.folder_levels)
+        ? String(Math.min(20, Math.max(0, linkedPath.folder_levels)))
+        : '0';
     
     // Dicts
     const dictBody = document.getElementById('dictRulesBody');
@@ -402,8 +525,7 @@ async function saveTemplateConfig() {
     });
     
     if (res) {
-        alert('Đã lưu cấu hình biểu mẫu thành công!');
-        configModalInstance.hide();
+        closeConfigModal(() => alert('Đã lưu cấu hình biểu mẫu thành công!'));
     }
 }
 

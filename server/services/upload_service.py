@@ -5,14 +5,6 @@ import zipfile
 from fastapi import HTTPException, UploadFile
 
 
-def _max_upload_bytes() -> int:
-    try:
-        configured_mb = int(os.getenv("MAX_UPLOAD_MB", "25"))
-    except ValueError:
-        configured_mb = 25
-    return max(1, configured_mb) * 1024 * 1024
-
-
 DOCUMENT_EXTENSIONS = {".pdf", ".png", ".jpg", ".jpeg", ".webp"}
 EXCEL_EXTENSIONS = {".xlsx", ".xlsm"}
 
@@ -55,7 +47,6 @@ def save_validated_upload(
         expected = "PDF hoặc ảnh PNG/JPEG/WebP" if kind == "document" else "Excel .xlsx hoặc .xlsm"
         raise HTTPException(status_code=400, detail=f"Chỉ hỗ trợ file {expected}")
 
-    byte_limit = max_bytes if max_bytes is not None else _max_upload_bytes()
     directory = os.path.dirname(destination) or "."
     os.makedirs(directory, exist_ok=True)
     temporary_path = f"{destination}.{uuid.uuid4().hex}.part"
@@ -72,10 +63,10 @@ def save_validated_upload(
                 if len(header) < 32:
                     header += chunk[: 32 - len(header)]
                 total += len(chunk)
-                if total > byte_limit:
+                if max_bytes is not None and total > max_bytes:
                     raise HTTPException(
                         status_code=413,
-                        detail=f"File vượt quá giới hạn {byte_limit // (1024 * 1024)} MB",
+                        detail=f"File vượt quá giới hạn {max_bytes // (1024 * 1024)} MB",
                     )
                 output.write(chunk)
 

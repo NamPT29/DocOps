@@ -2,6 +2,10 @@ let formDataCache = {};
 let uploadedFilesQueue = [];
 let iframeCurrentIndex = -1;
 let currentPdfObjectUrl = null;
+let activeDocumentRelativePath = null;
+let activeDocumentFolderPath = null;
+let activeQueueFolderKey = null;
+let relativePathObserver = null;
 
 function normalizePdfUrl(url) {
     if (!url) return null;
@@ -11,10 +15,130 @@ function normalizePdfUrl(url) {
     return url;
 }
 
+function normalizeQueuePath(path) {
+    return String(path || '').replace(/\\/g, '/').replace(/^\/+|\/+$/g, '');
+}
+
+function getQueuePathTail(path) {
+    const parts = normalizeQueuePath(path).split('/').filter(Boolean);
+    return parts[parts.length - 1] || '';
+}
+
+function getQueueDocumentName(file) {
+    return getQueuePathTail(file?.name || file?.relative_path) || 'Tài liệu không tên';
+}
+
+function getQueueFolderKey(file) {
+    const folderPath = normalizeQueuePath(file?.folder_group);
+    if (!folderPath || folderPath === '__ROOT__') return null;
+    return `${file.template_id || 0}::${folderPath}`;
+}
+
+function getLinkedPdfPathConfig() {
+    const config = window.activeTemplateConfig?.linked_pdf_path;
+    const col = Number(config?.col);
+    if (config?.enabled !== true || !Number.isInteger(col) || col < 1) return null;
+    const parsedLevels = Number(config.folder_levels);
+    return {
+        col,
+        folderLevels: Number.isInteger(parsedLevels) ? Math.min(20, Math.max(0, parsedLevels)) : 0,
+    };
+}
+
+function formatLinkedPdfPath(path, folderLevels) {
+    const normalized = normalizeQueuePath(path);
+    if (!normalized || folderLevels === 0) return normalized;
+    const parts = normalized.split('/');
+    return parts.slice(-Math.min(parts.length, folderLevels + 1)).join('/');
+}
+
+function applyDocumentRelativePathToForm() {
+    const config = getLinkedPdfPathConfig();
+    if (!config) return false;
+    const input = document.getElementById(`col_${config.col - 1}`);
+    if (!input) return false;
+    const value = formatLinkedPdfPath(activeDocumentRelativePath, config.folderLevels);
+    if (input.value !== value) {
+        input.value = value;
+        if (typeof Event === 'function') {
+            input.dispatchEvent(new Event('input', { bubbles: true }));
+            input.dispatchEvent(new Event('change', { bubbles: true }));
+        }
+    }
+    return true;
+}
+
+function setActiveDocumentRelativePath(relativePath, waitForTemplateRender = false) {
+    activeDocumentRelativePath = typeof relativePath === 'string'
+        ? normalizeQueuePath(relativePath)
+        : null;
+    if (relativePathObserver) {
+        relativePathObserver.disconnect();
+        relativePathObserver = null;
+    }
+    if (!waitForTemplateRender && applyDocumentRelativePathToForm()) return;
+    if (!activeDocumentRelativePath) return;
+    if (!waitForTemplateRender && !getLinkedPdfPathConfig()) return;
+
+    const formContainer = document.getElementById('form-container');
+    if (!formContainer || typeof MutationObserver === 'undefined') return;
+    relativePathObserver = new MutationObserver(() => {
+        if (applyDocumentRelativePathToForm() || !getLinkedPdfPathConfig()) {
+            relativePathObserver.disconnect();
+            relativePathObserver = null;
+        }
+    });
+    relativePathObserver.observe(formContainer, { childList: true, subtree: true });
+}
+
 function saveQueueState() {
     if (!currentUser) return;
-    localStorage.setItem(`pdfQueue_${currentUser.username}`, JSON.stringify(uploadedFilesQueue));
-    localStorage.setItem(`pdfIndex_${currentUser.username}`, iframeCurrentIndex);
+    const activeFile = uploadedFilesQueue[iframeCurrentIndex] || null;
+    const persistedQueue = uploadedFilesQueue.filter(file => file.temporary_view !== true);
+    const persistedIndex = activeFile && activeFile.temporary_view !== true
+        ? persistedQueue.indexOf(activeFile)
+        : -1;
+    localStorage.setItem(`pdfQueue_${currentUser.username}`, JSON.stringify(persistedQueue));
+    localStorage.setItem(`pdfIndex_${currentUser.username}`, persistedIndex);
+}
+
+function showEmptyPdfQueueState(message = 'Chưa có tài liệu trong hàng chờ.') {
+    iframeCurrentIndex = -1;
+    activeDocumentRelativePath = null;
+    activeDocumentFolderPath = null;
+    activeQueueFolderKey = null;
+    isPdfLinked = false;
+    const iframe = document.getElementById('pdfIframe');
+    const placeholder = document.getElementById('pdfPlaceholder');
+    if (iframe) iframe.style.display = 'none';
+    if (placeholder) {
+        placeholder.style.display = 'block';
+        placeholder.innerHTML = message;
+    }
+    updatePdfLinkUI();
+}
+
+function clearTemporaryPdfView() {
+    const activeFile = uploadedFilesQueue[iframeCurrentIndex] || null;
+    const activeWasTemporary = activeFile?.temporary_view === true;
+    const originalLength = uploadedFilesQueue.length;
+    uploadedFilesQueue = uploadedFilesQueue.filter(file => file.temporary_view !== true);
+    if (uploadedFilesQueue.length === originalLength) return false;
+
+    iframeCurrentIndex = activeFile && !activeWasTemporary
+        ? uploadedFilesQueue.indexOf(activeFile)
+        : -1;
+    saveQueueState();
+    renderFileQueue();
+
+    if (iframeCurrentIndex >= 0) return true;
+    if (uploadedFilesQueue.length > 0) {
+        selectFileFromQueue(0);
+        return true;
+    }
+
+    showEmptyPdfQueueState();
+    return true;
 }
 
 function restoreQueue() {
@@ -99,93 +223,153 @@ function setupPdfUpload() {
     });
 }
 
+function openQueueFolder(folderKey) {
+    activeQueueFolderKey = folderKey || null;
+    renderFileQueue();
+}
+
+function appendQueueFileRow(fileQueueList, file, index) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'list-group-item list-group-item-action d-flex align-items-center';
+    btn.style.fontSize = '0.9rem';
+    btn.title = file.relative_path || file.name;
+
+    const checkbox = document.createElement('input');
+    checkbox.type = 'checkbox';
+    checkbox.className = 'form-check-input me-2 mt-0';
+    checkbox.checked = file.completed || false;
+    checkbox.onclick = event => {
+        event.stopPropagation();
+        file.completed = checkbox.checked;
+        saveQueueState();
+        renderFileQueue();
+    };
+
+    const icon = document.createElement('i');
+    icon.className = 'fas fa-file-pdf text-danger me-2';
+    const textSpan = document.createElement('span');
+    textSpan.className = 'text-truncate flex-grow-1 text-start';
+    textSpan.innerText = getQueueDocumentName(file);
+    if (file.completed) textSpan.classList.add('text-success', 'text-decoration-line-through');
+
+    const removeBtn = document.createElement('button');
+    removeBtn.type = 'button';
+    removeBtn.className = 'btn-close btn-close-sm ms-2';
+    removeBtn.style.fontSize = '0.6rem';
+    removeBtn.onclick = event => {
+        event.stopPropagation();
+        uploadedFilesQueue.splice(index, 1);
+        if (iframeCurrentIndex === index) {
+            if (uploadedFilesQueue.length > 0) {
+                selectFileFromQueue(Math.min(index, uploadedFilesQueue.length - 1));
+            } else {
+                iframeCurrentIndex = -1;
+                activeDocumentRelativePath = null;
+                activeDocumentFolderPath = null;
+                activeQueueFolderKey = null;
+                document.getElementById('pdfIframe').style.display = 'none';
+                document.getElementById('pdfPlaceholder').style.display = 'block';
+                document.getElementById('pdfPlaceholder').innerHTML = 'Chưa có tài liệu nào được tải lên.<br>Vui lòng chọn file PDF hoặc hình ảnh ở cột bên trái.';
+                updatePdfLinkUI();
+            }
+        } else if (iframeCurrentIndex > index) {
+            iframeCurrentIndex--;
+        }
+        saveQueueState();
+        renderFileQueue();
+    };
+
+    btn.appendChild(checkbox);
+    btn.appendChild(icon);
+    btn.appendChild(textSpan);
+    btn.appendChild(removeBtn);
+    if (iframeCurrentIndex === index) {
+        btn.classList.add('active');
+        if (file.completed) textSpan.classList.remove('text-success');
+    }
+    btn.onclick = () => selectFileFromQueue(index);
+    fileQueueList.appendChild(btn);
+}
+
 function renderFileQueue() {
     const fileQueueList = document.getElementById('fileQueueList');
+    const breadcrumb = document.getElementById('queueExplorerCurrentFolder');
+    if (!fileQueueList) return;
     fileQueueList.innerHTML = '';
-    
-    let currentTemplateId = -1;
-    uploadedFilesQueue.forEach((file, index) => {
-        if (file.template_id && file.template_id !== currentTemplateId) {
-            const header = document.createElement('div');
-            header.className = 'list-group-item bg-light fw-bold text-primary px-2 py-1 mt-1';
-            header.style.fontSize = '0.85rem';
-            const icon = document.createElement('i');
-            icon.className = 'fas fa-folder-open';
-            header.appendChild(icon);
-            header.appendChild(document.createTextNode(` Biểu mẫu: ${file.template_name || 'Không xác định'}`));
-            fileQueueList.appendChild(header);
-            currentTemplateId = file.template_id;
-        }
 
-        const btn = document.createElement('button');
-        btn.type = 'button';
-        btn.className = 'list-group-item list-group-item-action d-flex align-items-center';
-        btn.style.fontSize = '0.9rem';
-        btn.title = file.name;
-        
-        // Manual Checkbox
-        const checkbox = document.createElement('input');
-        checkbox.type = 'checkbox';
-        checkbox.className = 'form-check-input me-2 mt-0';
-        checkbox.checked = file.completed || false;
-        checkbox.onclick = (e) => {
-            e.stopPropagation(); // Prevent triggering the row click
-            file.completed = checkbox.checked;
-            saveQueueState();
-            renderFileQueue();
-        };
-        
-        // Filename text
-        const textSpan = document.createElement('span');
-        textSpan.className = 'text-truncate flex-grow-1';
-        textSpan.innerText = file.name;
-        
-        if (file.completed) {
-            textSpan.classList.add('text-success', 'text-decoration-line-through');
+    const folders = new Map();
+    uploadedFilesQueue.forEach((file, index) => {
+        const key = getQueueFolderKey(file);
+        if (!key) return;
+        if (!folders.has(key)) {
+            folders.set(key, {
+                key,
+                path: normalizeQueuePath(file.folder_group),
+                templateName: file.template_name || 'Không xác định',
+                entries: [],
+            });
         }
-        
-        // Remove Button (x)
-        const removeBtn = document.createElement('button');
-        removeBtn.type = 'button';
-        removeBtn.className = 'btn-close btn-close-sm ms-2';
-        removeBtn.style.fontSize = '0.6rem';
-        removeBtn.onclick = (e) => {
-            e.stopPropagation(); // Prevent triggering the row click
-            uploadedFilesQueue.splice(index, 1);
-            
-            // Adjust iframeCurrentIndex if needed
-            if (iframeCurrentIndex === index) {
-                // If we removed the currently viewed file, try to show the next one, or previous
-                if (uploadedFilesQueue.length > 0) {
-                    selectFileFromQueue(Math.min(index, uploadedFilesQueue.length - 1));
-                } else {
-                    // No files left
-                    iframeCurrentIndex = -1;
-                    document.getElementById('pdfIframe').style.display = 'none';
-                    document.getElementById('pdfPlaceholder').style.display = 'block';
-                    document.getElementById('pdfPlaceholder').innerHTML = 'Chưa có tài liệu nào được tải lên.<br>Vui lòng chọn file PDF hoặc hình ảnh ở cột bên trái.';
-                }
-            } else if (iframeCurrentIndex > index) {
-                // If we removed a file before the current one, the current one shifted left
-                iframeCurrentIndex--;
-            }
-            saveQueueState();
-            renderFileQueue();
-        };
-        
-        btn.appendChild(checkbox);
-        btn.appendChild(textSpan);
-        btn.appendChild(removeBtn);
-        
-        // Mark active
-        if (iframeCurrentIndex === index) {
-            btn.classList.add('active');
-            if (file.completed) textSpan.classList.remove('text-success'); // White text when active
-        }
-        
-        btn.onclick = () => selectFileFromQueue(index);
-        fileQueueList.appendChild(btn);
+        folders.get(key).entries.push({ file, index });
     });
+
+    if (activeQueueFolderKey && !folders.has(activeQueueFolderKey)) activeQueueFolderKey = null;
+    if (breadcrumb) breadcrumb.textContent = activeQueueFolderKey
+        ? ` / ${getQueuePathTail(folders.get(activeQueueFolderKey).path)}`
+        : '';
+
+    if (!activeQueueFolderKey) {
+        Array.from(folders.values())
+            .sort((a, b) => a.path.localeCompare(b.path, 'vi'))
+            .forEach(folder => {
+                const btn = document.createElement('button');
+                btn.type = 'button';
+                btn.className = 'list-group-item list-group-item-action d-flex align-items-center text-start';
+                btn.title = folder.path;
+                btn.onclick = () => openQueueFolder(folder.key);
+
+                const icon = document.createElement('i');
+                icon.className = 'fas fa-folder text-warning fs-4 me-2';
+                const labels = document.createElement('span');
+                labels.className = 'text-truncate flex-grow-1';
+                const name = document.createElement('span');
+                name.className = 'd-block fw-semibold text-truncate';
+                name.textContent = getQueuePathTail(folder.path) || '(folder gốc)';
+                const template = document.createElement('small');
+                template.className = 'd-block text-muted text-truncate';
+                template.textContent = folder.templateName;
+                const count = document.createElement('span');
+                count.className = 'badge bg-secondary rounded-pill';
+                count.textContent = String(folder.entries.length);
+                labels.appendChild(name);
+                labels.appendChild(template);
+                btn.appendChild(icon);
+                btn.appendChild(labels);
+                btn.appendChild(count);
+                fileQueueList.appendChild(btn);
+            });
+
+        uploadedFilesQueue.forEach((file, index) => {
+            if (!getQueueFolderKey(file)) appendQueueFileRow(fileQueueList, file, index);
+        });
+    } else {
+        const back = document.createElement('button');
+        back.type = 'button';
+        back.className = 'list-group-item list-group-item-action fw-semibold text-primary';
+        back.innerHTML = '<i class="fas fa-level-up-alt me-2"></i>Quay lại danh sách folder';
+        back.onclick = () => openQueueFolder(null);
+        fileQueueList.appendChild(back);
+        folders.get(activeQueueFolderKey).entries.forEach(({ file, index }) => {
+            appendQueueFileRow(fileQueueList, file, index);
+        });
+    }
+
+    if (uploadedFilesQueue.length === 0) {
+        const empty = document.createElement('div');
+        empty.className = 'list-group-item text-muted small';
+        empty.textContent = 'Chưa có tài liệu trong hàng chờ.';
+        fileQueueList.appendChild(empty);
+    }
 }
 
 
@@ -200,17 +384,23 @@ function togglePdfLink() {
 function updatePdfLinkUI() {
     const btn = document.getElementById('pdfLinkBtn');
     const text = document.getElementById('pdfLinkText');
+    const folderBadge = document.getElementById('folderLinkBadge');
+    const folderText = document.getElementById('folderLinkText');
     if (!btn || !text) return;
     
     if (isPdfLinked) {
         btn.classList.remove('btn-outline-secondary');
         btn.classList.add('btn-success');
-        text.innerText = 'Đã liên kết';
+        text.innerText = 'Đã liên kết PDF';
     } else {
         btn.classList.remove('btn-success');
         btn.classList.add('btn-outline-secondary');
-        text.innerText = 'Không liên kết';
+        text.innerText = 'Không liên kết PDF';
     }
+    if (folderText) folderText.innerText = activeDocumentFolderPath
+        ? getQueuePathTail(activeDocumentFolderPath)
+        : 'Chưa có folder';
+    if (folderBadge) folderBadge.title = activeDocumentFolderPath || 'PDF này không có metadata folder';
 }
 
 async function selectFileFromQueue(index) {
@@ -219,6 +409,10 @@ async function selectFileFromQueue(index) {
     iframeCurrentIndex = index;
     saveQueueState();
     const file = uploadedFilesQueue[index];
+    activeQueueFolderKey = getQueueFolderKey(file);
+    activeDocumentFolderPath = file.folder_group && file.folder_group !== '__ROOT__'
+        ? normalizeQueuePath(file.folder_group)
+        : null;
     const iframe = document.getElementById('pdfIframe');
     const placeholder = document.getElementById('pdfPlaceholder');
 
@@ -246,24 +440,23 @@ async function selectFileFromQueue(index) {
         iframe.style.display = 'block';
     };
     
-    renderFileQueue(); // Re-render to update the active class
-    
     // Auto-switch template if needed
+    let templateChanged = false;
     if (file.template_id && window.activeTemplateId !== undefined && parseInt(file.template_id) !== parseInt(window.activeTemplateId)) {
         const select = document.getElementById('templateSelect');
         if (select) {
+            templateChanged = true;
             select.value = file.template_id;
             select.dispatchEvent(new Event('change'));
         }
     }
     
-    // Check if we are currently editing from the list. If not, clicking a PDF should start a fresh form.
-    if (!currentEditingId || !isEditingFromList) {
-        if (typeof resetFormData === 'function') resetFormData(true);
-    }
+    // Switching the reference PDF must not erase in-progress form data.
+    setActiveDocumentRelativePath(file.relative_path || null, templateChanged);
     // Tự động liên kết file PDF này với form đang nhập
     isPdfLinked = true;
     updatePdfLinkUI();
+    renderFileQueue();
 }
 
 async function fetchMyQueue() {
@@ -277,38 +470,71 @@ async function fetchMyQueue() {
         
         if (data.status === 'ok') {
             const queueGroups = data.data;
+            const linkedPdfUuids = new Set(
+                (Array.isArray(data.linked_pdf_uuids) ? data.linked_pdf_uuids : []).map(String)
+            );
+            const activeFile = uploadedFilesQueue[iframeCurrentIndex] || null;
+            uploadedFilesQueue = uploadedFilesQueue.filter(file =>
+                file.temporary_view !== true
+                && !(file.uuid && linkedPdfUuids.has(String(file.uuid)))
+            );
+            iframeCurrentIndex = activeFile && uploadedFilesQueue.includes(activeFile)
+                ? uploadedFilesQueue.indexOf(activeFile)
+                : -1;
             if (queueGroups.length === 0) {
                 alert("Bạn không có tài liệu nào đang chờ xử lý.");
             } else {
                 let added = 0;
                 queueGroups.forEach(group => {
                     group.files.forEach(doc => {
-                        if (!uploadedFilesQueue.find(f => f.url === doc.url)) {
+                        const existingFile = uploadedFilesQueue.find(f => f.url === doc.url);
+                        if (existingFile) {
+                            existingFile.name = doc.name;
+                            existingFile.uuid = doc.uuid;
+                            existingFile.relative_path = doc.relative_path || null;
+                            existingFile.folder_group = doc.folder_group || null;
+                            existingFile.template_id = group.template_id;
+                            existingFile.template_name = group.template_name;
+                            existingFile.temporary_view = false;
+                        } else {
                             uploadedFilesQueue.push({
                                 name: doc.name,
                                 url: doc.url,
                                 uuid: doc.uuid,
+                                relative_path: doc.relative_path || null,
+                                folder_group: doc.folder_group || null,
                                 template_id: group.template_id,
-                                template_name: group.template_name
+                                template_name: group.template_name,
+                                temporary_view: false,
                             });
                             added++;
                         }
                     });
                 });
                 
-                uploadedFilesQueue.sort((a, b) => (a.template_id || 0) - (b.template_id || 0));
-                
-                saveQueueState();
-                renderFileQueue();
+                uploadedFilesQueue.sort((a, b) => {
+                    const templateOrder = (a.template_id || 0) - (b.template_id || 0);
+                    if (templateOrder !== 0) return templateOrder;
+                    return (a.relative_path || a.name).localeCompare(
+                        b.relative_path || b.name,
+                        'vi'
+                    );
+                });
                 
                 if (added > 0) {
                     alert(`Đã nhận thêm ${added} tài liệu vào danh sách chờ.`);
                 }
                 
-                // Select first file if nothing is selected
-                if (uploadedFilesQueue.length > 0 && iframeCurrentIndex === -1) {
-                    selectFileFromQueue(0);
-                }
+            }
+
+            saveQueueState();
+            renderFileQueue();
+
+            // Select first file if nothing is selected
+            if (uploadedFilesQueue.length > 0 && iframeCurrentIndex === -1) {
+                selectFileFromQueue(0);
+            } else if (uploadedFilesQueue.length === 0) {
+                showEmptyPdfQueueState();
             }
         }
         
@@ -319,7 +545,7 @@ async function fetchMyQueue() {
     }
 }
 
-function addFileToQueueAndSelect(attachedPdf, attachedPdfUuid, attachedPdfUrl) {
+function addFileToQueueAndSelect(attachedPdf, attachedPdfUuid, attachedPdfUrl, metadata = {}) {
     if (!attachedPdf) return;
 
     const resolvedUrl = attachedPdfUrl || (attachedPdfUuid
@@ -330,13 +556,27 @@ function addFileToQueueAndSelect(attachedPdf, attachedPdfUuid, attachedPdfUrl) {
         return;
     }
 
-    let fileIndex = uploadedFilesQueue.findIndex(f =>
-        (attachedPdfUuid && f.uuid === attachedPdfUuid) || f.url === resolvedUrl
-    );
+    const normalizedResolvedUrl = normalizePdfUrl(resolvedUrl);
+    const targetRelativePath = normalizeQueuePath(metadata.relative_path);
+    const targetFolderPath = normalizeQueuePath(metadata.folder_group);
+    const targetDocumentName = getQueuePathTail(attachedPdf);
+    const identityMatches = uploadedFilesQueue
+        .map((file, index) => ({ file, index }))
+        .filter(({ file }) =>
+            (attachedPdfUuid && file.uuid === attachedPdfUuid)
+            || normalizePdfUrl(file.url) === normalizedResolvedUrl
+            || (targetRelativePath && normalizeQueuePath(file.relative_path) === targetRelativePath)
+            || (
+                targetFolderPath
+                && normalizeQueuePath(file.folder_group) === targetFolderPath
+                && getQueueDocumentName(file) === targetDocumentName
+            )
+        );
+    let fileIndex = identityMatches.length > 0 ? identityMatches[0].index : -1;
     if (fileIndex === -1) {
         const legacyMatches = uploadedFilesQueue
             .map((file, index) => ({ file, index }))
-            .filter(({ file }) => file.name === attachedPdf && !file.uuid);
+            .filter(({ file }) => getQueueDocumentName(file) === targetDocumentName && !file.uuid);
         if (legacyMatches.length === 1) {
             fileIndex = legacyMatches[0].index;
         }
@@ -345,17 +585,76 @@ function addFileToQueueAndSelect(attachedPdf, attachedPdfUuid, attachedPdfUrl) {
         uploadedFilesQueue.push({
             name: attachedPdf,
             uuid: attachedPdfUuid,
-            url: resolvedUrl
+            url: resolvedUrl,
+            relative_path: metadata.relative_path || null,
+            folder_group: metadata.folder_group || null,
+            template_id: metadata.template_id || null,
+            template_name: metadata.template_name || null,
+            temporary_view: metadata.temporary_view === true,
         });
         fileIndex = uploadedFilesQueue.length - 1;
         renderFileQueue();
         saveQueueState();
     } else {
+        uploadedFilesQueue[fileIndex].name = attachedPdf || uploadedFilesQueue[fileIndex].name;
         uploadedFilesQueue[fileIndex].uuid = attachedPdfUuid || uploadedFilesQueue[fileIndex].uuid;
         uploadedFilesQueue[fileIndex].url = resolvedUrl;
+        uploadedFilesQueue[fileIndex].relative_path = metadata.relative_path || uploadedFilesQueue[fileIndex].relative_path || null;
+        uploadedFilesQueue[fileIndex].folder_group = metadata.folder_group || uploadedFilesQueue[fileIndex].folder_group || null;
+        uploadedFilesQueue[fileIndex].template_id = metadata.template_id || uploadedFilesQueue[fileIndex].template_id || null;
+        uploadedFilesQueue[fileIndex].template_name = metadata.template_name || uploadedFilesQueue[fileIndex].template_name || null;
+        uploadedFilesQueue[fileIndex].temporary_view = metadata.temporary_view === true;
+        const duplicateIndexes = identityMatches
+            .map(match => match.index)
+            .filter(index => index !== fileIndex)
+            .sort((a, b) => b - a);
+        duplicateIndexes.forEach(index => {
+            uploadedFilesQueue.splice(index, 1);
+            if (index < fileIndex) fileIndex--;
+        });
+        if (duplicateIndexes.length > 0) renderFileQueue();
         saveQueueState();
     }
     
     selectFileFromQueue(fileIndex);
     isPdfLinked = true;
+}
+
+function loadReviewFolderFiles(folderFiles, selectedUuid) {
+    if (!Array.isArray(folderFiles) || folderFiles.length === 0) return false;
+
+    const folderPath = normalizeQueuePath(folderFiles[0].folder_group);
+    if (folderPath) {
+        uploadedFilesQueue = uploadedFilesQueue.filter(file =>
+            file.temporary_view !== true
+            || normalizeQueuePath(file.folder_group) !== folderPath
+        );
+    }
+
+    folderFiles.forEach(file => {
+        uploadedFilesQueue.push({
+            name: file.name,
+            uuid: file.uuid,
+            url: file.url,
+            relative_path: file.relative_path || null,
+            folder_group: file.folder_group || null,
+            template_id: file.template_id || null,
+            template_name: file.template_name || null,
+            temporary_view: true,
+        });
+    });
+    uploadedFilesQueue.sort((a, b) =>
+        (a.relative_path || a.name || '').localeCompare(
+            b.relative_path || b.name || '',
+            'vi'
+        )
+    );
+    const selectedIndex = uploadedFilesQueue.findIndex(file => file.uuid === selectedUuid);
+    const displayIndex = selectedIndex >= 0 ? selectedIndex : 0;
+    activeQueueFolderKey = getQueueFolderKey(uploadedFilesQueue[displayIndex]);
+    renderFileQueue();
+    saveQueueState();
+    selectFileFromQueue(displayIndex);
+    isPdfLinked = selectedIndex >= 0;
+    return true;
 }

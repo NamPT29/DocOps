@@ -36,7 +36,12 @@ const sandbox = {
 };
 vm.createContext(sandbox);
 vm.runInContext(fs.readFileSync('frontend/js/form_renderer.js', 'utf8'), sandbox);
-vm.runInContext(fs.readFileSync('frontend/js/admin_panel.js', 'utf8'), sandbox);
+const adminPanelSource = fs.readFileSync('frontend/js/admin_panel.js', 'utf8');
+vm.runInContext(adminPanelSource, sandbox);
+
+assert(adminPanelSource.includes('const safeUsername = escapeHTML(u.username);'));
+assert(!adminPanelSource.includes('<td>${u.username}</td>'));
+assert(!adminPanelSource.includes('${u.username} <span class="text-muted small">'));
 
 assert.equal(sandbox.getDraftStorageKey(), 'formDraft_2_11');
 sandbox.window.activeTemplateId = 12;
@@ -51,6 +56,7 @@ sandbox.renderAdminSubmissionsTable([{
     ho_ten: '<img src=x onerror=alert(2)>',
     so_giay_to: '<svg onload=alert(3)>',
     template: '<iframe srcdoc=x>',
+    pdf_relative_path: '<img src=x onerror=alert(2)>',
     status: 'pending_review',
     has_errors: false,
 }], 'submissionsTableBody', true);

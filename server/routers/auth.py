@@ -10,7 +10,8 @@ import secrets
 from typing import Literal
 from datetime import datetime, timedelta, timezone
 from server.database import get_db, SessionLocal
-from server.models import User, AssignedDocument, Submission, Task
+from server.models import User
+from server.repositories import UserRepository
 
 router = APIRouter(prefix="/api", tags=["auth"])
 
@@ -86,7 +87,7 @@ def get_current_user(
     except (jwt.InvalidTokenError, TypeError, ValueError):
         raise HTTPException(status_code=401, detail="Invalid token")
 
-    user = db.query(User).filter(User.id == user_id).first()
+    user = UserRepository(db).get(user_id)
     if not user:
         raise HTTPException(status_code=401, detail="User no longer exists")
     return {"id": user.id, "username": user.username, "role": user.role}
@@ -96,10 +97,69 @@ def get_admin_user(current_user: dict = Depends(get_current_user)):
         raise HTTPException(status_code=403, detail="Access denied")
     return current_user
 
+
+def _capability_profile(user: User, *, can_input: bool = False, can_review: bool = False) -> dict:
+    if user.role == "admin":
+        can_input = True
+        can_review = True
+    roles = []
+    if user.role == "admin":
+        roles.append("admin")
+    if can_input:
+        roles.append("input")
+    if can_review:
+        roles.append("reviewer")
+    return {
+        "can_input": can_input,
+        "can_review": can_review,
+        "roles": roles,
+    }
+
+
+def get_user_capability_profile(user: User, db: Session) -> dict:
+    can_input, can_review = UserRepository(db).capability_flags(user.id)
+    return _capability_profile(
+        user,
+        can_input=can_input,
+        can_review=can_review,
+    )
+
+
+def build_user_payload(user: User, db: Session) -> dict:
+    return {
+        "id": user.id,
+        "username": user.username,
+        "role": user.role,
+        **get_user_capability_profile(user, db),
+    }
+
+
+def get_input_user(
+    current_user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    user = UserRepository(db).get(current_user["id"])
+    profile = get_user_capability_profile(user, db) if user else None
+    if not profile or not profile["can_input"]:
+        raise HTTPException(status_code=403, detail="Tài khoản không có quyền nhập liệu")
+    return {**current_user, **profile}
+
+
+def get_reviewer_user(
+    current_user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    user = UserRepository(db).get(current_user["id"])
+    profile = get_user_capability_profile(user, db) if user else None
+    if not profile or not profile["can_review"]:
+        raise HTTPException(status_code=403, detail="Tài khoản không có quyền kiểm tra")
+    return {**current_user, **profile}
+
 def init_admin():
     db = SessionLocal()
     try:
-        admin = db.query(User).filter(User.username == "admin").first()
+        repository = UserRepository(db)
+        admin = repository.get_by_username("admin")
         if not admin:
             initial_password = os.getenv("INITIAL_ADMIN_PASSWORD")
             if not initial_password or len(initial_password) < 12:
@@ -112,7 +172,7 @@ def init_admin():
                 password=hash_password(initial_password),
                 role="admin",
             )
-            db.add(admin)
+            repository.add(admin)
             db.commit()
     finally:
         db.close()
@@ -123,7 +183,7 @@ class LoginRequest(BaseModel):
 
 @router.post("/login")
 def api_login(req: LoginRequest, db: Session = Depends(get_db)):
-    user = db.query(User).filter(User.username == req.username).first()
+    user = UserRepository(db).get_by_username(req.username)
     if not user or not verify_password(req.password, user.password):
         return {"status": "error", "message": "Sai tên đăng nhập hoặc mật khẩu"}
 
@@ -131,7 +191,7 @@ def api_login(req: LoginRequest, db: Session = Depends(get_db)):
         user.password = hash_password(req.password)
         db.commit()
     
-    user_data = {"id": user.id, "username": user.username, "role": user.role}
+    user_data = build_user_payload(user, db)
     expire = datetime.now(timezone.utc) + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
     to_encode = {
         "sub": str(user.id),
@@ -151,37 +211,30 @@ class CreateUserRequest(BaseModel):
 
 @router.post("/users")
 def api_create_user(req: CreateUserRequest, current_user: dict = Depends(get_admin_user), db: Session = Depends(get_db)):
-    if db.query(User).filter(User.username == req.username).first():
+    repository = UserRepository(db)
+    if repository.get_by_username(req.username):
         return {"status": "error", "message": "Username already exists"}
     user = User(
         username=req.username,
         password=hash_password(req.password),
         role=req.role,
     )
-    db.add(user)
+    repository.add(user)
     db.commit()
-    return {"status": "ok"}
+    return {"status": "ok", "user": build_user_payload(user, db)}
 
 @router.delete("/users/{user_id}")
 def api_delete_user(user_id: int, current_user: dict = Depends(get_admin_user), db: Session = Depends(get_db)):
     if current_user["id"] == user_id:
         return {"status": "error", "message": "Không thể tự xóa tài khoản của chính mình"}
         
-    user = db.query(User).filter(User.id == user_id).first()
+    repository = UserRepository(db)
+    user = repository.get(user_id)
     if not user:
         return {"status": "error", "message": "Không tìm thấy người dùng"}
         
     try:
-        db.query(AssignedDocument).filter(
-            AssignedDocument.assigned_to_user_id == user_id
-        ).update({AssignedDocument.assigned_to_user_id: None}, synchronize_session=False)
-        db.query(Submission).filter(
-            Submission.created_by_user_id == user_id
-        ).update({Submission.created_by_user_id: None}, synchronize_session=False)
-        db.query(Task).filter(Task.user_id == user_id).update(
-            {Task.user_id: None}, synchronize_session=False
-        )
-        db.delete(user)
+        repository.detach_references_and_delete(user)
         db.commit()
         return {"status": "ok"}
     except Exception:
@@ -190,5 +243,13 @@ def api_delete_user(user_id: int, current_user: dict = Depends(get_admin_user), 
 
 @router.get("/users")
 def api_get_users(current_user: dict = Depends(get_admin_user), db: Session = Depends(get_db)):
-    users = db.query(User).all()
-    return {"status": "ok", "data": [{"id": u.id, "username": u.username, "role": u.role} for u in users]}
+    users = UserRepository(db).list_all()
+    return {"status": "ok", "data": [build_user_payload(user, db) for user in users]}
+
+
+@router.get("/me")
+def api_get_me(current_user: dict = Depends(get_current_user), db: Session = Depends(get_db)):
+    user = UserRepository(db).get(current_user["id"])
+    if not user:
+        raise HTTPException(status_code=404, detail="Không tìm thấy người dùng")
+    return {"status": "ok", "user": build_user_payload(user, db)}

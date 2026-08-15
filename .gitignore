@@ -43,6 +43,7 @@ data.db
 
 # Uploaded PDF and images
 uploads/
+source_documents/
 
 # IDEs and Editors
 .vscode/
