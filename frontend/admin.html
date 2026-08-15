@@ -458,66 +458,29 @@
             <div class="tab-content" id="configTabsContent">
                 <!-- 1. CỘT ĐẶC BIỆT -->
                 <div class="tab-pane fade show active" id="pane-basic" role="tabpanel">
-                    <div class="row">
-                        <div class="col-md-4">
-                            <div class="card shadow-sm mb-3">
-                                <div class="card-header bg-secondary text-white fw-bold"><i class="fas fa-lock"></i> Cột Chỉ Đọc (Read-only)</div>
-                                <div class="card-body p-2">
-                                    <p class="text-muted small mb-2">Các cột này sẽ bị khóa, không cho người dùng tự gõ phím.</p>
-                                    <div id="roColSelect" class="border rounded p-2 bg-white" style="max-height: 220px; overflow-y: auto;"></div>
-                                    <button class="btn btn-sm btn-outline-danger w-100 mt-2" onclick="clearCheckboxes('roColSelect')">Bỏ chọn tất cả</button>
-                                </div>
-                            </div>
-                        </div>
-                        <div class="col-md-4">
-                            <div class="card shadow-sm mb-3">
-                                <div class="card-header bg-info text-white fw-bold"><i class="fas fa-calendar"></i> Định dạng Ngày tháng</div>
-                                <div class="card-body p-2">
-                                    <p class="text-muted small mb-2">Ép kiểu dd/mm/yyyy khi người dùng nhập số.</p>
-                                    <div id="dateColSelect" class="border rounded p-2 bg-white" style="max-height: 220px; overflow-y: auto;"></div>
-                                    <button class="btn btn-sm btn-outline-danger w-100 mt-2" onclick="clearCheckboxes('dateColSelect')">Bỏ chọn tất cả</button>
-                                </div>
-                            </div>
-                        </div>
-                        <div class="col-md-4">
-                            <div class="card shadow-sm mb-3">
-                                <div class="card-header bg-warning text-dark fw-bold"><i class="fas fa-calendar-alt"></i> Định dạng Năm</div>
-                                <div class="card-body p-2">
-                                    <p class="text-muted small mb-2">Ép kiểu yyyy khi người dùng nhập số.</p>
-                                    <div id="yearColSelect" class="border rounded p-2 bg-white" style="max-height: 220px; overflow-y: auto;"></div>
-                                    <button class="btn btn-sm btn-outline-danger w-100 mt-2" onclick="clearCheckboxes('yearColSelect')">Bỏ chọn tất cả</button>
-                                </div>
+                    <div class="card shadow-sm mb-3">
+                        <div class="card-header bg-secondary text-white fw-bold"><i class="fas fa-sliders-h"></i> Bảng Cấu hình Thuộc tính Cột</div>
+                        <div class="card-body p-0">
+                            <div class="table-responsive" style="max-height: 500px; overflow-y: auto;">
+                                <table class="table table-hover table-bordered mb-0 align-middle">
+                                    <thead class="table-light position-sticky top-0 shadow-sm" style="z-index: 1;">
+                                        <tr>
+                                            <th>Tên Cột</th>
+                                            <th class="text-center" title="Ẩn cột trên form"><i class="fas fa-eye-slash text-danger"></i> Ẩn ô</th>
+                                            <th class="text-center" title="Chỉ đọc, không cho gõ"><i class="fas fa-lock text-secondary"></i> Khóa</th>
+                                            <th class="text-center" title="Ép kiểu ngày tháng"><i class="fas fa-calendar text-info"></i> Ngày</th>
+                                            <th class="text-center" title="Ép kiểu năm"><i class="fas fa-calendar-alt text-warning"></i> Năm</th>
+                                            <th class="text-center" title="Giữ lại nội dung khi nộp form"><i class="fas fa-book text-primary"></i> Bìa hồ sơ</th>
+                                            <th class="text-center" title="Hiển thị mờ khi ô trống"><i class="fas fa-lightbulb text-success"></i> Chữ gợi ý (Placeholder)</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="unifiedColConfigBody">
+                                        <tr><td colspan="7" class="text-center text-muted">Đang tải danh sách cột...</td></tr>
+                                    </tbody>
+                                </table>
                             </div>
                         </div>
                     </div>
-                    <div class="row">
-                        <div class="col-md-6">
-                            <div class="card shadow-sm mb-3 border-primary">
-                                <div class="card-header bg-primary text-white fw-bold"><i class="fas fa-book"></i> Cột Thông Tin Bìa</div>
-                                <div class="card-body">
-                                    <p class="text-muted small mb-2">Các ô được chọn sẽ không bị xóa khi bấm Nộp hồ sơ mới. Dùng chung cho nhiều tài liệu.</p>
-                                    <div id="coverColSelect" class="border rounded p-2 bg-white" style="max-height: 320px; overflow-y: auto;"></div>
-                                    <button class="btn btn-sm btn-outline-danger w-100 mt-2" onclick="clearCheckboxes('coverColSelect')">Bỏ chọn tất cả</button>
-                                </div>
-                            </div>
-                        </div>
-                        <div class="col-md-6">
-                            <div class="card shadow-sm mb-3 border-danger">
-                                <div class="card-header bg-danger text-white fw-bold"><i class="fas fa-eye-slash"></i> Ẩn ô nhập</div>
-                                <div class="card-body">
-                                    <p class="text-muted small mb-2">Các ô được chọn sẽ không xuất hiện trên biểu mẫu nhập. Những ô còn hiển thị vẫn giữ nguyên vị trí cột khi xuất Excel.</p>
-                                    <div id="hiddenColSelect" class="border rounded p-2 bg-white" style="max-height: 320px; overflow-y: auto;"></div>
-                                    <button class="btn btn-sm btn-outline-danger w-100 mt-2" onclick="clearCheckboxes('hiddenColSelect')">Bỏ chọn tất cả</button>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                    <div class="card shadow-sm mb-3 border-success">
-                        <div class="card-header bg-success text-white fw-bold"><i class="fas fa-lightbulb"></i> Gán gợi ý cho ô nhập</div>
-                        <div class="card-body">
-                            <p class="text-muted small mb-2">Chọn ô và nhập chữ gợi ý. Chữ này hiển thị mờ khi ô trống, tự biến mất khi người dùng nhập và không được lưu vào hồ sơ.</p>
-                            <div id="placeholderColSelect" class="border rounded px-3 bg-white" style="max-height: 320px; overflow-y: auto;"></div>
-                        </div>
                     </div>
                     <div class="card shadow-sm mb-3 border-primary">
                         <div class="card-header bg-primary text-white fw-bold"><i class="fas fa-link"></i> Đường dẫn của PDF liên kết</div>

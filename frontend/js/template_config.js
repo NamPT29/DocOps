@@ -144,34 +144,23 @@ async function openConfigModal(templateId, templateName) {
 }
 
 function populateColDropdowns() {
-    // Render checkboxes for the special-column panels
-    const checkboxPanels = ['roColSelect', 'dateColSelect', 'yearColSelect', 'hiddenColSelect', 'coverColSelect'];
-    checkboxPanels.forEach(panelId => {
-        const container = document.getElementById(panelId);
-        if (!container) return;
-        container.innerHTML = templateFields.map(f => `
-            <div class="form-check">
-                <input class="form-check-input" type="checkbox" value="${Number(f.col)}" id="chk_${panelId}_${Number(f.col)}">
-                <label class="form-check-label small" for="chk_${panelId}_${Number(f.col)}">${escapeHTML(f.label)}</label>
-            </div>
-        `).join('');
-    });
-
-    const placeholderContainer = document.getElementById('placeholderColSelect');
-    if (placeholderContainer) {
-        placeholderContainer.innerHTML = templateFields.map(f => `
-            <div class="row g-2 align-items-center border-bottom py-2 placeholder-rule-row">
-                <div class="col-md-5">
-                    <div class="form-check">
-                        <input class="form-check-input placeholder-rule-enabled" type="checkbox" value="${Number(f.col)}" id="chk_placeholder_${Number(f.col)}">
-                        <label class="form-check-label small" for="chk_placeholder_${Number(f.col)}">${escapeHTML(f.label)}</label>
-                    </div>
-                </div>
-                <div class="col-md-7">
-                    <input type="text" class="form-control form-control-sm placeholder-rule-text" data-col="${Number(f.col)}" maxlength="255" placeholder="Nhập chữ gợi ý hiển thị mờ">
-                </div>
-            </div>
-        `).join('');
+    // Render the unified table rows
+    const unifiedBody = document.getElementById('unifiedColConfigBody');
+    if (unifiedBody) {
+        unifiedBody.innerHTML = templateFields.map(f => {
+            const col = Number(f.col);
+            return `
+                <tr>
+                    <td class="fw-bold text-nowrap">${escapeHTML(f.label)}</td>
+                    <td class="text-center"><input class="form-check-input unified-chk-hidden" style="transform: scale(1.3); cursor: pointer;" type="checkbox" value="${col}" id="chk_hidden_${col}"></td>
+                    <td class="text-center"><input class="form-check-input unified-chk-ro" style="transform: scale(1.3); cursor: pointer;" type="checkbox" value="${col}" id="chk_ro_${col}"></td>
+                    <td class="text-center"><input class="form-check-input unified-chk-date" style="transform: scale(1.3); cursor: pointer;" type="checkbox" value="${col}" id="chk_date_${col}"></td>
+                    <td class="text-center"><input class="form-check-input unified-chk-year" style="transform: scale(1.3); cursor: pointer;" type="checkbox" value="${col}" id="chk_year_${col}"></td>
+                    <td class="text-center"><input class="form-check-input unified-chk-cover" style="transform: scale(1.3); cursor: pointer;" type="checkbox" value="${col}" id="chk_cover_${col}"></td>
+                    <td><input type="text" class="form-control form-control-sm placeholder-rule-text" data-col="${col}" placeholder="Nhập gợi ý..." maxlength="255"></td>
+                </tr>
+            `;
+        }).join('');
     }
 
     // Single selects / col-dropdowns in other tabs
@@ -201,22 +190,9 @@ function populateDictDropdowns() {
 }
 
 function resetVisualUi() {
-    // Reset checkboxes
-    ['roColSelect', 'dateColSelect', 'yearColSelect', 'hiddenColSelect', 'coverColSelect'].forEach(id => {
-        const el = document.getElementById(id);
-        if (el) el.querySelectorAll('input[type=checkbox]').forEach(cb => cb.checked = false);
-    });
-    const linkedPathEnabled = document.getElementById('linkedPdfPathEnabled');
-    const linkedPathCol = document.getElementById('linkedPdfPathCol');
-    const linkedPathLevels = document.getElementById('linkedPdfPathFolderLevels');
-    if (linkedPathEnabled) linkedPathEnabled.checked = false;
-    if (linkedPathCol) linkedPathCol.value = '';
-    if (linkedPathLevels) linkedPathLevels.value = '0';
-    const placeholderContainer = document.getElementById('placeholderColSelect');
-    if (placeholderContainer) {
-        placeholderContainer.querySelectorAll('.placeholder-rule-enabled').forEach(cb => cb.checked = false);
-        placeholderContainer.querySelectorAll('.placeholder-rule-text').forEach(input => input.value = '');
-    }
+    // Reset unified checkboxes and inputs
+    document.querySelectorAll('.unified-chk-hidden, .unified-chk-ro, .unified-chk-date, .unified-chk-year, .unified-chk-cover').forEach(cb => cb.checked = false);
+    document.querySelectorAll('.placeholder-rule-text').forEach(input => input.value = '');
     
     document.getElementById('dictRulesBody').innerHTML = '<tr><td colspan="4" class="text-center text-muted">Chưa có luật nào</td></tr>';
     document.getElementById('syncRulesList').innerHTML = '';
@@ -236,27 +212,22 @@ function getFieldName(colIdx) {
 // ---------------- UI -> JSON ----------------
 function buildConfigFromUI() {
     // Basic cols
-    // Basic cols - read from checkboxes
-    const getMultiVals = (id) => {
-        const el = document.getElementById(id);
-        if (!el) return [];
-        return Array.from(el.querySelectorAll('input[type=checkbox]:checked')).map(cb => parseInt(cb.value));
+    // Basic cols - read from unified table
+    const getMultiValsByClass = (className) => {
+        return Array.from(document.querySelectorAll(`.${className}:checked`)).map(cb => parseInt(cb.value, 10));
     };
-    currentConfigObj.readonly_cols = getMultiVals('roColSelect');
-    currentConfigObj.date_cols = getMultiVals('dateColSelect');
-    currentConfigObj.year_cols = getMultiVals('yearColSelect');
-    currentConfigObj.hidden_cols = getMultiVals('hiddenColSelect');
-    currentConfigObj.cover_cols = getMultiVals('coverColSelect');
-    const placeholderContainer = document.getElementById('placeholderColSelect');
-    currentConfigObj.placeholder_rules = placeholderContainer
-        ? Array.from(placeholderContainer.querySelectorAll('.placeholder-rule-enabled:checked'))
-            .map(checkbox => {
-                const col = parseInt(checkbox.value, 10);
-                const input = placeholderContainer.querySelector(`.placeholder-rule-text[data-col="${col}"]`);
-                return { col, text: input ? input.value.trim() : '' };
-            })
-            .filter(rule => Number.isInteger(rule.col) && rule.text.length > 0)
-        : [];
+    currentConfigObj.readonly_cols = getMultiValsByClass('unified-chk-ro');
+    currentConfigObj.date_cols = getMultiValsByClass('unified-chk-date');
+    currentConfigObj.year_cols = getMultiValsByClass('unified-chk-year');
+    currentConfigObj.hidden_cols = getMultiValsByClass('unified-chk-hidden');
+    currentConfigObj.cover_cols = getMultiValsByClass('unified-chk-cover');
+    
+    currentConfigObj.placeholder_rules = Array.from(document.querySelectorAll('.placeholder-rule-text'))
+        .map(input => {
+            const col = parseInt(input.getAttribute('data-col'), 10);
+            return { col, text: input.value.trim() };
+        })
+        .filter(rule => Number.isInteger(rule.col) && rule.text.length > 0);
     const linkedPathCol = parseInt(document.getElementById('linkedPdfPathCol')?.value || '', 10);
     const folderLevels = parseInt(document.getElementById('linkedPdfPathFolderLevels')?.value || '0', 10);
     currentConfigObj.linked_pdf_path = {
@@ -275,40 +246,29 @@ function renderVisualUiFromJSON() {
     const obj = currentConfigObj;
     
     // Basic
-    // Basic - set checkboxes from saved values
-    const setMultiVals = (id, arr) => {
-        const el = document.getElementById(id);
-        if (!el) return;
-        const selectedValues = new Set(
-            (Array.isArray(arr) ? arr : [])
-                .map(Number)
-                .filter(Number.isInteger),
-        );
-        el.querySelectorAll('input[type=checkbox]').forEach(cb => {
+    // Basic - set unified table from saved values
+    const setMultiValsByClass = (className, arr) => {
+        const selectedValues = new Set((Array.isArray(arr) ? arr : []).map(Number).filter(Number.isInteger));
+        document.querySelectorAll(`.${className}`).forEach(cb => {
             cb.checked = selectedValues.has(parseInt(cb.value, 10));
         });
     };
     
-    setMultiVals('roColSelect', obj.readonly_cols);
-    setMultiVals('dateColSelect', obj.date_cols);
-    setMultiVals('yearColSelect', obj.year_cols);
-    setMultiVals('hiddenColSelect', obj.hidden_cols);
-    setMultiVals('coverColSelect', obj.cover_cols);
-    const placeholderContainer = document.getElementById('placeholderColSelect');
-    if (placeholderContainer) {
-        const rules = Array.isArray(obj.placeholder_rules) ? obj.placeholder_rules : [];
-        placeholderContainer.querySelectorAll('.placeholder-rule-enabled').forEach(cb => cb.checked = false);
-        placeholderContainer.querySelectorAll('.placeholder-rule-text').forEach(input => input.value = '');
-        rules.forEach(rule => {
-            const col = Number(rule.col);
-            const checkbox = placeholderContainer.querySelector(`#chk_placeholder_${col}`);
-            const input = placeholderContainer.querySelector(`.placeholder-rule-text[data-col="${col}"]`);
-            if (checkbox && input && typeof rule.text === 'string' && rule.text.trim()) {
-                checkbox.checked = true;
-                input.value = rule.text.trim();
-            }
-        });
-    }
+    setMultiValsByClass('unified-chk-ro', obj.readonly_cols);
+    setMultiValsByClass('unified-chk-date', obj.date_cols);
+    setMultiValsByClass('unified-chk-year', obj.year_cols);
+    setMultiValsByClass('unified-chk-hidden', obj.hidden_cols);
+    setMultiValsByClass('unified-chk-cover', obj.cover_cols);
+
+    const rules = Array.isArray(obj.placeholder_rules) ? obj.placeholder_rules : [];
+    document.querySelectorAll('.placeholder-rule-text').forEach(input => input.value = '');
+    rules.forEach(rule => {
+        const col = Number(rule.col);
+        const input = document.querySelector(`.placeholder-rule-text[data-col="${col}"]`);
+        if (input && typeof rule.text === 'string' && rule.text.trim()) {
+            input.value = rule.text.trim();
+        }
+    });
     const linkedPath = obj.linked_pdf_path || {};
     const linkedPathEnabled = document.getElementById('linkedPdfPathEnabled');
     const linkedPathCol = document.getElementById('linkedPdfPathCol');
