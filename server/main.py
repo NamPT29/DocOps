@@ -4,7 +4,7 @@ import logging.handlers
 from pathlib import Path
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
 import uvicorn
@@ -117,7 +117,7 @@ app.add_middleware(
 )
 
 # Include routers
-from server.routers import auth, templates, tasks, submissions, documents, processing, dictionaries
+from server.routers import auth, templates, tasks, submissions, documents, processing, dictionaries, notifications
 app.include_router(auth.router)
 app.include_router(templates.router)
 app.include_router(tasks.router)
@@ -126,6 +126,7 @@ app.include_router(documents.router)
 app.include_router(processing.router)
 app.include_router(dictionaries.template_dict_router)
 app.include_router(dictionaries.router)
+app.include_router(notifications.router)
 
 PDF_STORAGE_PATH = os.getenv("PDF_STORAGE_PATH", "uploads")
 os.makedirs(PDF_STORAGE_PATH, exist_ok=True)
@@ -136,6 +137,10 @@ os.makedirs("templates", exist_ok=True)
 
 # Mount static directories
 app.mount("/frontend", StaticFiles(directory="frontend"), name="frontend")
+
+@app.get("/favicon.ico", include_in_schema=False)
+def favicon():
+    return Response(status_code=204)
 
 @app.get("/")
 def serve_index():

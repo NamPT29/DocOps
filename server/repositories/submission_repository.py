@@ -4,7 +4,7 @@ from sqlalchemy import func, or_
 
 from server.models import Submission, Template, User
 from server.repositories.base import BaseRepository
-from server.services.submission_metadata_service import folder_path_key, normalize_folder_path
+from server.utils.folder_utils import folder_path_key, normalize_folder_path
 
 
 class SubmissionRepository(BaseRepository[Submission]):
@@ -21,6 +21,11 @@ class SubmissionRepository(BaseRepository[Submission]):
         return self.session.query(Submission).filter(
             Submission.created_by_user_id == user_id,
             Submission.status == "draft",
+        ).all()
+
+    def list_by_template_id(self, template_id: int) -> list[Submission]:
+        return self.session.query(Submission).filter(
+            Submission.template_id == template_id
         ).all()
 
     def list_assignment_submission_references(
@@ -51,6 +56,29 @@ class SubmissionRepository(BaseRepository[Submission]):
     ) -> list[Submission]:
         query = self._apply_filters(
             self.session.query(Submission),
+            status='pending_review,rejected',
+            template_id=template_id,
+            folder_path=folder_path,
+        )
+        return query.order_by(
+            Submission.created_at.desc(),
+            Submission.id.desc(),
+        ).all()
+
+    def list_active_review_submission_rows(
+        self,
+        *,
+        template_id: int | None = None,
+        folder_path: str | None = None,
+    ) -> list[tuple]:
+        query = self._apply_filters(
+            self.session.query(
+                Submission.id,
+                Submission.folder_path,
+                Submission.assigned_document_id,
+                Submission.created_by_user_id,
+                Submission.template_id,
+            ),
             status='pending_review,rejected',
             template_id=template_id,
             folder_path=folder_path,
@@ -212,3 +240,27 @@ class SubmissionRepository(BaseRepository[Submission]):
         if user_id is not None:
             query = query.filter(Submission.created_by_user_id == user_id)
         return query.order_by(Submission.id.desc()).first()
+
+    def delete(self, submission: Submission):
+        self.session.delete(submission)
+
+    def user_submission_status_counts(self) -> dict[int, dict[str, int]]:
+        from sqlalchemy import func
+        submission_rows = (
+            self.session.query(
+                Submission.created_by_user_id,
+                Submission.status,
+                func.count(Submission.id),
+            )
+            .group_by(Submission.created_by_user_id, Submission.status)
+            .all()
+        )
+        submission_counts = {}
+        for user_id, status, count in submission_rows:
+            submission_counts.setdefault(user_id, {})[status] = count
+        return submission_counts
+
+    def count_by_document_id(self, document_id: int) -> int:
+        return self.session.query(Submission).filter(
+            Submission.assigned_document_id == document_id,
+        ).count()

@@ -147,6 +147,38 @@ def test_my_queue_hides_pdf_linked_to_draft_until_draft_is_deleted(database_fact
     db.close()
 
 
+def test_my_queue_hides_documents_linked_to_any_user_submission(database_factory):
+    db = database_factory()
+    assigned_user = User(username="queue-assigned-user", password="hash", role="user")
+    other_user = User(username="queue-other-user", password="hash", role="user")
+    template = Template(name="Mẫu hàng đợi", filename="queue.xlsx")
+    db.add_all([assigned_user, other_user, template])
+    db.flush()
+    document = AssignedDocument(
+        original_filename="already-entered.pdf",
+        uuid_filename="uuid-already-entered.pdf",
+        assigned_to_user_id=assigned_user.id,
+        template_id=template.id,
+        status="pending",
+    )
+    db.add(document)
+    db.flush()
+    db.add(Submission(
+        data_json=json.dumps({"_pdf_filename": document.original_filename}),
+        created_by_user_id=other_user.id,
+        template_id=template.id,
+        assigned_document_id=document.id,
+        status="approved",
+    ))
+    db.commit()
+
+    queue = get_my_queue(current_user={"id": assigned_user.id}, db=db)
+
+    assert queue["data"] == []
+    assert queue["linked_pdf_uuids"] == [document.uuid_filename]
+    db.close()
+
+
 def test_scan_excludes_managed_storage_when_it_is_nested_in_source(monkeypatch, tmp_path):
     source_root = tmp_path / "source"
     storage_root = source_root / "managed-uploads"

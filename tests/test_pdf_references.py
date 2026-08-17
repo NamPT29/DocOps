@@ -11,7 +11,7 @@ from starlette.datastructures import UploadFile
 
 from server.database import Base
 from server.routers import submissions
-from server.routers.submissions import _enrich_pdf_reference, _pdf_url
+from server.services.submission_service import SubmissionService, _pdf_url
 from server.models import (
     AssignedDocument,
     AssignedDocumentFolder,
@@ -69,7 +69,7 @@ def test_enriches_legacy_pdf_name_with_stored_uuid():
         uuid_filename='abc_CT 909101-GCN.pdf',
     )
 
-    data, resolved = _enrich_pdf_reference(
+    data, resolved = SubmissionService.enrich_pdf_reference(
         {'_pdf_filename': 'CT 909101-GCN.pdf'}, FakeDb(document), owner_id=2
     )
 
@@ -92,7 +92,7 @@ def test_enriches_report_with_authoritative_pdf_and_folder_paths():
         AssignedDocumentFolder: folder,
     })
 
-    data, resolved = _enrich_pdf_reference(
+    data, resolved = SubmissionService.enrich_pdf_reference(
         {
             '_pdf_uuid': 'uuid_001.pdf',
             '_pdf_relative_path': 'đường/dẫn/giả.pdf',
@@ -268,7 +268,7 @@ def test_admin_opening_review_also_gets_every_pdf_from_the_folder():
 
 
 def test_builds_url_for_manual_upload_uuid_without_assignment():
-    data, resolved = _enrich_pdf_reference(
+    data, resolved = SubmissionService.enrich_pdf_reference(
         {
             '_pdf_filename': 'Hồ sơ.pdf',
             '_pdf_uuid': 'uuid_Hồ sơ.pdf',

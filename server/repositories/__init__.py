@@ -10,6 +10,7 @@ from server.repositories.task_repository import TaskRepository
 from server.repositories.template_repository import TemplateRepository
 from server.repositories.user_repository import UserRepository
 from server.repositories.submission_view_repository import SubmissionViewRepository
+from server.repositories.notification_repository import NotificationRepository
 
 __all__ = [
     "DocumentRepository",
@@ -22,4 +23,5 @@ __all__ = [
     "TemplateRepository",
     "UserRepository",
     'SubmissionViewRepository',
+    'NotificationRepository',
 ]

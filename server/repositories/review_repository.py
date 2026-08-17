@@ -10,7 +10,7 @@ from server.models import (
     User,
 )
 from server.repositories.base import BaseRepository
-from server.services.submission_metadata_service import folder_path_key, normalize_folder_path
+from server.utils.folder_utils import folder_path_key, normalize_folder_path
 
 
 class ReviewRepository(BaseRepository[SubmissionReviewAssignment]):
@@ -31,6 +31,17 @@ class ReviewRepository(BaseRepository[SubmissionReviewAssignment]):
         return self.session.query(AssignedDocumentReviewAssignment).filter(
             AssignedDocumentReviewAssignment.document_id == document_id
         ).first()
+
+    def get_folder_reviewer(self, folder_path: str) -> int | None:
+        if not folder_path or folder_path == "__ROOT__":
+            return None
+        assignment = self.session.query(AssignedDocumentReviewAssignment.reviewer_user_id).join(
+            AssignedDocumentFolder,
+            AssignedDocumentFolder.document_id == AssignedDocumentReviewAssignment.document_id
+        ).filter(
+            AssignedDocumentFolder.folder_group == folder_path
+        ).first()
+        return assignment[0] if assignment else None
 
     def delete_document_assignments(self, document_ids: list[int]) -> int:
         if not document_ids:
@@ -124,11 +135,12 @@ class ReviewRepository(BaseRepository[SubmissionReviewAssignment]):
         ).delete(synchronize_session=False)
 
     def reviewer_folder_rows(self, reviewer_id: int, template_id: int | None) -> list[tuple]:
+        from sqlalchemy import func
         query = self.session.query(
-            AssignedDocument,
             AssignedDocumentFolder.folder_group,
             User.username,
             Template.name,
+            func.count(AssignedDocument.id),
         ).join(
             AssignedDocumentFolder,
             AssignedDocumentFolder.document_id == AssignedDocument.id,
@@ -147,9 +159,12 @@ class ReviewRepository(BaseRepository[SubmissionReviewAssignment]):
         )
         if template_id:
             query = query.filter(AssignedDocument.template_id == template_id)
-        return query.order_by(
+        return query.group_by(
             AssignedDocumentFolder.folder_group,
-            AssignedDocument.id,
+            User.username,
+            Template.name,
+        ).order_by(
+            AssignedDocumentFolder.folder_group,
         ).all()
 
     def reviewer_submitted_counts(
@@ -198,6 +213,8 @@ class ReviewRepository(BaseRepository[SubmissionReviewAssignment]):
         reviewer_id: int,
         folder_path: str,
         template_id: int | None,
+        offset: int | None = None,
+        limit: int | None = None,
     ) -> list[Submission]:
         normalized = normalize_folder_path(folder_path)
         query = self.session.query(Submission).join(
@@ -212,10 +229,36 @@ class ReviewRepository(BaseRepository[SubmissionReviewAssignment]):
         )
         if template_id:
             query = query.filter(Submission.template_id == template_id)
-        return query.order_by(
+        query = query.order_by(
             Submission.created_at.desc(),
             Submission.id.desc(),
-        ).all()
+        )
+        if offset is not None:
+            query = query.offset(offset)
+        if limit is not None:
+            query = query.limit(limit)
+        return query.all()
+
+    def reviewer_folder_submissions_count(
+        self,
+        reviewer_id: int,
+        folder_path: str,
+        template_id: int | None,
+    ) -> int:
+        normalized = normalize_folder_path(folder_path)
+        query = self.session.query(Submission.id).join(
+            SubmissionReviewAssignment,
+            SubmissionReviewAssignment.submission_id == Submission.id,
+        ).filter(
+            SubmissionReviewAssignment.reviewer_user_id == reviewer_id,
+            Submission.created_by_user_id != reviewer_id,
+            Submission.status == "pending_review",
+            Submission.folder_path_key == folder_path_key(normalized),
+            Submission.folder_path == normalized,
+        )
+        if template_id:
+            query = query.filter(Submission.template_id == template_id)
+        return query.count()
 
     def reviewer_has_linked_submission(
         self,

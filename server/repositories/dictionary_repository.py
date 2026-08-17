@@ -1,6 +1,24 @@
+from sqlalchemy import event
+from cachetools import TTLCache
+
 from server.models import Dictionary, DictionaryItem
 from server.repositories.base import BaseRepository
 
+
+_OPTION_MAP_CACHE = TTLCache(maxsize=100, ttl=3600)
+
+def _invalidate_cache(mapper, connection, target):
+    if isinstance(target, Dictionary):
+        _OPTION_MAP_CACHE.pop(target.template_id, None)
+    elif isinstance(target, DictionaryItem):
+        _OPTION_MAP_CACHE.clear()
+
+event.listen(Dictionary, 'after_insert', _invalidate_cache)
+event.listen(Dictionary, 'after_update', _invalidate_cache)
+event.listen(Dictionary, 'after_delete', _invalidate_cache)
+event.listen(DictionaryItem, 'after_insert', _invalidate_cache)
+event.listen(DictionaryItem, 'after_update', _invalidate_cache)
+event.listen(DictionaryItem, 'after_delete', _invalidate_cache)
 
 class DictionaryRepository(BaseRepository[Dictionary]):
     model = Dictionary
@@ -45,12 +63,16 @@ class DictionaryRepository(BaseRepository[Dictionary]):
         self.session.delete(item)
 
     def option_map_for_template(self, template_id: int) -> dict[str, list[str]]:
+        if template_id in _OPTION_MAP_CACHE:
+            return _OPTION_MAP_CACHE[template_id]
+
         rows = self.session.query(Dictionary, DictionaryItem).outerjoin(
             DictionaryItem,
             DictionaryItem.dictionary_id == Dictionary.id,
         ).filter(
             Dictionary.template_id == template_id
         ).order_by(Dictionary.id, DictionaryItem.id).all()
+        
         options: dict[str, list[str]] = {}
         for dictionary, item in rows:
             values = options.setdefault(dictionary.name, [])
@@ -59,4 +81,6 @@ class DictionaryRepository(BaseRepository[Dictionary]):
             values.append(
                 f"{item.code} - {item.value}" if item.code else item.value
             )
+            
+        _OPTION_MAP_CACHE[template_id] = options
         return options

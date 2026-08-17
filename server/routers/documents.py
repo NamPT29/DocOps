@@ -1,6 +1,6 @@
 from fastapi import APIRouter, BackgroundTasks, Depends, UploadFile, File, HTTPException, Form
 from sqlalchemy.orm import Session
-from typing import List, Literal
+from typing import List, Literal, Optional
 from datetime import datetime
 import os
 import secrets
@@ -20,8 +20,10 @@ from server.models import (
 )
 from server.services.upload_service import save_validated_upload
 from server.services.submission_metadata_service import (
-    NO_FOLDER_SENTINEL,
     backfill_submission_metadata,
+)
+from server.utils.folder_utils import (
+    NO_FOLDER_SENTINEL,
     normalize_folder_path,
 )
 from server.repositories import (
@@ -91,48 +93,16 @@ def start_server_folder_import(
     current_user: dict = Depends(get_admin_user),
     db: Session = Depends(get_db),
 ):
-    input_user_ids = list(dict.fromkeys(request.input_user_ids))
-    reviewer_user_ids = list(dict.fromkeys(request.reviewer_user_ids))
-    if not input_user_ids:
-        raise HTTPException(status_code=400, detail="Vui lòng chọn ít nhất một người nhập")
-    if not reviewer_user_ids:
-        raise HTTPException(status_code=400, detail="Vui lòng chọn ít nhất một người kiểm tra")
-    summary, _ = scan_server_source_documents(request.relative_path)
-    if summary["total_files"] == 0:
-        raise HTTPException(status_code=400, detail="Thư mục không có tài liệu được hỗ trợ")
-    maximum_level = max(1, summary["max_folder_depth"])
-    if request.grouping_level < 1 or request.grouping_level > maximum_level:
-        raise HTTPException(status_code=400, detail="Cấp folder phân việc không hợp lệ")
-    if not TemplateRepository(db).get(request.template_id):
-        raise HTTPException(status_code=404, detail="Biểu mẫu không tồn tại")
-    user_repository = UserRepository(db)
-    valid_input_ids = user_repository.input_user_ids()
-    valid_reviewer_ids = {user.id for user in user_repository.list_all()}
-    if not set(input_user_ids).issubset(valid_input_ids):
-        raise HTTPException(status_code=400, detail="Danh sách người nhập không hợp lệ")
-    if not set(reviewer_user_ids).issubset(valid_reviewer_ids):
-        raise HTTPException(status_code=400, detail="Danh sách người kiểm tra không hợp lệ")
-    if any(not (set(reviewer_user_ids) - {user_id}) for user_id in input_user_ids):
-        raise HTTPException(
-            status_code=400,
-            detail="Mỗi người nhập phải có ít nhất một người kiểm tra khác mình",
-        )
-
-    job = ServerFolderImportJob(
-        created_by_user_id=current_user["id"],
+    from server.services.server_folder_service import create_server_folder_import_job
+    job = create_server_folder_import_job(
+        db=db,
         template_id=request.template_id,
-        source_relative_path=summary["selected_relative_path"],
+        input_user_ids=request.input_user_ids,
+        reviewer_user_ids=request.reviewer_user_ids,
+        relative_path=request.relative_path,
         grouping_level=request.grouping_level,
-        user_ids_json=json.dumps(input_user_ids),
-        status="queued",
-        total_files=summary["total_files"],
+        current_user_id=current_user["id"]
     )
-    repository = ServerFolderRepository(db)
-    repository.add(job)
-    db.flush()
-    repository.add_reviewers(job.id, reviewer_user_ids)
-    db.commit()
-    db.refresh(job)
     background_tasks.add_task(process_server_folder_import, job.id)
     return {"status": "ok", "job_id": job.id, "total_files": job.total_files}
 
@@ -266,75 +236,6 @@ async def upload_and_assign_documents(
                 os.remove(path)
         raise HTTPException(status_code=500, detail="Không thể tải lên và phân công tài liệu")
 
-def _find_submission_document(db: Session, submission: Submission):
-    try:
-        data = json.loads(submission.data_json)
-    except (TypeError, ValueError, json.JSONDecodeError):
-        return None
-    uuid_filename = data.get("_pdf_uuid")
-    original_filename = data.get("_pdf_filename")
-    if not uuid_filename and not original_filename:
-        return None
-
-    return DocumentRepository(db).resolve_reference(
-        owner_id=submission.created_by_user_id,
-        uuid_filename=uuid_filename,
-        original_filename=original_filename,
-    )
-
-
-def _get_user_pending_assignment_folders(db: Session, user_id: int) -> list[dict]:
-    document_repository = DocumentRepository(db)
-    documents = document_repository.list_pending_for_user(user_id)
-    candidate_ids = {document.id for document in documents}
-    metadata = document_repository.metadata_map(candidate_ids)
-    group_document_ids: dict[str, list[int]] = {}
-    document_group_paths = {}
-    for document in documents:
-        folder_path = normalize_folder_path(
-            metadata.get(document.id, {}).get("folder_path")
-        ) or NO_FOLDER_SENTINEL
-        group_document_ids.setdefault(folder_path, []).append(document.id)
-        document_group_paths[document.id] = folder_path
-
-    real_folder_paths = {
-        folder_path
-        for folder_path in group_document_ids
-        if folder_path != NO_FOLDER_SENTINEL
-    }
-    submission_rows = SubmissionRepository(
-        db
-    ).list_assignment_submission_references(
-        candidate_ids,
-        real_folder_paths,
-    )
-    submission_counts = {folder_path: 0 for folder_path in group_document_ids}
-    for assigned_document_id, submission_folder_path in submission_rows:
-        folder_path = document_group_paths.get(assigned_document_id)
-        if not folder_path:
-            normalized = normalize_folder_path(submission_folder_path)
-            folder_path = normalized if normalized in real_folder_paths else None
-        if folder_path:
-            submission_counts[folder_path] += 1
-
-    groups = []
-    for folder_path, document_ids in group_document_ids.items():
-        if folder_path == NO_FOLDER_SENTINEL:
-            folder_name = "Tài liệu chưa có folder"
-        elif folder_path == "__ROOT__":
-            folder_name = "Thư mục gốc"
-        else:
-            folder_name = folder_path.rstrip("/").rsplit("/", 1)[-1]
-        groups.append({
-            "folder_path": folder_path,
-            "folder_name": folder_name,
-            "document_ids": document_ids,
-            "document_count": len(document_ids),
-            "submission_count": submission_counts[folder_path],
-        })
-    return sorted(groups, key=lambda item: item["folder_path"].casefold())
-
-
 @router.get("/documents/assignments/folders")
 def get_user_assignment_folders(
     user_id: int,
@@ -346,7 +247,8 @@ def get_user_assignment_folders(
         raise HTTPException(status_code=400, detail="Nhân viên không hợp lệ")
 
     backfill_submission_metadata(db)
-    groups = _get_user_pending_assignment_folders(db, target_user.id)
+    from server.services.document_assignment_service import get_user_pending_assignment_folders
+    groups = get_user_pending_assignment_folders(db, target_user.id)
     data = [{
         "folder_path": group["folder_path"],
         "folder_name": group["folder_name"],
@@ -373,88 +275,16 @@ def revoke_user_assignments(
     if not target_user or target_user.role == "admin":
         raise HTTPException(status_code=400, detail="Nhân viên thu hồi không hợp lệ")
 
-    result = {
-        "input_revoked": 0,
-        "input_folders_revoked": 0,
-        "input_folders_blocked": 0,
-        "drafts_blocked": 0,
-        "review_reservations_revoked": 0,
-        "reviews_transferred_to_admin": 0,
-        "reviews_blocked": 0,
-    }
+    from server.services.document_assignment_service import execute_revoke_user_assignments
+    
     try:
-        document_repository = DocumentRepository(db)
-        review_repository = ReviewRepository(db)
-        if request.assignment_type == "input":
-            target_folder_path = normalize_folder_path(request.folder_path)
-            if not target_folder_path:
-                raise HTTPException(
-                    status_code=400,
-                    detail="Vui lòng chọn folder cần thu hồi",
-                )
-            backfill_submission_metadata(db)
-            groups = _get_user_pending_assignment_folders(db, target_user.id)
-            target_group = next(
-                (
-                    group for group in groups
-                    if group["folder_path"] == target_folder_path
-                ),
-                None,
-            )
-            if not target_group:
-                raise HTTPException(
-                    status_code=404,
-                    detail="Folder không còn được phân cho nhân viên này",
-                )
-            if target_group["submission_count"]:
-                raise HTTPException(
-                    status_code=409,
-                    detail="Folder đã có hồ sơ nên không thể thu hồi",
-                )
-
-            revocable_ids = target_group["document_ids"]
-            if revocable_ids:
-                result["review_reservations_revoked"] = (
-                    review_repository.delete_document_assignments(revocable_ids)
-                )
-                result["input_revoked"] = document_repository.unassign_documents(
-                    revocable_ids
-                )
-            result["input_folders_revoked"] = 1
-        else:
-            pending_mappings = review_repository.pending_document_assignments(
-                target_user.id
-            )
-            result["review_reservations_revoked"] = len(pending_mappings)
-            for mapping in pending_mappings:
-                review_repository.delete(mapping)
-
-            active_reviews = review_repository.active_submission_assignments(
-                target_user.id
-            )
-            for assignment, submission in active_reviews:
-                if submission.created_by_user_id == current_user["id"]:
-                    result["reviews_blocked"] += 1
-                    continue
-                assignment.reviewer_user_id = current_user["id"]
-                assignment.assigned_at = get_utc_now()
-                document = _find_submission_document(db, submission)
-                if document:
-                    document_mapping = review_repository.get_document_assignment(
-                        document.id
-                    )
-                    if document_mapping:
-                        document_mapping.reviewer_user_id = current_user["id"]
-                        document_mapping.assigned_at = get_utc_now()
-                    else:
-                        document_repository.add_review_assignment(
-                            AssignedDocumentReviewAssignment(
-                                document_id=document.id,
-                                reviewer_user_id=current_user["id"],
-                            )
-                        )
-                result["reviews_transferred_to_admin"] += 1
-
+        result = execute_revoke_user_assignments(
+            db=db,
+            target_user_id=target_user.id,
+            assignment_type=request.assignment_type,
+            folder_path=request.folder_path,
+            current_user_id=current_user["id"]
+        )
         db.commit()
         return {"status": "ok", **result}
     except HTTPException:
@@ -637,6 +467,9 @@ def get_document_stats(current_user: dict = Depends(get_admin_user), db: Session
     document_counts = document_repository.user_document_counts()
     reservation_counts = document_repository.reviewer_reservation_counts()
     active_review_counts = ReviewRepository(db).active_review_counts()
+    # Submission counts grouped by user and status
+    submission_counts = SubmissionRepository(db).user_submission_status_counts()
+
     stats = []
     for u in users:
         counts = document_counts.get(u.id, {})
@@ -644,6 +477,7 @@ def get_document_stats(current_user: dict = Depends(get_admin_user), db: Session
         completed = counts.get("completed", 0)
         review_reservations = reservation_counts.get(u.id, 0)
         active_reviews = active_review_counts.get(u.id, 0)
+        sub_counts = submission_counts.get(u.id, {})
         
         stats.append({
             "user_id": u.id,
@@ -651,6 +485,11 @@ def get_document_stats(current_user: dict = Depends(get_admin_user), db: Session
             "pending": pending,
             "completed": completed,
             "review_pending": review_reservations + active_reviews,
+            "submissions_draft": sub_counts.get("draft", 0),
+            "submissions_pending_review": sub_counts.get("pending_review", 0),
+            "submissions_approved": sub_counts.get("approved", 0),
+            "submissions_rejected": sub_counts.get("rejected", 0),
+            "submissions_total": sum(sub_counts.values()),
         })
         
     return {
@@ -690,4 +529,58 @@ def get_my_queue(current_user: dict = Depends(get_input_user), db: Session = Dep
         "status": "ok",
         "data": list(grouped.values()),
         "linked_pdf_uuids": sorted(linked_pdf_uuids),
+    }
+
+@router.get("/documents/inventory")
+def get_inventory(
+    page: int = 1,
+    page_size: int = 20,
+    folder_path: Optional[str] = None,
+    template_id: Optional[int] = None,
+    current_user: dict = Depends(get_admin_user),
+    db: Session = Depends(get_db)
+):
+    repo = DocumentRepository(db)
+    folders = repo.get_inventory_folders()
+    rows, total = repo.get_inventory_documents(folder_path=folder_path, page=page, page_size=page_size)
+    
+    upload_dir = os.getenv("PDF_STORAGE_PATH", "uploads")
+    existing_files = set(os.listdir(upload_dir)) if os.path.exists(upload_dir) else set()
+    
+    data = []
+    for doc, rel_path, folder_group, assigned_username, submission_status in rows:
+        exists = doc.uuid_filename in existing_files
+        data.append({
+            "id": doc.id,
+            "filename": doc.original_filename,
+            "relative_path": folder_group or "__NO_FOLDER__",
+            "source_path": rel_path or "",
+            "storage_path": doc.uuid_filename,
+            "assigned_to": assigned_username or "Chưa giao",
+            "status": submission_status or doc.status,
+            "storage_exists": exists
+        })
+        
+    total_pages = (total + page_size - 1) // page_size
+    
+    # Calculate stored/missing count for inventory
+    stored_count = min(total, len(existing_files))
+    missing_count = max(0, total - stored_count)
+    
+    return {
+        "status": "ok",
+        "data": data,
+        "folders": folders,
+        "selected_folder": folder_path,
+        "summary": {
+            "total": total,
+            "stored": stored_count,
+            "missing": missing_count
+        },
+        "pagination": {
+            "page": page,
+            "page_size": page_size,
+            "total": total,
+            "total_pages": total_pages
+        }
     }

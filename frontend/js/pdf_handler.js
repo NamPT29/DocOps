@@ -457,6 +457,21 @@ async function selectFileFromQueue(index) {
     isPdfLinked = true;
     updatePdfLinkUI();
     renderFileQueue();
+    
+    // Auto-load submission if in review mode and clicking a new PDF
+    console.log("Checking auto-load:", {
+        isEditingFromList,
+        file_submission_id: file.submission_id,
+        currentEditingId: typeof currentEditingId !== 'undefined' ? currentEditingId : 'undefined',
+        typeof_editSubmission: typeof editSubmission
+    });
+    
+    if (isEditingFromList && file.submission_id && typeof currentEditingId !== 'undefined' && currentEditingId != file.submission_id && typeof editSubmission === 'function') {
+        console.log("Auto-loading submission", file.submission_id);
+        setTimeout(() => {
+            editSubmission(file.submission_id);
+        }, 0);
+    }
 }
 
 async function fetchMyQueue() {
@@ -473,11 +488,29 @@ async function fetchMyQueue() {
             const linkedPdfUuids = new Set(
                 (Array.isArray(data.linked_pdf_uuids) ? data.linked_pdf_uuids : []).map(String)
             );
+            
+            const currentQueueUuids = new Set();
+            queueGroups.forEach(group => {
+                if (group.files) {
+                    group.files.forEach(doc => {
+                        if (doc.uuid) currentQueueUuids.add(String(doc.uuid));
+                    });
+                }
+            });
+
             const activeFile = uploadedFilesQueue[iframeCurrentIndex] || null;
-            uploadedFilesQueue = uploadedFilesQueue.filter(file =>
-                file.temporary_view !== true
-                && !(file.uuid && linkedPdfUuids.has(String(file.uuid)))
-            );
+            uploadedFilesQueue = uploadedFilesQueue.filter(file => {
+                if (file.temporary_view === true) return false;
+                if (file.uuid && linkedPdfUuids.has(String(file.uuid))) return false;
+                
+                // Nếu là file được giao từ server (có template_id) 
+                // nhưng lại không nằm trong danh sách queue mới nhất thì xóa khỏi hàng chờ
+                if (file.template_id !== undefined && file.template_id !== null) {
+                    return file.uuid && currentQueueUuids.has(String(file.uuid));
+                }
+                
+                return true;
+            });
             iframeCurrentIndex = activeFile && uploadedFilesQueue.includes(activeFile)
                 ? uploadedFilesQueue.indexOf(activeFile)
                 : -1;
@@ -640,6 +673,7 @@ function loadReviewFolderFiles(folderFiles, selectedUuid) {
             folder_group: file.folder_group || null,
             template_id: file.template_id || null,
             template_name: file.template_name || null,
+            submission_id: file.submission_id || null,
             temporary_view: true,
         });
     });

@@ -19,6 +19,24 @@ class UserCapability(Base):
     can_review = Column(Boolean, nullable=False, default=False)
     updated_at = Column(DateTime, nullable=False, default=get_utc_now)
 
+
+class Notification(Base):
+    __tablename__ = "notifications"
+
+    id = Column(Integer, primary_key=True, index=True)
+    title = Column(String(255), nullable=False)
+    message = Column(Text, nullable=False)
+    created_by_user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    created_at = Column(DateTime, nullable=False, default=get_utc_now, index=True)
+
+
+class NotificationRecipient(Base):
+    __tablename__ = "notification_recipients"
+
+    notification_id = Column(Integer, ForeignKey("notifications.id", ondelete="CASCADE"), primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), primary_key=True, index=True)
+    read_at = Column(DateTime, nullable=True)
+
 class Template(Base):
     __tablename__ = "templates"
     

@@ -12,3 +12,4 @@ python-dotenv
 PyJWT
 pytest
 pytest-mock
+cachetools

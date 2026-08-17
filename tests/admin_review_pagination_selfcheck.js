@@ -93,11 +93,11 @@ vm.runInContext(fs.readFileSync('frontend/js/admin_panel.js', 'utf8'), sandbox, 
     assert.equal(reviewRequest.searchParams.get('folder_path'), '004/0023');
     assert.equal(reviewRequest.searchParams.get('page'), '2');
     assert.equal(reviewRequest.searchParams.get('page_size'), '20');
-    assert.equal(reviewPagination.children.length, 4);
-    assert.equal(reviewPagination.children[1].disabled, false);
-    assert.equal(reviewPagination.children[3].disabled, true);
+    assert.equal(reviewPagination.children.length, 5);
+    assert.equal(reviewPagination.children[2].disabled, false);
+    assert.equal(reviewPagination.children[4].disabled, true);
 
-    await reviewPagination.children[1].onclick();
+    await reviewPagination.children[2].onclick();
     const previousPageRequest = new URL(calls.at(-1));
     assert.equal(previousPageRequest.searchParams.get('page'), '1');
     console.log('Admin review pagination self-check: OK');

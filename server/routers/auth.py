@@ -241,6 +241,25 @@ def api_delete_user(user_id: int, current_user: dict = Depends(get_admin_user), 
         db.rollback()
         raise HTTPException(status_code=500, detail="Không thể xóa người dùng")
 
+class ChangePasswordRequest(BaseModel):
+    new_password: str = Field(min_length=8, max_length=128)
+
+@router.put("/users/{user_id}/password")
+def api_change_user_password(
+    user_id: int, 
+    req: ChangePasswordRequest, 
+    current_user: dict = Depends(get_admin_user), 
+    db: Session = Depends(get_db)
+):
+    repository = UserRepository(db)
+    user = repository.get(user_id)
+    if not user:
+        return {"status": "error", "message": "Không tìm thấy người dùng"}
+    
+    user.password = hash_password(req.new_password)
+    db.commit()
+    return {"status": "ok"}
+
 @router.get("/users")
 def api_get_users(current_user: dict = Depends(get_admin_user), db: Session = Depends(get_db)):
     users = UserRepository(db).list_all()

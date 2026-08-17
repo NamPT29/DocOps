@@ -48,12 +48,8 @@ def _detect_excel_layout(excel_path):
     return sheet_name, header_rows
 
 
-def get_form_schema(excel_path, dicts=None, config=None):
-    """
-    Detects the data worksheet and its header rows to construct a hierarchical form schema.
-    Uses provided dicts or an empty dictionary.
-    Optionally applies dynamic `config` (dict) to override hardcoded behaviors.
-    """
+
+def _load_excel_headers(excel_path):
     try:
         sheet_name, header_rows = _detect_excel_layout(excel_path)
         df_head = pd.read_excel(
@@ -62,10 +58,118 @@ def get_form_schema(excel_path, dicts=None, config=None):
             header=header_rows,
             nrows=0,
         )
+        return sheet_name, df_head
     except Exception as e:
         raise ValueError(f"Không thể tự nhận diện biểu mẫu Excel: {e}") from e
+
+def _build_field_schema(col_idx, levels, is_legacy_data_sheet, config, dicts):
+    levels = [str(value).strip() for value in levels]
+    levels = ["" if value.startswith('Unnamed:') else value for value in levels]
+    cat = levels[0] if levels else ""
+    field1 = levels[1] if len(levels) > 1 else ""
+    field2 = levels[2] if len(levels) > 2 else ""
+    field3 = levels[3] if len(levels) > 3 else ""
     
-    # Use dicts from DB if provided
+    # Skip 'Số TT' as user requested
+    if 'số tt' in cat.lower() or 'số tt' in field1.lower():
+        return None, None
+    
+    if not any(levels):
+        return None, None
+
+    col_1 = col_idx + 1
+    if is_legacy_data_sheet and ((17 <= col_1 <= 22) or (34 <= col_1 <= 39) or (86 <= col_1 <= 89) or (90 <= col_1 <= 94) or (111 <= col_1 <= 168) or (179 <= col_1 <= 182)):
+        label_parts = [p for p in [field2, field3] if p]
+    else:
+        label_parts = [value for value in levels[1:] if value]
+        
+    label = " - ".join(label_parts) if label_parts else cat
+    
+    if not cat:
+        cat = "Thông tin chung"
+
+    field_type = "text"
+    options = []
+    extract_mode = "none"
+    
+    if config and isinstance(config, dict):
+        dd_rules = config.get("dropdown_rules", [])
+        for rule in dd_rules:
+            if str(rule.get("col")) == str(col_1):
+                field_type = "dropdown"
+                dict_name = rule.get("dictionary")
+                options = dicts.get(dict_name, [])
+                extract_mode = rule.get("extract_mode", "none")
+                break
+            
+    field = {
+        "col_index": col_idx,
+        "label": label,
+        "name": f"col_{col_idx}",
+        "type": field_type,
+        "options": options
+    }
+    if config and isinstance(config, dict):
+        seps = config.get("separators", {})
+        if str(col_1) in seps:
+            field["separator_above"] = seps[str(col_1)]["title"]
+            field["group_end"] = int(seps[str(col_1)]["group_end"]) if seps[str(col_1)].get("group_end") else None
+    elif is_legacy_data_sheet:
+        if col_1 == 17:
+            field["separator_above"] = "Địa chỉ sử dụng"
+            field["group_end"] = 22
+        elif col_1 == 34:
+            field["separator_above"] = "Địa chỉ vợ (chồng)"
+            field["group_end"] = 39
+        elif col_1 == 86:
+            field["separator_above"] = "Diện tích hành lang"
+            field["group_end"] = 89
+        elif col_1 == 90:
+            field["separator_above"] = "Địa chỉ thửa đất"
+            field["group_end"] = 94
+        elif col_1 == 111:
+            field["separator_above"] = "Hạn chế quyền"
+            field["group_end"] = 117
+        elif col_1 == 118:
+            field["separator_above"] = "Nghĩa vụ tài chính"
+            field["group_end"] = 123
+        elif col_1 == 124:
+            field["separator_above"] = "Miễn giảm nghĩa vụ tài chính"
+            field["group_end"] = 128
+        elif col_1 == 129:
+            field["separator_above"] = "Nợ nghĩa vụ tài chính"
+            field["group_end"] = 133
+        elif col_1 == 134:
+            field["separator_above"] = "Nhà ở riêng lẻ"
+            field["group_end"] = 141
+        elif col_1 == 142:
+            field["separator_above"] = "Công trình, hạng mục công trình xây dựng"
+            field["group_end"] = 154
+        elif col_1 == 155:
+            field["separator_above"] = "Công trình ngầm"
+            field["group_end"] = 162
+        elif col_1 == 163:
+            field["separator_above"] = "Rừng trồng"
+            field["group_end"] = 165
+        elif col_1 == 166:
+            field["separator_above"] = "Cây lâu năm"
+            field["group_end"] = 168
+        elif col_1 == 179:
+            field["separator_above"] = "Thông tin lưu kho vật lý hồ sơ"
+            field["group_end"] = 182
+        
+    if field_type == "dropdown":
+        field["extract_mode"] = extract_mode
+
+    return cat, field
+
+def get_form_schema(excel_path, dicts=None, config=None):
+    """
+    Detects the data worksheet and its header rows to construct a hierarchical form schema.
+    Uses provided dicts or an empty dictionary.
+    Optionally applies dynamic `config` (dict) to override hardcoded behaviors.
+    """
+    sheet_name, df_head = _load_excel_headers(excel_path)
     if dicts is None:
         dicts = {}
 
@@ -73,33 +177,14 @@ def get_form_schema(excel_path, dicts=None, config=None):
     current_category = ""
     category_fields = []
     
+    is_legacy_data_sheet = sheet_name.strip().lower() == 'data'
+    
     for col_idx, col_tuple in enumerate(df_head.columns):
         levels = list(col_tuple) if isinstance(col_tuple, tuple) else [col_tuple]
-        levels = [str(value).strip() for value in levels]
-        levels = ["" if value.startswith('Unnamed:') else value for value in levels]
-        cat = levels[0] if levels else ""
-        field1 = levels[1] if len(levels) > 1 else ""
-        field2 = levels[2] if len(levels) > 2 else ""
-        field3 = levels[3] if len(levels) > 3 else ""
+        cat, field = _build_field_schema(col_idx, levels, is_legacy_data_sheet, config, dicts)
         
-        # Skip 'Số TT' as user requested
-        if 'số tt' in cat.lower() or 'số tt' in field1.lower():
+        if not field:
             continue
-        
-        if not any(levels):
-            continue
-
-        col_1 = col_idx + 1
-        is_legacy_data_sheet = sheet_name.strip().lower() == 'data'
-        if is_legacy_data_sheet and ((17 <= col_1 <= 22) or (34 <= col_1 <= 39) or (86 <= col_1 <= 89) or (90 <= col_1 <= 94) or (111 <= col_1 <= 168) or (179 <= col_1 <= 182)):
-            label_parts = [p for p in [field2, field3] if p]
-        else:
-            label_parts = [value for value in levels[1:] if value]
-            
-        label = " - ".join(label_parts) if label_parts else cat
-        
-        if not cat:
-            cat = "Thông tin chung"
             
         if cat != current_category:
             if current_category:
@@ -109,86 +194,6 @@ def get_form_schema(excel_path, dicts=None, config=None):
                 })
             current_category = cat
             category_fields = []
-            
-        # Determine field type and options
-        # Mặc định tất cả các cột là dạng chữ (text)
-        field_type = "text"
-        options = []
-        extract_mode = "none"
-        col_1 = col_idx + 1
-        
-        # Chỉ áp dụng Từ điển (Dropdown) nếu Admin có cấu hình trong dropdown_rules
-        if config and isinstance(config, dict):
-            dd_rules = config.get("dropdown_rules", [])
-            for rule in dd_rules:
-                if str(rule.get("col")) == str(col_1):
-                    field_type = "dropdown"
-                    dict_name = rule.get("dictionary")
-                    
-                    options = dicts.get(dict_name, [])
-                        
-                    extract_mode = rule.get("extract_mode", "none")
-                    break
-                
-        field = {
-            "col_index": col_idx,
-            "label": label,
-            "name": f"col_{col_idx}",
-            "type": field_type,
-            "options": options
-        }
-        if config and isinstance(config, dict):
-            seps = config.get("separators", {})
-            if str(col_1) in seps:
-                field["separator_above"] = seps[str(col_1)]["title"]
-                field["group_end"] = int(seps[str(col_1)]["group_end"]) if seps[str(col_1)].get("group_end") else None
-        elif is_legacy_data_sheet:
-            # Hardcoded separators fallback
-            if col_1 == 17:
-                field["separator_above"] = "Địa chỉ sử dụng"
-                field["group_end"] = 22
-            elif col_1 == 34:
-                field["separator_above"] = "Địa chỉ vợ (chồng)"
-                field["group_end"] = 39
-            elif col_1 == 86:
-                field["separator_above"] = "Diện tích hành lang"
-                field["group_end"] = 89
-            elif col_1 == 90:
-                field["separator_above"] = "Địa chỉ thửa đất"
-                field["group_end"] = 94
-            elif col_1 == 111:
-                field["separator_above"] = "Hạn chế quyền"
-                field["group_end"] = 117
-            elif col_1 == 118:
-                field["separator_above"] = "Nghĩa vụ tài chính"
-                field["group_end"] = 123
-            elif col_1 == 124:
-                field["separator_above"] = "Miễn giảm nghĩa vụ tài chính"
-                field["group_end"] = 128
-            elif col_1 == 129:
-                field["separator_above"] = "Nợ nghĩa vụ tài chính"
-                field["group_end"] = 133
-            elif col_1 == 134:
-                field["separator_above"] = "Nhà ở riêng lẻ"
-                field["group_end"] = 141
-            elif col_1 == 142:
-                field["separator_above"] = "Công trình, hạng mục công trình xây dựng"
-                field["group_end"] = 154
-            elif col_1 == 155:
-                field["separator_above"] = "Công trình ngầm"
-                field["group_end"] = 162
-            elif col_1 == 163:
-                field["separator_above"] = "Rừng trồng"
-                field["group_end"] = 165
-            elif col_1 == 166:
-                field["separator_above"] = "Cây lâu năm"
-                field["group_end"] = 168
-            elif col_1 == 179:
-                field["separator_above"] = "Thông tin lưu kho vật lý hồ sơ"
-                field["group_end"] = 182
-            
-        if field_type == "dropdown":
-            field["extract_mode"] = extract_mode
             
         category_fields.append(field)
         

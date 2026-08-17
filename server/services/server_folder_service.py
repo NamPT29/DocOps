@@ -11,6 +11,10 @@ from fastapi import HTTPException, UploadFile
 from sqlalchemy.orm import Session
 
 from server.database import SessionLocal, get_utc_now
+
+from server.models import ServerFolderImportJob
+from typing import List, Tuple, Dict, Any
+
 from server.models import (
     AssignedDocument,
     AssignedDocumentFolder,
@@ -197,6 +201,126 @@ def source_document_upload_id(document: ServerSourceDocument, template_id: int) 
     return "server:" + hashlib.sha256(identity.encode("utf-8")).hexdigest()
 
 
+
+def _validate_import_job(job, user_ids, reviewer_ids, db):
+    user_repository = UserRepository(db)
+    valid_input_ids = user_repository.input_user_ids()
+    valid_reviewer_ids = {user.id for user in user_repository.list_all()}
+    if not set(user_ids).issubset(valid_input_ids):
+        raise HTTPException(status_code=400, detail="Danh sách người nhập không hợp lệ")
+    if not reviewer_ids or not set(reviewer_ids).issubset(valid_reviewer_ids):
+        raise HTTPException(status_code=400, detail="Danh sách người kiểm tra không hợp lệ")
+    if any(not (set(reviewer_ids) - {user_id}) for user_id in user_ids):
+        raise HTTPException(
+            status_code=400,
+            detail="Mỗi người nhập phải có ít nhất một người kiểm tra khác mình",
+        )
+    if not TemplateRepository(db).get(job.template_id):
+        raise HTTPException(status_code=404, detail="Biểu mẫu không tồn tại")
+
+
+def _prepare_group_assignments(documents, job, user_ids, reviewer_ids) -> tuple[dict, dict]:
+    groups = sorted(
+        {folder_group_for_level(document, job.grouping_level) for document in documents},
+        key=str.casefold,
+    )
+    group_assignees = {
+        group: user_ids[index % len(user_ids)] for index, group in enumerate(groups)
+    }
+    
+    group_reviewers = {}
+    for group, assignee_id in group_assignees.items():
+        reviewer_candidates = [rid for rid in reviewer_ids if rid != assignee_id]
+        if not reviewer_candidates:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Folder {group} không có người kiểm tra khác người nhập",
+            )
+        group_reviewers[group] = secrets.choice(reviewer_candidates)
+        
+    return group_assignees, group_reviewers
+
+def _process_existing_document(
+    existing, group, group_assignees, group_reviewers, 
+    review_repository, document_repository
+):
+    _, assigned_document, folder_metadata = existing
+    if assigned_document.status == "pending":
+        assignee_id = group_assignees[group]
+        assigned_document.assigned_to_user_id = assignee_id
+        reviewer_id = group_reviewers[group]
+        review_assignment = review_repository.get_document_assignment(
+            assigned_document.id
+        )
+        if review_assignment:
+            review_assignment.reviewer_user_id = reviewer_id
+            review_assignment.assigned_at = get_utc_now()
+        else:
+            document_repository.add_review_assignment(
+                AssignedDocumentReviewAssignment(
+                    document_id=assigned_document.id,
+                    reviewer_user_id=reviewer_id,
+                )
+            )
+        if folder_metadata:
+            folder_metadata.folder_group = group
+        else:
+            document_repository.add_folder(
+                AssignedDocumentFolder(
+                    document_id=assigned_document.id,
+                    folder_group=group,
+                )
+            )
+
+def _import_new_document(
+    document, group, upload_id, job, group_assignees, group_reviewers,
+    storage_path, document_repository, db
+):
+    extension = document.source_path.suffix.lower()
+    uuid_name = f"{uuid.uuid4()}{extension}"
+    destination = storage_path / uuid_name
+    try:
+        with document.source_path.open("rb") as source_stream:
+            upload = UploadFile(filename=document.source_path.name, file=source_stream)
+            save_validated_upload(upload, str(destination), kind="document")
+            
+        assigned_document = AssignedDocument(
+            original_filename=document.source_path.name,
+            uuid_filename=uuid_name,
+            assigned_to_user_id=group_assignees[group],
+            template_id=job.template_id,
+            status="pending",
+        )
+        document_repository.add(assigned_document)
+        db.flush()
+        
+        document_repository.add_review_assignment(
+            AssignedDocumentReviewAssignment(
+                document_id=assigned_document.id,
+                reviewer_user_id=group_reviewers[group],
+            )
+        )
+        document_repository.add_path(
+            AssignedDocumentPath(
+                document_id=assigned_document.id,
+                relative_path=document.relative_path,
+                upload_id=upload_id,
+            )
+        )
+        document_repository.add_folder(
+            AssignedDocumentFolder(
+                document_id=assigned_document.id,
+                folder_group=group,
+            )
+        )
+        return True, None
+    except Exception as error:
+        if destination.exists():
+            destination.unlink()
+        detail = error.detail if isinstance(error, HTTPException) else str(error)
+        detail = detail or error.__class__.__name__
+        return False, detail
+
 def process_server_folder_import(
     job_id: int,
     session_factory=SessionLocal,
@@ -216,39 +340,10 @@ def process_server_folder_import(
         summary, documents = scan_server_source_documents(job.source_relative_path)
         user_ids = [int(value) for value in json.loads(job.user_ids_json)]
         reviewer_ids = job_repository.reviewer_ids(job.id)
-        user_repository = UserRepository(db)
-        valid_input_ids = user_repository.input_user_ids()
-        valid_reviewer_ids = {user.id for user in user_repository.list_all()}
-        if not set(user_ids).issubset(valid_input_ids):
-            raise HTTPException(status_code=400, detail="Danh sách người nhập không hợp lệ")
-        if not reviewer_ids or not set(reviewer_ids).issubset(valid_reviewer_ids):
-            raise HTTPException(status_code=400, detail="Danh sách người kiểm tra không hợp lệ")
-        if any(not (set(reviewer_ids) - {user_id}) for user_id in user_ids):
-            raise HTTPException(
-                status_code=400,
-                detail="Mỗi người nhập phải có ít nhất một người kiểm tra khác mình",
-            )
-        if not TemplateRepository(db).get(job.template_id):
-            raise HTTPException(status_code=404, detail="Biểu mẫu không tồn tại")
 
-        groups = sorted(
-            {folder_group_for_level(document, job.grouping_level) for document in documents},
-            key=str.casefold,
-        )
-        group_assignees = {
-            group: user_ids[index % len(user_ids)] for index, group in enumerate(groups)
-        }
-        # Review is assigned once per folder group, not once per PDF. This
-        # keeps a shared folder cover/form under the same reviewer.
-        group_reviewers = {}
-        for group, assignee_id in group_assignees.items():
-            reviewer_candidates = [rid for rid in reviewer_ids if rid != assignee_id]
-            if not reviewer_candidates:
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"Folder {group} không có người kiểm tra khác người nhập",
-                )
-            group_reviewers[group] = secrets.choice(reviewer_candidates)
+        _validate_import_job(job, user_ids, reviewer_ids, db)
+        group_assignees, group_reviewers = _prepare_group_assignments(documents, job, user_ids, reviewer_ids)
+        
         job.total_files = summary["total_files"]
         db.commit()
 
@@ -261,84 +356,25 @@ def process_server_folder_import(
             upload_id = source_document_upload_id(document, job.template_id)
             existing = document_repository.find_import_by_upload_id(upload_id)
             if existing:
-                _, assigned_document, folder_metadata = existing
-                if assigned_document.status == "pending":
-                    assignee_id = group_assignees[group]
-                    assigned_document.assigned_to_user_id = assignee_id
-                    reviewer_id = group_reviewers[group]
-                    review_assignment = review_repository.get_document_assignment(
-                        assigned_document.id
-                    )
-                    if review_assignment:
-                        review_assignment.reviewer_user_id = reviewer_id
-                        review_assignment.assigned_at = get_utc_now()
-                    else:
-                        document_repository.add_review_assignment(
-                            AssignedDocumentReviewAssignment(
-                                document_id=assigned_document.id,
-                                reviewer_user_id=reviewer_id,
-                            )
-                        )
-                    if folder_metadata:
-                        folder_metadata.folder_group = group
-                    else:
-                        document_repository.add_folder(
-                            AssignedDocumentFolder(
-                                document_id=assigned_document.id,
-                                folder_group=group,
-                            )
-                        )
+                _process_existing_document(
+                    existing, group, group_assignees, group_reviewers, 
+                    review_repository, document_repository
+                )
                 job.skipped_files += 1
-                job.processed_files += 1
-                db.commit()
-                continue
+            else:
+                success, error_detail = _import_new_document(
+                    document, group, upload_id, job, group_assignees, group_reviewers,
+                    storage_path, document_repository, db
+                )
+                if success:
+                    job.imported_files += 1
+                else:
+                    db.rollback()
+                    job = job_repository.get(job_id)
+                    job.failed_files += 1
+                    if not job.error_message:
+                        job.error_message = f"{document.relative_path}: {error_detail}"[:1000]
 
-            extension = document.source_path.suffix.lower()
-            uuid_name = f"{uuid.uuid4()}{extension}"
-            destination = storage_path / uuid_name
-            try:
-                with document.source_path.open("rb") as source_stream:
-                    upload = UploadFile(filename=document.source_path.name, file=source_stream)
-                    save_validated_upload(upload, str(destination), kind="document")
-                assigned_document = AssignedDocument(
-                    original_filename=document.source_path.name,
-                    uuid_filename=uuid_name,
-                    assigned_to_user_id=group_assignees[group],
-                    template_id=job.template_id,
-                    status="pending",
-                )
-                document_repository.add(assigned_document)
-                db.flush()
-                document_repository.add_review_assignment(
-                    AssignedDocumentReviewAssignment(
-                        document_id=assigned_document.id,
-                        reviewer_user_id=group_reviewers[group],
-                    )
-                )
-                document_repository.add_path(
-                    AssignedDocumentPath(
-                        document_id=assigned_document.id,
-                        relative_path=document.relative_path,
-                        upload_id=upload_id,
-                    )
-                )
-                document_repository.add_folder(
-                    AssignedDocumentFolder(
-                        document_id=assigned_document.id,
-                        folder_group=group,
-                    )
-                )
-                job.imported_files += 1
-            except Exception as error:
-                db.rollback()
-                job = job_repository.get(job_id)
-                job.failed_files += 1
-                if not job.error_message:
-                    detail = error.detail if isinstance(error, HTTPException) else str(error)
-                    detail = detail or error.__class__.__name__
-                    job.error_message = f"{document.relative_path}: {detail}"[:1000]
-                if destination.exists():
-                    destination.unlink()
             job.processed_files += 1
             db.commit()
 
@@ -360,3 +396,58 @@ def process_server_folder_import(
             db.commit()
     finally:
         db.close()
+
+
+def create_server_folder_import_job(
+    db: Session,
+    template_id: int,
+    input_user_ids: List[int],
+    reviewer_user_ids: List[int],
+    relative_path: str,
+    grouping_level: int,
+    current_user_id: int
+) -> ServerFolderImportJob:
+    input_user_ids = list(dict.fromkeys(input_user_ids))
+    reviewer_user_ids = list(dict.fromkeys(reviewer_user_ids))
+    if not input_user_ids:
+        raise HTTPException(status_code=400, detail="Vui lòng chọn ít nhất một người nhập")
+    if not reviewer_user_ids:
+        raise HTTPException(status_code=400, detail="Vui lòng chọn ít nhất một người kiểm tra")
+    summary, _ = scan_server_source_documents(relative_path)
+    if summary["total_files"] == 0:
+        raise HTTPException(status_code=400, detail="Thư mục không có tài liệu được hỗ trợ")
+    maximum_level = max(1, summary["max_folder_depth"])
+    if grouping_level < 1 or grouping_level > maximum_level:
+        raise HTTPException(status_code=400, detail="Cấp folder phân việc không hợp lệ")
+    if not TemplateRepository(db).get(template_id):
+        raise HTTPException(status_code=404, detail="Biểu mẫu không tồn tại")
+        
+    user_repository = UserRepository(db)
+    valid_input_ids = user_repository.input_user_ids()
+    valid_reviewer_ids = {user.id for user in user_repository.list_all()}
+    if not set(input_user_ids).issubset(valid_input_ids):
+        raise HTTPException(status_code=400, detail="Danh sách người nhập không hợp lệ")
+    if not set(reviewer_user_ids).issubset(valid_reviewer_ids):
+        raise HTTPException(status_code=400, detail="Danh sách người kiểm tra không hợp lệ")
+    if any(not (set(reviewer_user_ids) - {user_id}) for user_id in input_user_ids):
+        raise HTTPException(
+            status_code=400,
+            detail="Mỗi người nhập phải có ít nhất một người kiểm tra khác mình",
+        )
+
+    job = ServerFolderImportJob(
+        created_by_user_id=current_user_id,
+        template_id=template_id,
+        source_relative_path=summary["selected_relative_path"],
+        grouping_level=grouping_level,
+        user_ids_json=json.dumps(input_user_ids),
+        status="queued",
+        total_files=summary["total_files"],
+    )
+    repository = ServerFolderRepository(db)
+    repository.add(job)
+    db.flush()
+    repository.add_reviewers(job.id, reviewer_user_ids)
+    db.commit()
+    db.refresh(job)
+    return job

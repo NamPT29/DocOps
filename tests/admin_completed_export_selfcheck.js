@@ -101,7 +101,8 @@ vm.runInContext(
 
     const authSource = fs.readFileSync('frontend/auth.js', 'utf8');
     assert(authSource.includes('formatApiErrorDetail(data.detail || data.message)'));
-    assert(authSource.includes('folder_path: folderPath'));
+    assert(!authSource.includes('folder_path: folderPath'));
+    assert(authSource.includes('new URLSearchParams({ template_id: tid })'));
     assert(authSource.includes('start_date'));
     assert(authSource.includes('end_date'));
     console.log('Admin completed export self-check: OK');

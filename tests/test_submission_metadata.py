@@ -353,6 +353,7 @@ def test_review_folder_queries_do_not_grow_with_submission_count(tmp_path):
         queue = submissions.api_get_review_folder_submissions(
             folder_path=folder,
             template_id=template_id,
+            page_size=100,
             current_user={"id": reviewer_id, "role": "user"},
             db=db,
         )
@@ -362,7 +363,8 @@ def test_review_folder_queries_do_not_grow_with_submission_count(tmp_path):
         assert folders["data"][0]["submitted_count"] == 80
         assert len(folder_statements) <= 8
         assert len(queue["data"]) == 80
-        assert len(queue_statements) <= 11
+        assert queue["pagination"]["total"] == 80
+        assert len(queue_statements) <= 15
     finally:
         db.close()
         engine.dispose()

@@ -8,7 +8,13 @@ from sqlalchemy.orm import Session
 from server.models import AssignedDocument, Submission
 
 
-NO_FOLDER_SENTINEL = "__NO_FOLDER__"
+from server.repositories.submission_repository import SubmissionRepository
+from server.utils.folder_utils import (
+    NO_FOLDER_SENTINEL,
+    folder_path_key,
+    normalize_folder_path,
+)
+
 _SUBMISSION_COLUMNS = {
     "assigned_document_id": "INTEGER NULL",
     "folder_path": "VARCHAR(1024) NULL",
@@ -19,14 +25,6 @@ _SUBMISSION_INDEXES = {
     "ix_submissions_folder_path_key": "folder_path_key",
 }
 
-
-def normalize_folder_path(folder_path: object) -> str:
-    return str(folder_path or "").replace("\\", "/").strip("/")
-
-
-def folder_path_key(folder_path: object) -> str:
-    normalized = normalize_folder_path(folder_path) or NO_FOLDER_SENTINEL
-    return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
 
 
 def apply_submission_metadata(
@@ -95,7 +93,6 @@ def _document_metadata_maps(db: Session) -> tuple[dict, dict, dict]:
 
 def backfill_submission_metadata(db: Session, *, batch_size: int = 500) -> dict:
     """Backfill only missing metadata; never mutates the stored form JSON."""
-    from server.repositories.submission_repository import SubmissionRepository
 
     repository = SubmissionRepository(db)
     if not repository.has_missing_metadata():

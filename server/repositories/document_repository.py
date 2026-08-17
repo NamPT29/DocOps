@@ -1,6 +1,6 @@
 import os
 
-from sqlalchemy import case, func
+from sqlalchemy import and_, case, exists, func, or_
 from server.models import (
     AssignedDocument,
     AssignedDocumentFolder,
@@ -94,12 +94,16 @@ class DocumentRepository(BaseRepository[AssignedDocument]):
         return self.session.query(
             AssignedDocument,
             AssignedDocumentPath.relative_path,
+            Submission.id.label("submission_id")
         ).join(
             AssignedDocumentFolder,
             AssignedDocumentFolder.document_id == AssignedDocument.id,
         ).outerjoin(
             AssignedDocumentPath,
             AssignedDocumentPath.document_id == AssignedDocument.id,
+        ).outerjoin(
+            Submission,
+            Submission.assigned_document_id == AssignedDocument.id
         ).filter(
             AssignedDocumentFolder.folder_group == folder_path,
         ).order_by(
@@ -123,12 +127,30 @@ class DocumentRepository(BaseRepository[AssignedDocument]):
             AssignedDocument.id.desc(),
         ).all()
 
+    def _legacy_pdf_sets(self) -> tuple[set[str], set[str]]:
+        """Parse legacy submissions (no assigned_document_id) and return
+        sets of (_pdf_uuid values, _pdf_filename values) for O(1) lookup."""
+        import json as _json
+        legacy_subs = self.session.query(Submission.data_json).filter(
+            Submission.assigned_document_id.is_(None)
+        ).all()
+        legacy_uuids: set[str] = set()
+        legacy_filenames: set[str] = set()
+        for (data_json,) in legacy_subs:
+            try:
+                data = _json.loads(data_json)
+            except (TypeError, ValueError):
+                continue
+            pdf_uuid = data.get("_pdf_uuid")
+            pdf_filename = data.get("_pdf_filename")
+            if pdf_uuid:
+                legacy_uuids.add(str(pdf_uuid))
+            if pdf_filename:
+                legacy_filenames.add(str(pdf_filename))
+        return legacy_uuids, legacy_filenames
+
     def list_input_queue(self, user_id: int) -> list[tuple]:
-        linked_ids = self.session.query(Submission.assigned_document_id).filter(
-            Submission.created_by_user_id == user_id,
-            Submission.assigned_document_id.isnot(None),
-        )
-        return self.session.query(
+        all_docs = self.session.query(
             AssignedDocument,
             Template.name,
             AssignedDocumentPath.relative_path,
@@ -145,25 +167,68 @@ class DocumentRepository(BaseRepository[AssignedDocument]):
         ).filter(
             AssignedDocument.assigned_to_user_id == user_id,
             AssignedDocument.status == "pending",
-            ~AssignedDocument.id.in_(linked_ids),
         ).order_by(
             AssignedDocument.template_id,
             AssignedDocumentPath.relative_path,
             AssignedDocument.created_at,
         ).all()
 
+        if not all_docs:
+            return []
+
+        doc_ids = [d[0].id for d in all_docs]
+        
+        subs_by_id = self.session.query(Submission.assigned_document_id).filter(
+            Submission.assigned_document_id.in_(doc_ids)
+        ).all()
+        submitted_doc_ids = {s.assigned_document_id for s in subs_by_id}
+
+        legacy_uuids, legacy_filenames = self._legacy_pdf_sets()
+
+        result = []
+        for doc_tuple in all_docs:
+            doc = doc_tuple[0]
+            if doc.id in submitted_doc_ids:
+                continue
+            if doc.uuid_filename and doc.uuid_filename in legacy_uuids:
+                continue
+            if doc.original_filename and doc.original_filename in legacy_filenames:
+                continue
+            result.append(doc_tuple)
+            
+        return result
+
     def linked_pdf_uuids(self, user_id: int) -> set[str]:
-        return {
-            uuid_filename
-            for uuid_filename, in self.session.query(
-                AssignedDocument.uuid_filename
-            ).join(
-                Submission,
-                Submission.assigned_document_id == AssignedDocument.id,
-            ).filter(
-                Submission.created_by_user_id == user_id,
-            ).distinct().all()
-        }
+        all_docs = self.session.query(
+            AssignedDocument.id,
+            AssignedDocument.uuid_filename,
+            AssignedDocument.original_filename
+        ).filter(
+            AssignedDocument.assigned_to_user_id == user_id
+        ).all()
+
+        if not all_docs:
+            return set()
+
+        doc_ids = [d.id for d in all_docs]
+        
+        subs_by_id = self.session.query(Submission.assigned_document_id).filter(
+            Submission.assigned_document_id.in_(doc_ids)
+        ).all()
+        submitted_doc_ids = {s.assigned_document_id for s in subs_by_id}
+
+        legacy_uuids, legacy_filenames = self._legacy_pdf_sets()
+
+        result = set()
+        for doc_id, uuid_filename, original_filename in all_docs:
+            if doc_id in submitted_doc_ids:
+                result.add(uuid_filename)
+            elif uuid_filename and uuid_filename in legacy_uuids:
+                result.add(uuid_filename)
+            elif original_filename and original_filename in legacy_filenames:
+                result.add(uuid_filename)
+                
+        return result
 
     def is_direct_reviewer(self, document_id: int, user_id: int) -> bool:
         return self.session.query(AssignedDocumentReviewAssignment.document_id).filter(
@@ -274,3 +339,49 @@ class DocumentRepository(BaseRepository[AssignedDocument]):
             AssignedDocumentReviewAssignment.reviewer_user_id
         ).all()
         return {reviewer_id: count for reviewer_id, count in rows}
+
+    def get_inventory_folders(self) -> list[dict]:
+        from server.models import AssignedDocumentFolder, AssignedDocumentPath
+        from sqlalchemy import func
+        rows = self.session.query(
+            AssignedDocumentFolder.folder_group,
+            func.count(AssignedDocumentFolder.document_id).label("document_count")
+        ).group_by(AssignedDocumentFolder.folder_group).all()
+        
+        folders = []
+        for folder_group, count in rows:
+            path = folder_group or "__NO_FOLDER__"
+            name = path.split("/")[-1] if path and path != "__ROOT__" and path != "__NO_FOLDER__" else path
+            folders.append({
+                "folder_path": path,
+                "folder_name": name,
+                "document_count": count
+            })
+        return folders
+
+    def get_inventory_documents(self, folder_path: str = None, page: int = 1, page_size: int = 20) -> tuple[list, int]:
+        from server.models import User, Submission
+        query = self.session.query(
+            AssignedDocument,
+            AssignedDocumentPath.relative_path,
+            AssignedDocumentFolder.folder_group,
+            User.username.label("assigned_username"),
+            Submission.status.label("submission_status")
+        ).outerjoin(
+            AssignedDocumentPath, AssignedDocumentPath.document_id == AssignedDocument.id
+        ).outerjoin(
+            AssignedDocumentFolder, AssignedDocumentFolder.document_id == AssignedDocument.id
+        ).outerjoin(
+            User, User.id == AssignedDocument.assigned_to_user_id
+        ).outerjoin(
+            Submission, Submission.assigned_document_id == AssignedDocument.id
+        )
+
+        if folder_path and folder_path != "__NO_FOLDER__":
+            query = query.filter(AssignedDocumentFolder.folder_group == folder_path)
+        elif folder_path == "__NO_FOLDER__":
+            query = query.filter(AssignedDocumentFolder.folder_group == None)
+
+        total = query.count()
+        rows = query.order_by(AssignedDocument.id.desc()).offset((page - 1) * page_size).limit(page_size).all()
+        return rows, total

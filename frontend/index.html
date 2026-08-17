@@ -5,9 +5,9 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Số hóa All in One</title>
     <!-- Bootstrap 5 CSS -->
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="vendor/bootstrap/css/bootstrap.min.css" rel="stylesheet">
     <!-- FontAwesome for Icons -->
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="vendor/fontawesome/css/all.min.css">
     <style>
         #submissionsTableBody tr.table-success > * {
             --bs-table-bg-state: #b7e4c7;
@@ -61,6 +61,7 @@
                         <i class="fas fa-user-circle"></i> <span id="userNameText" class="fw-bold"></span>
                         <span id="userRoleBadge" class="badge bg-secondary ms-1"></span>
                     </span>
+                    <button class="btn btn-sm btn-outline-light position-relative" data-bs-toggle="modal" data-bs-target="#notificationModal" onclick="loadNotifications()" title="Thông báo"><i class="fas fa-bell"></i><span id="notificationBadge" class="position-absolute top-0 start-100 translate-middle badge rounded-pill bg-warning text-dark d-none"></span></button>
                     <a href="admin.html#data" id="backToAdminBtn" class="btn btn-outline-light btn-sm me-2 d-none"><i class="fas fa-arrow-left"></i> Về trang Quản trị</a>
                     <button class="btn btn-sm btn-outline-light ms-2" onclick="doLogout()">Thoát</button>
                 </div>
@@ -172,6 +173,7 @@
                                     </div>
                                     <button type="button" class="btn btn-warning btn-sm mt-2" id="clearFormBtn" onclick="resetFormData()">Bìa mới (Xóa toàn bộ)</button>
                                     <button type="button" class="btn btn-outline-danger btn-sm mt-2 d-none" id="cancelEditBtn" onclick="cancelEdit()">Quay lại danh sách</button>
+                                    <button type="button" class="btn btn-success mt-3 d-none" id="reviewNextButton" onclick="goToNextReviewSubmission()"><i class="fas fa-arrow-right"></i> Hồ sơ tiếp theo</button>
                                 </div>
                             </form>
                         </div>
@@ -254,8 +256,16 @@
         </div>
     </div>
 
+    <div class="modal fade" id="notificationModal" tabindex="-1" aria-labelledby="notificationModalLabel" aria-hidden="true">
+        <div class="modal-dialog modal-dialog-scrollable"><div class="modal-content">
+            <div class="modal-header"><h5 class="modal-title" id="notificationModalLabel"><i class="fas fa-bell"></i> Thông báo</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+            <div class="modal-body p-0"><div id="notificationList" class="list-group list-group-flush"></div></div>
+            <div class="modal-footer"><button type="button" class="btn btn-outline-secondary btn-sm" onclick="markAllNotificationsRead()">Đánh dấu đã đọc tất cả</button></div>
+        </div></div>
+    </div>
+
     <!-- Bootstrap JS Bundle -->
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="vendor/bootstrap/js/bootstrap.bundle.min.js"></script>
     <script>
         // Immediate Auth Check to prevent flickering
         const token = localStorage.getItem('token');
@@ -271,11 +281,11 @@
             }
         }
     </script>
-    <script src="auth.js?v=7.10"></script>
-    <script src="js/pdf_handler.js?v=7.7"></script>
-    <script src="js/form_renderer.js?v=7.6"></script>
-    <script src="js/submission.js?v=7.7"></script>
-    <script src="js/admin_panel.js?v=9.8"></script>
-    <script src="app.js?v=6.33"></script>
+    <script src="auth.js?v=99.99"></script>
+    <script src="js/pdf_handler.js?v=99.99"></script>
+    <script src="js/form_renderer.js?v=99.99"></script>
+    <script src="js/submission.js?v=99.99"></script>
+    <script src="js/admin_panel.js?v=99.99"></script>
+    <script src="app.js?v=99.99"></script>
 </body>
 </html>

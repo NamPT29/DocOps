@@ -157,6 +157,7 @@ function populateColDropdowns() {
                     <td class="text-center"><input class="form-check-input unified-chk-date" style="transform: scale(1.3); cursor: pointer;" type="checkbox" value="${col}" id="chk_date_${col}"></td>
                     <td class="text-center"><input class="form-check-input unified-chk-year" style="transform: scale(1.3); cursor: pointer;" type="checkbox" value="${col}" id="chk_year_${col}"></td>
                     <td class="text-center"><input class="form-check-input unified-chk-cover" style="transform: scale(1.3); cursor: pointer;" type="checkbox" value="${col}" id="chk_cover_${col}"></td>
+                    <td class="text-center"><input class="form-check-input unified-chk-required" style="transform: scale(1.3); cursor: pointer;" type="checkbox" value="${col}" id="chk_required_${col}"></td>
                     <td><input type="text" class="form-control form-control-sm placeholder-rule-text" data-col="${col}" placeholder="Nhập gợi ý..." maxlength="255"></td>
                 </tr>
             `;
@@ -191,7 +192,33 @@ function populateDictDropdowns() {
 
 function resetVisualUi() {
     // Reset unified checkboxes and inputs
-    document.querySelectorAll('.unified-chk-hidden, .unified-chk-ro, .unified-chk-date, .unified-chk-year, .unified-chk-cover').forEach(cb => cb.checked = false);
+    document.querySelectorAll('.unified-chk-hidden, .unified-chk-ro, .unified-chk-date, .unified-chk-year, .unified-chk-cover, .unified-chk-required').forEach(cb => cb.checked = false);
+    document.querySelectorAll('.placeholder-rule-text').forEach(input => input.value = '');
+    
+    document.getElementById('dictRulesBody').innerHTML = '<tr><td colspan="4" class="text-center text-muted">Chưa có luật nào</td></tr>';
+    document.getElementById('syncRulesList').innerHTML = '';
+    document.getElementById('concatRulesList').innerHTML = '';
+}
+
+function clearCheckboxes(panelId) {
+    const el = document.getElementById(panelId);
+    if (el) el.querySelectorAll('input[type=checkbox]').forEach(cb => cb.checked = false);
+}
+
+function getFieldName(colIdx) {
+    const f = templateFields.find(x => x.col == colIdx);
+    return f ? f.label : `[Cột ${colIdx}]`;
+}
+
+// ---------------- UI -> JSON ----------------
+function buildConfigFromUI() {
+    // Basic cols
+    // Basic cols - read from unified table
+    const getMultiValsByClass = (className) => {
+        return Array.from(document.querySelectorAll(`.${className}:checked`)).map(cb => parseInt(cb.value, 10));
+    };
+    currentConfigObj.readonly_cols = getMultiValsByClass('unified-chk-ro');
+    currentConfigObj.date_cols = getMultiValsByClass('unified-chk-date');
     document.querySelectorAll('.placeholder-rule-text').forEach(input => input.value = '');
     
     document.getElementById('dictRulesBody').innerHTML = '<tr><td colspan="4" class="text-center text-muted">Chưa có luật nào</td></tr>';
@@ -221,6 +248,7 @@ function buildConfigFromUI() {
     currentConfigObj.year_cols = getMultiValsByClass('unified-chk-year');
     currentConfigObj.hidden_cols = getMultiValsByClass('unified-chk-hidden');
     currentConfigObj.cover_cols = getMultiValsByClass('unified-chk-cover');
+    currentConfigObj.required_cols = getMultiValsByClass('unified-chk-required');
     
     currentConfigObj.placeholder_rules = Array.from(document.querySelectorAll('.placeholder-rule-text'))
         .map(input => {
@@ -228,6 +256,10 @@ function buildConfigFromUI() {
             return { col, text: input.value.trim() };
         })
         .filter(rule => Number.isInteger(rule.col) && rule.text.length > 0);
+    
+    const coverFolderLevels = parseInt(document.getElementById('coverFolderLevels')?.value || '0', 10);
+    currentConfigObj.cover_folder_level = Number.isInteger(coverFolderLevels) ? Math.min(20, Math.max(0, coverFolderLevels)) : 0;
+
     const linkedPathCol = parseInt(document.getElementById('linkedPdfPathCol')?.value || '', 10);
     const folderLevels = parseInt(document.getElementById('linkedPdfPathFolderLevels')?.value || '0', 10);
     currentConfigObj.linked_pdf_path = {
@@ -259,6 +291,12 @@ function renderVisualUiFromJSON() {
     setMultiValsByClass('unified-chk-year', obj.year_cols);
     setMultiValsByClass('unified-chk-hidden', obj.hidden_cols);
     setMultiValsByClass('unified-chk-cover', obj.cover_cols);
+    setMultiValsByClass('unified-chk-required', obj.required_cols);
+
+    const coverLevels = document.getElementById('coverFolderLevels');
+    if (coverLevels) {
+        coverLevels.value = Number.isInteger(obj.cover_folder_level) ? String(Math.min(20, Math.max(0, obj.cover_folder_level))) : '0';
+    }
 
     const rules = Array.isArray(obj.placeholder_rules) ? obj.placeholder_rules : [];
     document.querySelectorAll('.placeholder-rule-text').forEach(input => input.value = '');
@@ -269,6 +307,7 @@ function renderVisualUiFromJSON() {
             input.value = rule.text.trim();
         }
     });
+
     const linkedPath = obj.linked_pdf_path || {};
     const linkedPathEnabled = document.getElementById('linkedPdfPathEnabled');
     const linkedPathCol = document.getElementById('linkedPdfPathCol');
@@ -278,7 +317,7 @@ function renderVisualUiFromJSON() {
     if (linkedPathLevels) linkedPathLevels.value = Number.isInteger(linkedPath.folder_levels)
         ? String(Math.min(20, Math.max(0, linkedPath.folder_levels)))
         : '0';
-    
+
     // Dicts
     const dictBody = document.getElementById('dictRulesBody');
     dictBody.innerHTML = '';

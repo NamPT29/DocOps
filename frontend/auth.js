@@ -83,6 +83,7 @@ function checkAuth() {
 
 async function handlePostAuthInit() {
     if (!(await refreshCurrentUserProfile())) return;
+    await loadNotifications();
     configureCapabilityUI();
     const hasCheckId = new URLSearchParams(window.location.search).has('check_id');
     if (
@@ -99,6 +100,79 @@ async function handlePostAuthInit() {
     if (!currentUserCanInput() && currentUserCanReview() && !hasCheckId) {
         await fetchReviewSubmissions();
     }
+}
+
+let notificationItems = [];
+
+async function loadNotifications() {
+    const data = await apiCall('/api/notifications', {}, 'Không thể tải thông báo');
+    if (!data) return;
+    notificationItems = data.data || [];
+    const badge = document.getElementById('notificationBadge');
+    if (badge) {
+        badge.textContent = data.unread_count > 99 ? '99+' : String(data.unread_count || '');
+        badge.classList.toggle('d-none', !data.unread_count);
+    }
+    const list = document.getElementById('notificationList');
+    if (!list) return;
+    if (!notificationItems.length) {
+        list.innerHTML = '<div class="text-center text-muted py-4">Chưa có thông báo.</div>';
+        return;
+    }
+    list.innerHTML = notificationItems.map(item => `
+        <button type="button" class="list-group-item list-group-item-action ${item.read_at ? '' : 'fw-semibold bg-light'}" onclick="markNotificationRead(${Number(item.id)})">
+            <div class="d-flex justify-content-between gap-2"><span>${escapeHTML(item.title)}</span><small class="text-muted text-nowrap">${formatNotificationDate(item.created_at)}</small></div>
+            <div class="small text-muted mt-1 text-start">${escapeHTML(item.message).replace(/\n/g, '<br>')}</div>
+        </button>
+    `).join('');
+}
+
+function formatNotificationDate(value) {
+    if (!value) return '';
+    const date = new Date(value);
+    return Number.isNaN(date.getTime()) ? '' : date.toLocaleString('vi-VN');
+}
+
+async function markNotificationRead(notificationId) {
+    const data = await apiCall(`/api/notifications/${Number(notificationId)}/read`, { method: 'POST' });
+    if (data) await loadNotifications();
+}
+
+async function markAllNotificationsRead() {
+    const data = await apiCall('/api/notifications/read-all', { method: 'POST' });
+    if (data) await loadNotifications();
+}
+
+async function loadNotificationRecipients() {
+    const data = await apiCall('/api/users');
+    const container = document.getElementById('notificationRecipients');
+    if (!data || !container) return;
+    container.innerHTML = data.data.map(user => `
+        <label class="list-group-item d-flex align-items-center gap-2">
+            <input class="form-check-input notification-recipient" type="checkbox" value="${Number(user.id)}">
+            <span>${escapeHTML(user.username)}${user.role === 'admin' ? ' <span class="badge bg-danger">Admin</span>' : ''}</span>
+        </label>
+    `).join('');
+}
+
+async function sendNotification() {
+    const title = document.getElementById('notificationTitle')?.value.trim();
+    const message = document.getElementById('notificationMessage')?.value.trim();
+    const recipientUserIds = [...document.querySelectorAll('.notification-recipient:checked')].map(input => Number(input.value));
+    if (!title || !message || !recipientUserIds.length) {
+        alert('Vui lòng nhập tiêu đề, nội dung và chọn ít nhất một người nhận.');
+        return;
+    }
+    const data = await apiCall('/api/notifications', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title, message, recipient_user_ids: recipientUserIds }),
+    });
+    if (!data) return;
+    document.getElementById('notificationTitle').value = '';
+    document.getElementById('notificationMessage').value = '';
+    document.querySelectorAll('.notification-recipient').forEach(input => { input.checked = false; });
+    alert(`Đã gửi thông báo đến ${data.recipient_count} người.`);
 }
 
 async function doLogin() {
@@ -237,15 +311,48 @@ async function fetchAdminData() {
             if (u.can_review) badges.push('<span class="badge bg-warning text-dark">Kiểm tra</span>');
             if (badges.length === 0) badges.push('<span class="badge bg-secondary">Chưa phân công</span>');
             let deleteBtn = safeId === currentUser.id ? '' : `<button class="btn btn-sm btn-danger" onclick="deleteUser(${safeId})"><i class="fas fa-trash"></i> Xóa</button>`;
+            let changePwdBtn = `<button class="btn btn-sm btn-warning ms-1" onclick="openChangePasswordModal(${safeId}, '${safeUsername}')"><i class="fas fa-key"></i> Đổi MK</button>`;
             tbody.innerHTML += `
                 <tr>
                     <td>${safeId}</td>
                     <td>${safeUsername}</td>
                     <td><div class="d-flex flex-wrap gap-1">${badges.join('')}</div></td>
-                    <td>${deleteBtn}</td>
+                    <td>${deleteBtn}${changePwdBtn}</td>
                 </tr>
             `;
         });
+    }
+}
+
+function openChangePasswordModal(userId, username) {
+    document.getElementById('changePasswordUserId').value = userId;
+    document.getElementById('changePasswordUsername').value = username;
+    document.getElementById('changePasswordNew').value = '';
+    document.getElementById('changePasswordError').style.display = 'none';
+    const modal = new bootstrap.Modal(document.getElementById('changePasswordModal'));
+    modal.show();
+}
+
+async function submitChangePassword() {
+    const userId = document.getElementById('changePasswordUserId').value;
+    const newPassword = document.getElementById('changePasswordNew').value;
+    const errorEl = document.getElementById('changePasswordError');
+    errorEl.style.display = 'none';
+    
+    if (!newPassword || newPassword.length < 8) {
+        errorEl.textContent = 'Mật khẩu phải có ít nhất 8 ký tự';
+        errorEl.style.display = 'block';
+        return;
+    }
+    
+    const data = await apiCall(`/api/users/${userId}/password`, {
+        method: 'PUT',
+        body: JSON.stringify({ new_password: newPassword })
+    });
+    
+    if (data) {
+        alert('Đổi mật khẩu thành công!');
+        bootstrap.Modal.getInstance(document.getElementById('changePasswordModal')).hide();
     }
 }
 
@@ -462,7 +569,43 @@ async function fetchDashboardStats() {
     if (periodCount && periodData) {
         periodCount.innerText = periodData.pagination.total;
     }
-    
+
+    // Render per-user detail table from stats API
+    const statsData = await apiCall('/api/documents/stats');
+    if (statsData && statsData.user_stats) {
+        let totalPendingReview = 0;
+        let totalApproved = 0;
+        const tbody = document.getElementById('dashUserDetailBody');
+        if (tbody) {
+            tbody.innerHTML = '';
+            const users = statsData.user_stats.filter(u => u.submissions_total > 0 || u.pending > 0 || u.completed > 0);
+            if (users.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="8" class="text-center text-muted py-3">Chưa có dữ liệu nhập liệu.</td></tr>';
+            } else {
+                users.forEach(u => {
+                    totalPendingReview += u.submissions_pending_review || 0;
+                    totalApproved += u.submissions_approved || 0;
+                    const tr = document.createElement('tr');
+                    tr.innerHTML = `
+                        <td class="fw-semibold"><i class="fas fa-user text-primary me-1"></i> ${escapeHTML(u.username)}</td>
+                        <td class="text-center">${u.pending}</td>
+                        <td class="text-center">${u.completed}</td>
+                        <td class="text-center">${u.submissions_draft || 0}</td>
+                        <td class="text-center"><span class="badge bg-warning text-dark">${u.submissions_pending_review || 0}</span></td>
+                        <td class="text-center"><span class="badge bg-success">${u.submissions_approved || 0}</span></td>
+                        <td class="text-center">${u.submissions_rejected ? '<span class="badge bg-danger">' + u.submissions_rejected + '</span>' : '0'}</td>
+                        <td class="text-center fw-bold">${u.submissions_total || 0}</td>
+                    `;
+                    tbody.appendChild(tr);
+                });
+            }
+        }
+        const pendingEl = document.getElementById('dashPendingReview');
+        const approvedEl = document.getElementById('dashApproved');
+        if (pendingEl) pendingEl.textContent = totalPendingReview;
+        if (approvedEl) approvedEl.textContent = totalApproved;
+    }
+
     // Also load templates dropdown so export/filter works
     await populateTemplatesDropdown('filterTemplateId', true);
 }
@@ -577,15 +720,8 @@ async function createUser() {
 
 async function exportExcelByTemplate() {
     const tid = document.getElementById('filterTemplateId').value;
-    if (!tid) return alert("Vui lòng chọn 1 biểu mẫu ở ô bên cạnh để xuất dữ liệu!");
-    const folderPath = typeof activeCompletedFolderPath !== 'undefined'
-        ? activeCompletedFolderPath
-        : null;
-    if (!folderPath) return alert("Vui lòng chọn 1 folder hồ sơ hoàn chỉnh để xuất dữ liệu!");
-    const params = new URLSearchParams({
-        template_id: tid,
-        folder_path: folderPath,
-    });
+    if (!tid) return alert("Vui lòng chọn 1 biểu mẫu để xuất toàn bộ hồ sơ!");
+    const params = new URLSearchParams({ template_id: tid });
     const startDate = document.getElementById('filterStartDate');
     const endDate = document.getElementById('filterEndDate');
     if (startDate && startDate.value) params.set('start_date', startDate.value);

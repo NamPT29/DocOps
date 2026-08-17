@@ -4,6 +4,11 @@ function initApp() {
         fetchSchema();
         setupPdfUpload();
         restoreQueue();
+        // Reconcile persisted local files with the current assignment first.
+        const hasCheckId = new URLSearchParams(window.location.search).has('check_id');
+        if (!hasCheckId && typeof fetchMyQueue === 'function') {
+            fetchMyQueue(true);
+        }
         
         // Wait a brief moment to ensure UI is ready
         setTimeout(() => {

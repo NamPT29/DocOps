@@ -225,6 +225,19 @@ def test_completed_folders_filter_approved_submissions_and_excel_by_folder(db, m
     assert result == {"status": "file-ready"}
     assert [item.id for item in export_call.await_args.args[2]] == [first_approved.id]
 
+    result = asyncio.run(submissions.api_export(
+        template.id,
+        BackgroundTasks(),
+        current_user={"id": 1, "role": "admin"},
+        db=db,
+    ))
+
+    assert result == {"status": "file-ready"}
+    assert [item.id for item in export_call.await_args.args[2]] == [
+        first_approved.id,
+        second_approved.id,
+    ]
+
 
 def test_completed_folders_keep_approved_legacy_records_without_folder(db):
     author = add_user(db, "legacy-completed-author")
@@ -1545,3 +1558,40 @@ def test_marking_wrong_fields_does_not_return_report_to_input_user(db):
     }
     assert submission.status == "pending_review"
     assert stored["_wrong_fields"] == ["col_8"]
+
+
+def test_next_review_submission_skips_completed_current_item(db):
+    author = add_user(db, "next-review-author")
+    reviewer = add_user(db, "next-review-reviewer")
+    older = Submission(
+        data_json='{"col_8": "older"}',
+        created_by_user_id=author.id,
+        folder_path="004/0023",
+        folder_path_key="004-0023",
+        status="pending_review",
+        created_at=datetime(2026, 1, 1, 10, 0, 0),
+    )
+    current = Submission(
+        data_json='{"col_8": "current"}',
+        created_by_user_id=author.id,
+        folder_path="004/0023",
+        folder_path_key="004-0023",
+        status="approved",
+        created_at=datetime(2026, 1, 1, 11, 0, 0),
+    )
+    db.add_all([older, current])
+    db.flush()
+    db.add_all([
+        SubmissionReviewAssignment(submission_id=older.id, reviewer_user_id=reviewer.id),
+        SubmissionReviewAssignment(submission_id=current.id, reviewer_user_id=reviewer.id),
+    ])
+    db.commit()
+
+    result = submissions.api_get_next_review_submission(
+        current_id=current.id,
+        folder_path="004/0023",
+        current_user=current_user(reviewer),
+        db=db,
+    )
+
+    assert result == {"status": "ok", "data": {"id": older.id}}

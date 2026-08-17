@@ -1,7 +1,91 @@
+
+// --- UTILITIES ---
+
+function renderGenericFolderTree(folders, options) {
+    const {
+        containerId,
+        emptyMessage,
+        activeFolderPath,
+        itemClassName,
+        getBadgeHTML,
+        getExtraInfoHTML,
+        onFolderClick
+    } = options;
+
+    const container = document.getElementById(containerId);
+    if (!container) return;
+    container.innerHTML = '';
+    if (!folders.length) {
+        container.innerHTML = `<div class="text-center text-muted p-3">${emptyMessage}</div>`;
+        return;
+    }
+
+    buildFolderTreeNodes(folders).forEach(node => {
+        const row = document.createElement(node.folder ? 'button' : 'div');
+        row.style.paddingLeft = `${12 + node.depth * 18}px`;
+        if (!node.folder) {
+            row.className = 'py-2 fw-semibold text-secondary border-bottom';
+            row.innerHTML = `<i class="fas fa-folder me-2 text-warning"></i>${escapeHTML(node.name)}`;
+        } else {
+            const folder = node.folder;
+            const selected = folder.folder_path === activeFolderPath;
+            row.type = 'button';
+            row.className = `${itemClassName} list-group-item list-group-item-action py-2 ${selected ? 'active' : ''}`;
+            row.dataset.folderPath = folder.folder_path;
+            row.innerHTML = `
+                <div class="d-flex justify-content-between gap-2">
+                    <span class="text-break"><i class="fas fa-folder-open me-2"></i>${escapeHTML(node.name)}</span>
+                    ${getBadgeHTML(folder)}
+                </div>
+                <div class="small ${selected ? 'text-white-50' : 'text-muted'} mt-1">
+                    Người nhập: ${escapeHTML((folder.input_names || []).join(', ') || 'Chưa xác định')} ${getExtraInfoHTML ? getExtraInfoHTML(folder) : ''}
+                </div>`;
+            row.onclick = () => onFolderClick(folder.folder_path);
+        }
+        container.appendChild(row);
+    });
+}
+
+function buildFolderTreeNodes(folders) {
+    const nodes = new Map();
+    folders.forEach(folder => {
+        const parts = folder.folder_path === '__NO_FOLDER__'
+            ? ['Chưa xác định folder']
+            : folder.folder_path === '__ROOT__'
+                ? ['Thư mục gốc']
+                : String(folder.folder_path).split(/[\\/]+/).filter(Boolean);
+        parts.forEach((part, index) => {
+            const key = parts.slice(0, index + 1).join('/');
+            if (!nodes.has(key)) nodes.set(key, { key, name: part, depth: index, folder: null });
+            if (index === parts.length - 1) nodes.get(key).folder = folder;
+        });
+    });
+    return [...nodes.values()].sort((a, b) => a.key.localeCompare(b.key, 'vi'));
+}
+
+function generatePaginationHTML(pagination, onPageClickFnName) {
+    if (pagination.total_pages <= 1) return '';
+    let html = `<nav><ul class="pagination pagination-sm justify-content-end mb-0">`;
+    html += `<li class="page-item ${pagination.page === 1 ? 'disabled' : ''}">
+                <a class="page-link" href="#" onclick="${onPageClickFnName}(${pagination.page - 1})">Trước</a>
+             </li>`;
+    for (let i = 1; i <= pagination.total_pages; i++) {
+        html += `<li class="page-item ${pagination.page === i ? 'active' : ''}">
+                    <a class="page-link" href="#" onclick="${onPageClickFnName}(${i})">${i}</a>
+                 </li>`;
+    }
+    html += `<li class="page-item ${pagination.page === pagination.total_pages ? 'disabled' : ''}">
+                <a class="page-link" href="#" onclick="${onPageClickFnName}(${pagination.page + 1})">Sau</a>
+             </li>`;
+    html += `</ul></nav>`;
+    return html;
+}
+// -----------------
+
 let submissionsCurrentPage = 1;
 let completedSubmissionsCurrentPage = 1;
 let reviewSubmissionsCurrentPage = 1;
-const submissionsPageSize = 20;
+let submissionsPageSize = 20;
 const selectedSubmissionIds = new Set();
 const selectableSubmissionStatuses = new Map();
 
@@ -13,37 +97,37 @@ async function fetchSubmissions(page = 1) {
     let url = new URL('/api/submissions', window.location.origin);
     url.searchParams.set('page', submissionsCurrentPage);
     url.searchParams.set('page_size', submissionsPageSize);
-    
+
     const filterTid = document.getElementById('filterTemplateId');
     if (filterTid && filterTid.value) {
         url.searchParams.append('template_id', filterTid.value);
     } else if (window.activeTemplateId && !window.location.pathname.includes('admin.html')) {
         url.searchParams.append('template_id', window.activeTemplateId);
     }
-    
+
     const startDate = document.getElementById('filterStartDate');
     if (startDate && startDate.value) {
         url.searchParams.append('start_date', startDate.value);
     }
-    
+
     const endDate = document.getElementById('filterEndDate');
     if (endDate && endDate.value) {
         url.searchParams.append('end_date', endDate.value);
     }
-    
+
     const res = await apiCall(url.toString());
     if (!res) return;
-    
+
     const tbody = document.getElementById('submissionsTableBody');
     if (!tbody) return; // safety
     tbody.innerHTML = '';
-    
+
     if (res.data.length === 0) {
         tbody.innerHTML = '<tr><td colspan="9" class="text-center">Chưa có dữ liệu</td></tr>';
         renderSubmissionsPagination(res.pagination, 'submissionsPagination', fetchSubmissions);
         return;
     }
-    
+
     res.data.forEach(sub => {
         const tr = document.createElement('tr');
         const safeId = Number(sub.id);
@@ -58,13 +142,13 @@ async function fetchSubmissions(page = 1) {
         if (sub.has_errors || sub.status === 'rejected') {
             tr.classList.add('table-danger');
         }
-        
+
         let statusBadge = '';
         if (sub.status === 'pending_review') statusBadge = '<span class="badge bg-warning text-dark"><i class="fas fa-hourglass-half"></i> Chờ duyệt</span>';
         else if (sub.status === 'rejected') statusBadge = '<span class="badge bg-danger"><i class="fas fa-times-circle"></i> Báo lỗi</span>';
         else if (sub.status === 'approved') statusBadge = '<span class="badge bg-success"><i class="fas fa-check-circle"></i> Đã duyệt</span>';
         else statusBadge = '<span class="badge bg-secondary"><i class="fas fa-save"></i> Lưu nháp</span>';
-        
+
         tr.innerHTML = `
             <td class="text-center">
                 ${canSelect ? `<input type="checkbox" class="form-check-input submission-select-checkbox" value="${safeId}" onchange="toggleSubmissionSelection(${safeId}, this.checked)" aria-label="Chọn hồ sơ ${safeId}">` : ''}
@@ -202,52 +286,15 @@ async function fetchReviewSubmissions(resetPage = true) {
 }
 
 function renderReviewFolderTree(folders) {
-    const container = document.getElementById('reviewFolderTree');
-    if (!container) return;
-    container.innerHTML = '';
-    if (!folders.length) {
-        container.innerHTML = '<div class="text-center text-muted p-3">Chưa có folder nào được phân kiểm tra.</div>';
-        return;
-    }
-
-    const nodes = new Map();
-    folders.forEach(folder => {
-        const parts = folder.folder_path === '__ROOT__'
-            ? ['Thư mục gốc']
-            : String(folder.folder_path).split(/[\\/]+/).filter(Boolean);
-        parts.forEach((part, index) => {
-            const key = parts.slice(0, index + 1).join('/');
-            if (!nodes.has(key)) nodes.set(key, { key, name: part, depth: index, folder: null });
-            if (index === parts.length - 1) nodes.get(key).folder = folder;
-        });
+    renderGenericFolderTree(folders, {
+        containerId: 'reviewFolderTree',
+        emptyMessage: 'Chưa có folder nào được phân kiểm tra.',
+        activeFolderPath: activeReviewFolderPath,
+        itemClassName: 'review-folder-item',
+        getBadgeHTML: (folder) => `<span class="badge ${folder.submitted_count ? 'bg-danger' : 'bg-secondary'} rounded-pill">${Number(folder.submitted_count) || 0}</span>`,
+        getExtraInfoHTML: (folder) => `· ${Number(folder.total_documents) || 0} tài liệu`,
+        onFolderClick: (folderPath) => selectReviewFolder(folderPath)
     });
-
-    [...nodes.values()]
-        .sort((a, b) => a.key.localeCompare(b.key, 'vi'))
-        .forEach(node => {
-            const row = document.createElement(node.folder ? 'button' : 'div');
-            row.style.paddingLeft = `${12 + node.depth * 18}px`;
-            if (!node.folder) {
-                row.className = 'py-2 fw-semibold text-secondary border-bottom';
-                row.innerHTML = `<i class="fas fa-folder me-2 text-warning"></i>${escapeHTML(node.name)}`;
-            } else {
-                const folder = node.folder;
-                const selected = folder.folder_path === activeReviewFolderPath;
-                row.type = 'button';
-                row.className = `review-folder-item list-group-item list-group-item-action py-2 ${selected ? 'active' : ''}`;
-                row.dataset.folderPath = folder.folder_path;
-                row.innerHTML = `
-                    <div class="d-flex justify-content-between gap-2">
-                        <span class="text-break"><i class="fas fa-folder-open me-2"></i>${escapeHTML(node.name)}</span>
-                        <span class="badge ${folder.submitted_count ? 'bg-danger' : 'bg-secondary'} rounded-pill">${Number(folder.submitted_count) || 0}</span>
-                    </div>
-                    <div class="small ${selected ? 'text-white-50' : 'text-muted'} mt-1">
-                        Người nhập: ${escapeHTML((folder.input_names || []).join(', ') || 'Chưa xác định')} · ${Number(folder.total_documents) || 0} tài liệu
-                    </div>`;
-                row.onclick = () => selectReviewFolder(folder.folder_path);
-            }
-            container.appendChild(row);
-        });
 }
 
 async function selectReviewFolder(folderPath, page = 1, rerenderTree = true) {
@@ -334,54 +381,15 @@ async function fetchCompletedSubmissions(page = 1, refreshFolders = Number(page)
 }
 
 function renderCompletedFolderTree(folders) {
-    const container = document.getElementById('completedFolderTree');
-    if (!container) return;
-    container.innerHTML = '';
-    if (!folders.length) {
-        container.innerHTML = '<div class="text-center text-muted p-3">Chưa có folder chứa hồ sơ đã duyệt.</div>';
-        return;
-    }
-
-    const nodes = new Map();
-    folders.forEach(folder => {
-        const parts = folder.folder_path === '__NO_FOLDER__'
-            ? ['Chưa xác định folder']
-            : folder.folder_path === '__ROOT__'
-                ? ['Thư mục gốc']
-                : String(folder.folder_path).split(/[\\/]+/).filter(Boolean);
-        parts.forEach((part, index) => {
-            const key = parts.slice(0, index + 1).join('/');
-            if (!nodes.has(key)) nodes.set(key, { key, name: part, depth: index, folder: null });
-            if (index === parts.length - 1) nodes.get(key).folder = folder;
-        });
+    renderGenericFolderTree(folders, {
+        containerId: 'completedFolderTree',
+        emptyMessage: 'Chưa có folder chứa hồ sơ đã duyệt.',
+        activeFolderPath: activeCompletedFolderPath,
+        itemClassName: 'completed-folder-item',
+        getBadgeHTML: (folder) => `<span class="badge bg-success rounded-pill">${Number(folder.approved_count) || 0}</span>`,
+        getExtraInfoHTML: null,
+        onFolderClick: (folderPath) => selectCompletedFolder(folderPath)
     });
-
-    [...nodes.values()]
-        .sort((a, b) => a.key.localeCompare(b.key, 'vi'))
-        .forEach(node => {
-            const row = document.createElement(node.folder ? 'button' : 'div');
-            row.style.paddingLeft = `${12 + node.depth * 18}px`;
-            if (!node.folder) {
-                row.className = 'py-2 fw-semibold text-secondary border-bottom';
-                row.innerHTML = `<i class="fas fa-folder me-2 text-warning"></i>${escapeHTML(node.name)}`;
-            } else {
-                const folder = node.folder;
-                const selected = folder.folder_path === activeCompletedFolderPath;
-                row.type = 'button';
-                row.className = `completed-folder-item list-group-item list-group-item-action py-2 ${selected ? 'active' : ''}`;
-                row.dataset.folderPath = folder.folder_path;
-                row.innerHTML = `
-                    <div class="d-flex justify-content-between gap-2">
-                        <span class="text-break"><i class="fas fa-folder-open me-2"></i>${escapeHTML(node.name)}</span>
-                        <span class="badge bg-success rounded-pill">${Number(folder.approved_count) || 0}</span>
-                    </div>
-                    <div class="small ${selected ? 'text-white-50' : 'text-muted'} mt-1">
-                        Người nhập: ${escapeHTML((folder.input_names || []).join(', ') || 'Chưa xác định')}
-                    </div>`;
-                row.onclick = () => selectCompletedFolder(folder.folder_path);
-            }
-            container.appendChild(row);
-        });
 }
 
 async function selectCompletedFolder(folderPath) {
@@ -390,7 +398,7 @@ async function selectCompletedFolder(folderPath) {
     await fetchCompletedSubmissions(1, false);
 }
 
-function renderSubmissionsPagination(pagination, containerId, onPageChange) {
+function renderSubmissionsPagination(pagination, containerId, onPageChange, options = {}) {
     const container = document.getElementById(containerId);
     if (!container) return;
     container.innerHTML = '';
@@ -402,6 +410,26 @@ function renderSubmissionsPagination(pagination, containerId, onPageChange) {
     summary.className = 'text-muted small me-3';
     summary.textContent = `Hiển thị ${Number(pagination.from) || 0}–${Number(pagination.to) || 0} / ${Number(pagination.total) || 0} hồ sơ`;
     container.appendChild(summary);
+
+    const sizeSelector = document.createElement('select');
+    sizeSelector.className = 'form-select form-select-sm d-inline-block w-auto me-3';
+    const sizeValue = Number(options.pageSize) || submissionsPageSize;
+    [5, 10, 15, 20].forEach(size => {
+        const option = document.createElement('option');
+        option.value = size;
+        option.textContent = `${size} / trang`;
+        if (size === sizeValue) option.selected = true;
+        sizeSelector.appendChild(option);
+    });
+    sizeSelector.onchange = (e) => {
+        if (typeof options.onPageSizeChange === 'function') {
+            options.onPageSizeChange(Number(e.target.value));
+        } else {
+            submissionsPageSize = Number(e.target.value);
+        }
+        onPageChange(1);
+    };
+    container.appendChild(sizeSelector);
 
     const previous = document.createElement('button');
     previous.type = 'button';
@@ -459,13 +487,14 @@ function renderAdminSubmissionsTable(data, tbodyId, isReviewTab, pagination = nu
         }
         const safeSubmissionUrl = escapeHTML(submissionUrl);
         if (sub.has_errors || sub.status === 'rejected') tr.classList.add('table-danger');
-        
+
         let statusBadge = '';
         if (sub.status === 'pending_review') statusBadge = '<span class="badge bg-warning text-dark"><i class="fas fa-hourglass-half"></i> Chờ duyệt</span>';
         else if (sub.status === 'rejected') statusBadge = '<span class="badge bg-danger"><i class="fas fa-times-circle"></i> Báo lỗi</span>';
         else if (sub.status === 'approved') statusBadge = '<span class="badge bg-success"><i class="fas fa-check-circle"></i> Đã duyệt</span>';
-        
-        let actions = `<a class="btn btn-sm btn-outline-primary" href="${safeSubmissionUrl}" target="_blank" title="Mở trong tab mới để kiểm tra và chỉnh sửa"><i class="fas fa-search"></i> Kiểm tra/Sửa</a>`;
+
+        const reviewTarget = isReviewTab ? '' : ' target="_blank"';
+        let actions = `<a class="btn btn-sm btn-outline-primary" href="${safeSubmissionUrl}"${reviewTarget} title="Mở để kiểm tra và chỉnh sửa"><i class="fas fa-search"></i> Kiểm tra/Sửa</a>`;
         if (sub.is_being_viewed || sub.viewing_user_name) {
             const viewerName = escapeHTML(sub.viewing_user_name || 'Người dùng khác');
             statusBadge += `<span class='badge bg-info text-dark ms-1'><i class='fas fa-eye'></i> Báo cáo đang có người xem: ${viewerName}</span>`;
@@ -478,6 +507,8 @@ function renderAdminSubmissionsTable(data, tbodyId, isReviewTab, pagination = nu
                 actions += `<button class="btn btn-sm btn-outline-warning" onclick="reopenSubmissionReview(${safeId})" title="Chuyển hồ sơ đã duyệt về hàng chờ kiểm tra"><i class="fas fa-undo"></i> Về chờ duyệt</button>`;
             }
             actions += `<button class="btn btn-sm btn-outline-danger" onclick="deleteSubmission(${safeId})" title="Xóa hồ sơ"><i class="fas fa-trash"></i></button>`;
+        } else if (isReviewTab && sub.status === 'pending_review') {
+            actions += `<button class="btn btn-sm btn-outline-danger" onclick="deleteSubmission(${safeId})" title="Xóa báo cáo và trả PDF về cho người nhập"><i class="fas fa-trash"></i> Xóa</button>`;
         }
 
         tr.innerHTML = `
@@ -485,7 +516,7 @@ function renderAdminSubmissionsTable(data, tbodyId, isReviewTab, pagination = nu
             <td><span class="badge bg-secondary">${safeTemplate}</span></td>
             <td class="text-nowrap">${safeCreatedAt}</td>
             <td style="min-width: 260px; max-width: 520px;">
-                ${safePdfPath ? `<a class="text-break" href="${safeSubmissionUrl}" target="_blank" title="${safePdfPath}"><i class="fas fa-file-pdf text-danger me-1"></i>${safePdfPath}</a>` : '<span class="text-muted fst-italic">Không liên kết PDF</span>'}
+                ${safePdfPath ? `<a class="text-break" href="${safeSubmissionUrl}"${reviewTarget} title="${safePdfPath}"><i class="fas fa-file-pdf text-danger me-1"></i>${safePdfPath}</a>` : '<span class="text-muted fst-italic">Không liên kết PDF</span>'}
             </td>
             <td><span class="badge bg-info text-dark"><i class="fas fa-user"></i> ${safeCreator}</span></td>
             <td class="text-center">${statusBadge}</td>
@@ -522,13 +553,60 @@ async function reopenSubmissionReview(id) {
 async function toggleCheckSubmission(id, checkbox) {
     const res = await apiCall(`/api/submissions/${id}/toggle_check`, { method: 'PUT' });
     if (res && res.status === 'ok') {
+        if (checkbox && typeof res.is_checked === 'boolean') checkbox.checked = res.is_checked;
+        window.reviewApproved = res.is_checked === true;
         if (window.location.pathname.includes('admin.html')) {
             fetchReviewSubmissions();
             fetchCompletedSubmissions();
+        } else {
+            await refreshReviewNextAction();
         }
     } else {
         checkbox.checked = !checkbox.checked; // revert
     }
+}
+
+function reviewNavigationParams() {
+    const params = new URLSearchParams(window.location.search);
+    if (!params.has('check_id')) return null;
+    return {
+        folderPath: params.get('return_folder') || '',
+        returnTarget: params.get('return_to') || 'review',
+    };
+}
+
+async function refreshReviewNextAction() {
+    const button = document.getElementById('reviewNextButton');
+    if (!button || !currentEditingId || window.reviewApproved !== true) {
+        if (button) button.classList.add('d-none');
+        return;
+    }
+    const navigation = reviewNavigationParams();
+    if (!navigation) return;
+    const params = new URLSearchParams({ current_id: String(currentEditingId) });
+    if (navigation.folderPath) params.set('folder_path', navigation.folderPath);
+    const res = await apiCall(`/api/review-next-submission?${params.toString()}`);
+    if (!res || !button) return;
+    const nextId = Number(res.data?.id);
+    button.dataset.nextId = Number.isInteger(nextId) && nextId > 0 ? String(nextId) : '';
+    button.classList.remove('d-none');
+    button.disabled = !button.dataset.nextId;
+    button.innerHTML = button.dataset.nextId
+        ? '<i class="fas fa-arrow-right"></i> Hồ sơ tiếp theo'
+        : '<i class="fas fa-check"></i> Đã hết hồ sơ cần kiểm tra';
+}
+
+function goToNextReviewSubmission() {
+    const button = document.getElementById('reviewNextButton');
+    const nextId = Number(button?.dataset.nextId);
+    if (!Number.isInteger(nextId) || nextId <= 0) return;
+    const navigation = reviewNavigationParams() || {};
+    const params = new URLSearchParams({
+        check_id: String(nextId),
+        return_to: navigation.returnTarget || 'review',
+    });
+    if (navigation.folderPath) params.set('return_folder', navigation.folderPath);
+    window.location.href = `index.html?${params.toString()}`;
 }
 
 function toggleFormCheck() {
@@ -543,7 +621,7 @@ async function copySubmission(id) {
     if (res) {
         fetchSubmissions();
         if (res.new_id) {
-            editSubmission(res.new_id);
+            editSubmission(res.new_id, true);
         }
     }
 }
@@ -589,19 +667,20 @@ function stopSubmissionView() {
         method: 'DELETE',
         headers,
         keepalive: true,
-    }).catch(() => {});
+    }).catch(() => { });
 }
 
-async function editSubmission(id) {
+async function editSubmission(id, isCopied = false) {
+    window.isCopiedSubmissionEdit = isCopied;
     const res = await apiCall(`/api/submissions/${id}`);
     if (!res) return;
-    
+
     // Switch to form tab safely
     const formTabBtn = document.getElementById('form-tab');
     if (formTabBtn) {
         formTabBtn.click();
     }
-    
+
     // Ensure schema is loaded before populating data
     if (res.template_id && window.activeTemplateId !== res.template_id) {
         window.activeTemplateId = res.template_id;
@@ -610,7 +689,7 @@ async function editSubmission(id) {
         // Form not rendered yet
         await fetchSchema();
     }
-    
+
     // Populate data
     const data = res.data;
     for (const [key, value] of Object.entries(data)) {
@@ -623,40 +702,57 @@ async function editSubmission(id) {
         resizeDynamicFormInputs(document.getElementById('dataForm'));
     }
     
+    if (window.isCopiedSubmissionEdit) {
+        const inputs = document.querySelectorAll('#dataForm input[type="text"], #dataForm textarea, #dataForm select');
+        const snap = {};
+        inputs.forEach(input => snap[input.name] = input.value);
+        window.originalEditingData = JSON.stringify(snap);
+    }
+    
+    // Save initial cover data to detect modifications
+    window.initialCoverData = {};
+    if (window.activeTemplateConfig && window.activeTemplateConfig.cover_cols) {
+        window.activeTemplateConfig.cover_cols.forEach(c => {
+            const key = `col_${c-1}`;
+            window.initialCoverData[key] = res.data[key] || '';
+        });
+    }
+
     // Set editing state
     currentEditingId = id;
     startSubmissionView(id);
     isEditingFromList = true;
-    
+
     // Handle readonly state
     const actionBtns = document.getElementById('actionButtonsRow');
     const readonlyNotice = document.getElementById('readonlyNotice');
     const clearFormBtn = document.getElementById('clearFormBtn');
-    
+
     const isAdmin = currentUser && currentUser.role === 'admin';
     const canReview = res.can_review === true;
     const reviewEditMode = canReview && (res.submission_status === 'pending_review' || res.submission_status === 'rejected');
     window.reviewEditMode = reviewEditMode;
+    window.reviewApproved = canReview && (res.submission_status === 'approved' || res.is_checked === true);
     const isLocked = !isAdmin && !reviewEditMode && (res.submission_status === 'pending_review' || res.submission_status === 'approved');
-    
+
     if (isLocked) {
-        if(actionBtns) actionBtns.classList.add('d-none');
-        if(clearFormBtn) clearFormBtn.classList.add('d-none');
-        if(readonlyNotice) readonlyNotice.style.display = 'block';
+        if (actionBtns) actionBtns.classList.add('d-none');
+        if (clearFormBtn) clearFormBtn.classList.add('d-none');
+        if (readonlyNotice) readonlyNotice.style.display = 'block';
     } else {
-        if(actionBtns) actionBtns.classList.remove('d-none');
-        if(clearFormBtn) clearFormBtn.classList.remove('d-none');
-        if(readonlyNotice) readonlyNotice.style.display = 'none';
-        
+        if (actionBtns) actionBtns.classList.remove('d-none');
+        if (clearFormBtn) clearFormBtn.classList.remove('d-none');
+        if (readonlyNotice) readonlyNotice.style.display = 'none';
+
         // Cập nhật text nút
         const draftBtn = document.getElementById('draftBtn');
         const submitBtn = document.getElementById('submitBtn');
         if (draftBtn) draftBtn.innerHTML = '<i class="fas fa-save"></i> Cập nhật Nháp';
         if (submitBtn) submitBtn.innerHTML = '<i class="fas fa-paper-plane"></i> Nộp duyệt lại';
     }
-    
+
     document.getElementById('cancelEditBtn').classList.remove('d-none');
-    
+
     // Error markers are stored per visible input. Legacy `_wrong_sections`
     // remains untouched in the record, but new reviews use `_wrong_fields`.
     const wrongFields = Array.isArray(data._wrong_fields) ? data._wrong_fields : [];
@@ -672,14 +768,14 @@ async function editSubmission(id) {
             fieldContainer.classList.toggle('bg-opacity-10', cb.checked);
         }
     });
-    
+
     if (canReview) {
         const adminCheckArea = document.getElementById('adminCheckArea');
         if (adminCheckArea) {
             adminCheckArea.classList.remove('d-none');
             document.getElementById('adminFormCheckToggle').checked = !!res.is_checked;
         }
-        
+
         // Người kiểm tra được sửa nội dung, nhưng không được đổi luồng nộp duyệt.
         const draftBtn = document.getElementById('draftBtn');
         if (draftBtn) {
@@ -693,19 +789,19 @@ async function editSubmission(id) {
             readonlyNotice.style.display = reviewEditMode ? 'none' : 'block';
             if (reviewEditMode) readonlyNotice.textContent = '';
         }
-        
+
         const btnClear = document.getElementById('clearFormBtn');
         if (btnClear) btnClear.classList.add('d-none');
-        
+
         const btnCancel = document.getElementById('cancelEditBtn');
         if (btnCancel) btnCancel.style.setProperty('display', 'none', 'important');
-        
+
         const pdfLinkBtn = document.getElementById('pdfLinkBtn');
         if (pdfLinkBtn) pdfLinkBtn.classList.add('d-none');
-        
+
         // Hide clear category buttons
         document.querySelectorAll('.clear-category-btn').forEach(btn => btn.classList.add('d-none'));
-        
+
         // Chỉ khóa nội dung khi hồ sơ đã rời khỏi bước kiểm tra.
         const inputs = document.querySelectorAll('#dataForm input, #dataForm textarea, #dataForm select');
         inputs.forEach(input => {
@@ -713,7 +809,7 @@ async function editSubmission(id) {
                 input.disabled = !reviewEditMode;
             }
         });
-        
+
         // Each visible field has its own internal error marker. Marking a field
         // keeps the report in review; the reviewer corrects the value directly.
         document.querySelectorAll('.review-field-error-check').forEach(el => el.classList.remove('d-none'));
@@ -725,7 +821,7 @@ async function editSubmission(id) {
                     document.querySelectorAll('.field-error-checkbox:checked'),
                     checkbox => checkbox.dataset.field,
                 );
-                
+
                 // Toggle visual highlight
                 const fieldContainer = cb.closest('.position-relative');
                 if (fieldContainer) {
@@ -736,7 +832,7 @@ async function editSubmission(id) {
                     fieldContainer.classList.toggle('bg-danger', cb.checked);
                     fieldContainer.classList.toggle('bg-opacity-10', cb.checked);
                 }
-                
+
                 const savePromise = apiCall(`/api/submissions/${id}/errors`, {
                     method: 'PUT',
                     headers: { 'Content-Type': 'application/json' },
@@ -762,7 +858,9 @@ async function editSubmission(id) {
             el.classList.add('d-none');
         });
     }
-    
+
+    await refreshReviewNextAction();
+
     // Check if there is an attached PDF
     const attachedPdf = data._pdf_filename;
     const loadedReviewFolder = canReview && loadReviewFolderFiles(
@@ -779,12 +877,11 @@ async function editSubmission(id) {
     } else {
         isPdfLinked = false;
     }
-    updatePdfLinkUI();
 }
 
 async function deleteSubmission(id) {
     if (!confirm('Bạn có chắc chắn muốn xóa hồ sơ này vĩnh viễn không?')) return;
-    
+
     const res = await apiCall(`/api/submissions/${id}`, { method: 'DELETE' });
     if (res) {
         fetchSubmissions();
@@ -796,12 +893,15 @@ async function fetchDocumentStats() {
     // Populate templates dropdown for assignment
     if (typeof populateTemplatesDropdown === 'function') {
         populateTemplatesDropdown('assignTemplateSelect', false);
+        populateTemplatesDropdown('inventoryTemplateFilter', true);
     }
-    
-    const [data, usersData] = await Promise.all([
+
+    const [data, usersData, inventoryData] = await Promise.all([
         apiCall('/api/documents/stats'),
         apiCall('/api/users'),
+        apiCall(`/api/documents/inventory?page=1&page_size=${inventoryPageSize}${document.getElementById('inventoryTemplateFilter')?.value ? `&template_id=${encodeURIComponent(document.getElementById('inventoryTemplateFilter').value)}` : ''}`),
     ]);
+    renderDocumentInventory(inventoryData);
     if (data && data.status === 'ok') {
         const tbody = document.getElementById('poolStatsTableBody');
         const revocationTbody = document.getElementById('assignmentRevocationTableBody');
@@ -823,7 +923,7 @@ async function fetchDocumentStats() {
                 inputContainer.innerHTML = '<span class="text-muted">Chưa có nhân viên để nhập liệu.</span>';
             }
         }
-        
+
         data.user_stats.forEach(u => {
             const safeUserId = Number(u.user_id);
             const safeUsername = escapeHTML(u.username);
@@ -862,7 +962,7 @@ async function fetchDocumentStats() {
                 `;
                 revocationTbody.appendChild(tr);
             }
-            
+
             // Input assignee checkboxes
             if (inputContainer) {
                 const div = document.createElement('div');
@@ -895,6 +995,107 @@ async function fetchDocumentStats() {
             reviewerContainer.appendChild(div);
         });
     }
+}
+
+let inventorySelectedFolder = '';
+let inventoryPageSize = 20;
+
+async function fetchDocumentInventory(page = 1, folderPath = inventorySelectedFolder) {
+    const filter = document.getElementById('inventoryTemplateFilter');
+    const templateId = filter?.value;
+    const params = new URLSearchParams({ page: String(page), page_size: String(inventoryPageSize) });
+    if (templateId) params.set('template_id', templateId);
+    if (folderPath) params.set('folder_path', folderPath);
+    const data = await apiCall(`/api/documents/inventory?${params.toString()}`);
+    renderDocumentInventory(data);
+}
+
+function renderDocumentInventory(payload) {
+    const summary = document.getElementById('inventorySummary');
+    const tbody = document.getElementById('inventoryDocumentsTableBody');
+    const tree = document.getElementById('inventoryFolderTree');
+    const pagination = document.getElementById('inventoryDocumentsPagination');
+    if (!tbody) return;
+    const items = payload && payload.status === 'ok' && Array.isArray(payload.data)
+        ? payload.data
+        : [];
+    const totals = payload?.summary || { total: items.length, stored: 0, missing: 0 };
+    const folders = Array.isArray(payload?.folders) ? payload.folders : [];
+    const selectedFolder = payload?.selected_folder || '';
+    if (selectedFolder && selectedFolder !== inventorySelectedFolder) {
+        inventorySelectedFolder = selectedFolder;
+    }
+    if (tree) {
+        tree.replaceChildren();
+        folders.forEach(folder => {
+            const button = document.createElement('button');
+            button.type = 'button';
+            const depth = folder.folder_path === '__ROOT__'
+                ? 0
+                : String(folder.folder_path || '').split('/').filter(Boolean).length;
+            const isActive = folder.folder_path === inventorySelectedFolder;
+            button.className = `list-group-item list-group-item-action d-flex justify-content-between align-items-center py-2 ${isActive ? 'active' : ''}`;
+            button.style.paddingLeft = `${0.75 + Math.min(depth, 12) * 1.15}rem`;
+            button.title = folder.folder_path || '';
+            button.innerHTML = `<span class="text-break text-truncate"><i class="fas fa-folder${isActive ? '-open' : ''} me-2"></i>${escapeHTML(folder.folder_name || folder.folder_path)}</span><span class="badge ${isActive ? 'bg-light text-primary' : 'bg-secondary'}">${Number(folder.document_count) || 0}</span>`;
+            button.onclick = () => {
+                inventorySelectedFolder = folder.folder_path;
+                fetchDocumentInventory(1, inventorySelectedFolder);
+            };
+            tree.appendChild(button);
+        });
+        if (!folders.length) tree.innerHTML = '<div class="text-center text-muted p-3">Kho chưa có folder.</div>';
+    }
+    const selectedTitle = document.getElementById('inventorySelectedFolder');
+    if (selectedTitle) selectedTitle.textContent = selectedFolder ? `Folder: ${selectedFolder === '__ROOT__' ? 'Thư mục gốc' : selectedFolder}` : 'Kho chưa có folder';
+    if (summary) {
+        summary.innerHTML = `
+            <span class="badge bg-primary">Tổng tài liệu: ${Number(totals.total) || 0}</span>
+            <span class="badge bg-success">Đã lưu: ${Number(totals.stored) || 0}</span>
+            <span class="badge bg-danger">Thiếu file: ${Number(totals.missing) || 0}</span>
+        `;
+    }
+    tbody.replaceChildren();
+    if (!items.length) {
+        const row = document.createElement('tr');
+        row.innerHTML = '<td colspan="7" class="text-center text-muted py-4">Kho chưa có tài liệu.</td>';
+        tbody.appendChild(row);
+        return;
+    }
+    items.forEach(item => {
+        const row = document.createElement('tr');
+        const status = item.storage_exists
+            ? '<span class="badge bg-success">Có file</span>'
+            : '<span class="badge bg-danger">Thiếu file</span>';
+        row.innerHTML = `
+            <td>${escapeHTML(item.filename || '')}<div class="small text-muted">#${Number(item.id) || ''}</div></td>
+            <td class="text-break small">${escapeHTML(item.relative_path || '')}</td>
+            <td class="text-break small font-monospace">${escapeHTML(item.source_path || '')}</td>
+            <td class="text-break small font-monospace">${escapeHTML(item.storage_path || '')}</td>
+            <td>${escapeHTML(item.assigned_to || 'Chưa giao')}</td>
+            <td>${escapeHTML(item.status || '')}</td>
+            <td>${status}</td>
+        `;
+        tbody.appendChild(row);
+    });
+    const page = Number(payload?.pagination?.page) || 1;
+    const total = Number(payload?.pagination?.total) || 0;
+    renderSubmissionsPagination(
+        total ? {
+            ...payload.pagination,
+            from: (page - 1) * inventoryPageSize + 1,
+            to: Math.min(page * inventoryPageSize, total),
+        } : null,
+        'inventoryDocumentsPagination',
+        nextPage => fetchDocumentInventory(nextPage, inventorySelectedFolder),
+        {
+            pageSize: inventoryPageSize,
+            onPageSizeChange: size => {
+                inventoryPageSize = size;
+                fetchDocumentInventory(1, inventorySelectedFolder);
+            },
+        },
+    );
 }
 
 let assignedFoldersUserId = null;
@@ -1073,11 +1274,23 @@ function renderReviewerReassignmentUsers() {
             ? reviewerReassignmentFolders.map(folder => {
                 const reviewers = (folder.reviewer_usernames || []).join(', ') || 'Chưa phân công';
                 const inputs = (folder.input_usernames || []).join(', ') || 'Không xác định';
-                return `<div class="border-bottom py-1"><i class="fas fa-folder text-warning me-1"></i><strong>${escapeHTML(folder.folder_path)}</strong><br><span class="text-muted">Người nhập: ${escapeHTML(inputs)} · hiện kiểm tra: ${escapeHTML(reviewers)}</span></div>`;
+                const activeCount = Number(folder.active_submission_count) || 0;
+                const canReassign = true;
+                return `<label class="d-flex gap-2 align-items-start border-bottom py-2"><input type="checkbox" class="form-check-input reassign-folder-checkbox mt-1" value="${escapeHTML(folder.folder_path)}"><span class="text-break"><i class="fas fa-folder text-warning me-1"></i><strong>${escapeHTML(folder.folder_path)}</strong><br><span class="small">Người nhập: ${escapeHTML(inputs)} · hiện kiểm tra: ${escapeHTML(reviewers)}</span><br><span class="small text-success">${activeCount > 0 ? `Sẽ chuyển giao ${activeCount} hồ sơ đang kiểm tra` : 'Chưa có hồ sơ được kiểm tra'}</span></span></label>`;
             }).join('')
             : '<span class="text-muted">Không có folder đang hoạt động để chia lại.</span>';
     }
-    if (submitButton) submitButton.disabled = !reviewerReassignmentFolders.length;
+    if (submitButton) submitButton.disabled = reviewerReassignmentFolders.length === 0;
+}
+
+function toggleAllReviewerFolders() {
+    const checkboxes = [...document.querySelectorAll('.reassign-folder-checkbox:not(:disabled)')];
+    const selectAll = checkboxes.some(checkbox => !checkbox.checked);
+    checkboxes.forEach(checkbox => { checkbox.checked = selectAll; });
+    const button = document.getElementById('toggleAllReviewerFoldersBtn');
+    if (button) button.innerHTML = selectAll
+        ? '<i class="fas fa-times"></i> Bỏ chọn toàn bộ'
+        : '<i class="fas fa-check-double"></i> Chọn toàn bộ folder';
 }
 
 async function reassignDocumentReviewer() {
@@ -1085,16 +1298,23 @@ async function reassignDocumentReviewer() {
     const reviewerUserIds = [...document.querySelectorAll('.reassign-reviewer-checkbox:checked')]
         .map(checkbox => Number(checkbox.value))
         .filter(Boolean);
+    const folderPaths = [...document.querySelectorAll('.reassign-folder-checkbox:checked')]
+        .map(checkbox => checkbox.value)
+        .filter(Boolean);
     if (!reviewerUserIds.length) {
         if (statusDiv) statusDiv.innerHTML = '<div class="alert alert-warning">Vui lòng chọn ít nhất một người kiểm tra.</div>';
         return;
     }
-    if (!confirm(`Tự chia đều ${reviewerReassignmentFolders.length} folder kiểm tra cho ${reviewerUserIds.length} người đã chọn?`)) return;
+    if (!folderPaths.length) {
+        if (statusDiv) statusDiv.innerHTML = '<div class="alert alert-warning">Vui lòng chọn ít nhất một folder chưa được kiểm tra.</div>';
+        return;
+    }
+    if (!confirm(`Tự chia đều ${folderPaths.length} folder kiểm tra cho ${reviewerUserIds.length} người đã chọn?`)) return;
 
     const result = await apiCall('/api/documents/reviewer-folders/redistribute', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ reviewer_user_ids: reviewerUserIds }),
+        body: JSON.stringify({ reviewer_user_ids: reviewerUserIds, folder_paths: folderPaths }),
     }, 'Không thể tự phân lại folder kiểm tra');
     if (!result) return;
     if (statusDiv) {
@@ -1294,7 +1514,7 @@ async function uploadAndAssign() {
     const reviewerCheckboxes = document.querySelectorAll('.reviewer-user-checkbox:checked');
     const inputUserIds = Array.from(inputCheckboxes).map(chk => parseInt(chk.value));
     const reviewerUserIds = Array.from(reviewerCheckboxes).map(chk => parseInt(chk.value));
-    
+
     if (!templateId) {
         alert('Vui lòng chọn 1 Biểu mẫu.');
         return;
@@ -1319,7 +1539,7 @@ async function uploadAndAssign() {
         alert('Mỗi người nhập phải có ít nhất 1 người kiểm tra khác họ.');
         return;
     }
-    
+
     btn.disabled = true;
     statusDiv.innerHTML = '<div class="alert alert-info"><i class="fas fa-spinner fa-spin"></i> Đang tự động phân công tài liệu...</div>';
     try {
