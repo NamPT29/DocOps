@@ -19,6 +19,7 @@ assert.ok(adminHtml.includes('id="linkedPdfPathCol"'));
 assert.ok(adminHtml.includes('id="linkedPdfPathFolderLevels"'));
 assert.ok(templateConfigSource.includes('currentConfigObj.linked_pdf_path'));
 assert.ok(!pdfHandlerSource.includes('resetFormData(true)'));
+assert.ok(pdfHandlerSource.includes('allowSubmissionNavigation = true'));
 assert.ok(appSource.includes("fileSidebar.classList.remove('d-none')"));
 assert.ok(!appSource.includes("fileSidebar.classList.add('d-none')"));
 const expectedCompletedSubmissionHeaders = [
@@ -54,7 +55,7 @@ assert.ok(adminPanelSource.includes('renderSubmissionsPagination'));
 assert.ok(indexHtml.includes('selectAllSubmissionsOnPage()'));
 assert.ok(indexHtml.includes('id="selectAllSubmissionsBtn"'));
 assert.ok(indexHtml.includes('clearSubmissionSelection()'));
-assert.ok(indexHtml.includes('bulkSubmitSelectedSubmissions()'));
+assert.ok(!indexHtml.includes('bulkSubmitSelectedSubmissions()'));
 assert.ok(indexHtml.includes('bulkDeleteSelectedSubmissions()'));
 assert.ok(adminPanelSource.includes('/api/submissions/bulk-action'));
 assert.ok(adminPanelSource.includes("row.classList.toggle('table-success', checked)"));
@@ -81,7 +82,11 @@ assert.equal(savedQueueState.pdfIndex_tester, '-1');
 
 renderFileQueue = () => {};
 saveQueueState = () => {};
-selectFileFromQueue = index => { iframeCurrentIndex = index; };
+let lastSelectionOptions = null;
+selectFileFromQueue = (index, options) => {
+    iframeCurrentIndex = index;
+    lastSelectionOptions = options;
+};
 updatePdfLinkUI = () => {};
 uploadedFilesQueue = [{
     name: 'CT 909101-GCN.pdf',
@@ -238,6 +243,31 @@ assert.equal(ownQueueFile.temporary_view, undefined, 'Xem folder kiểm tra khô
 assert(uploadedFilesQueue.filter(file => file.uuid !== 'uuid-own-queue.pdf').every(file => file.temporary_view === true));
 assert.equal(iframeCurrentIndex, 2, 'Há»“ sÆ¡ Ä‘ang duyá»‡t pháº£i chá»n Ä‘Ãºng PDF liÃªn káº¿t');
 assert.equal(activeQueueFolderKey, '1::001/0001', 'Báº¥m kiá»ƒm duyá»‡t pháº£i má»Ÿ ngay danh sÃ¡ch file trong folder');
+assert.equal(lastSelectionOptions.allowSubmissionNavigation, false, 'Programmatic review selection must not navigate to another submission');
+
+currentEditingId = 72;
+loadReviewFolderFiles([
+    {
+        name: 'bia.pdf',
+        uuid: 'uuid-bia.pdf',
+        url: '/api/files/uuid-bia.pdf',
+        relative_path: '001/0001/bia.pdf',
+        folder_group: '001/0001',
+        template_id: 1,
+        submission_id: 71,
+    },
+    {
+        name: 'form-1.pdf',
+        uuid: 'uuid-form-1.pdf',
+        url: '/api/files/uuid-form-1.pdf',
+        relative_path: '001/0001/form-1.pdf',
+        folder_group: '001/0001',
+        template_id: 1,
+        submission_id: 72,
+    },
+], null);
+assert.equal(uploadedFilesQueue[iframeCurrentIndex].submission_id, 72, 'Missing UUID must fall back to the current review submission');
+assert.equal(lastSelectionOptions.allowSubmissionNavigation, false, 'Submission fallback must not trigger automatic navigation');
 `;
 
 vm.runInThisContext(source, { filename: 'pdf_handler.js' });

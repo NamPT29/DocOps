@@ -71,3 +71,8 @@ assert.equal(elements.selectAllSubmissionsBtn.classList.contains('btn-outline-pr
 assert.equal(elements.selectedSubmissionsCount.textContent, 'Đã chọn: 0');
 
 console.log('Submission bulk selection self-check: OK');
+
+const employeeHtml = fs.readFileSync('frontend/index.html', 'utf8');
+const adminPanelSource = fs.readFileSync('frontend/js/admin_panel.js', 'utf8');
+assert.equal(employeeHtml.includes('bulkSubmitSubmissionsBtn'), false);
+assert.equal(adminPanelSource.includes('function bulkSubmitSelectedSubmissions'), false);

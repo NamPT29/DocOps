@@ -718,14 +718,98 @@ async function createUser() {
 
 
 
-async function exportExcelByTemplate() {
+async function downloadExportResponse(res, fallbackFilename) {
+    let filename = fallbackFilename;
+    const disposition = res.headers.get('content-disposition');
+    if (disposition && disposition.indexOf('filename=') !== -1) {
+        const filenameRegex = /filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/;
+        const matches = filenameRegex.exec(disposition);
+        if (matches != null && matches[1]) filename = matches[1].replace(/['"]/g, '');
+    }
+    const blob = await res.blob();
+    const url = window.URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    anchor.style.display = 'none';
+    anchor.href = url;
+    anchor.download = filename;
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    window.URL.revokeObjectURL(url);
+}
+
+function setExportAllStatus(message, isError = false) {
+    const status = document.getElementById('exportAllStatus');
+    if (!status) return;
+    status.textContent = message || '';
+    status.className = `small ${isError ? 'text-danger' : 'text-muted'}`;
+}
+
+async function exportAllReportsAsJob(params, templateId) {
+    const button = document.getElementById('exportAllBtn');
+    if (button) button.disabled = true;
+    setExportAllStatus('Đang khởi tạo tác vụ xuất...');
+    try {
+        const createResponse = await authFetch(`/api/export-jobs?${params.toString()}`, {
+            method: 'POST',
+        });
+        if (!createResponse) return;
+        const createData = await createResponse.json().catch(() => ({}));
+        if (!createResponse.ok) {
+            throw new Error(formatApiErrorDetail(createData.detail || createData.message));
+        }
+        const jobId = createData.job && createData.job.job_id;
+        if (!jobId) throw new Error('Máy chủ không trả về mã tác vụ xuất');
+
+        const deadline = Date.now() + 60 * 60 * 1000;
+        while (Date.now() < deadline) {
+            await new Promise(resolve => setTimeout(resolve, 2000));
+            const statusResponse = await authFetch(`/api/export-jobs/${jobId}`, { cache: 'no-store' });
+            if (!statusResponse) return;
+            const statusData = await statusResponse.json().catch(() => ({}));
+            if (!statusResponse.ok) {
+                throw new Error(formatApiErrorDetail(statusData.detail || statusData.message));
+            }
+            const job = statusData.job || {};
+            setExportAllStatus(job.message || 'Đang tạo file Excel...');
+            if (job.state === 'error') throw new Error(job.message || 'Tác vụ xuất thất bại');
+            if (job.state !== 'completed') continue;
+
+            const downloadResponse = await authFetch(`/api/export-jobs/${jobId}/download`);
+            if (!downloadResponse) return;
+            if (!downloadResponse.ok) {
+                const errorData = await downloadResponse.json().catch(() => ({}));
+                throw new Error(formatApiErrorDetail(errorData.detail || errorData.message));
+            }
+            await downloadExportResponse(
+                downloadResponse,
+                job.filename || `BaoCao_TatCa_${templateId}.xlsx`,
+            );
+            setExportAllStatus(`Đã tải ${Number(job.rows_total || 0).toLocaleString('vi-VN')} báo cáo.`);
+            return;
+        }
+        throw new Error('Tác vụ xuất quá 60 phút chưa hoàn tất');
+    } catch (error) {
+        setExportAllStatus(error.message, true);
+        alert(`Lỗi xuất báo cáo: ${error.message}`);
+    } finally {
+        if (button) button.disabled = false;
+    }
+}
+
+async function exportExcelByTemplate(includePendingReview = false) {
     const tid = document.getElementById('filterTemplateId').value;
     if (!tid) return alert("Vui lòng chọn 1 biểu mẫu để xuất toàn bộ hồ sơ!");
     const params = new URLSearchParams({ template_id: tid });
     const startDate = document.getElementById('filterStartDate');
     const endDate = document.getElementById('filterEndDate');
-    if (startDate && startDate.value) params.set('start_date', startDate.value);
-    if (endDate && endDate.value) params.set('end_date', endDate.value);
+    if (includePendingReview) {
+        params.set('include_pending_review', 'true');
+        return exportAllReportsAsJob(params, tid);
+    } else {
+        if (startDate && startDate.value) params.set('start_date', startDate.value);
+        if (endDate && endDate.value) params.set('end_date', endDate.value);
+    }
     
     // We can do a fetch but since it's downloading a file, we can just redirect to the download URL
     // since the API is protected by tokens, it's better to fetch and create a blob URL
@@ -737,26 +821,7 @@ async function exportExcelByTemplate() {
             return alert("Lỗi: " + formatApiErrorDetail(data.detail || data.message));
         }
         
-        // Get filename from header
-        let filename = `BaoCao_${tid}.xlsx`;
-        const disposition = res.headers.get('content-disposition');
-        if (disposition && disposition.indexOf('filename=') !== -1) {
-            const filenameRegex = /filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/;
-            const matches = filenameRegex.exec(disposition);
-            if (matches != null && matches[1]) { 
-                filename = matches[1].replace(/['"]/g, '');
-            }
-        }
-        
-        const blob = await res.blob();
-        const url = window.URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.style.display = 'none';
-        a.href = url;
-        a.download = filename;
-        document.body.appendChild(a);
-        a.click();
-        window.URL.revokeObjectURL(url);
+        await downloadExportResponse(res, `BaoCao_${tid}.xlsx`);
     } catch (e) {
         alert("Lỗi xuất báo cáo: " + e.message);
     }

@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session
 from server.database import SessionLocal, get_utc_now
 
 from server.models import ServerFolderImportJob
-from typing import List, Tuple, Dict, Any
+from typing import List
 
 from server.models import (
     AssignedDocument,

@@ -523,6 +523,7 @@ def get_my_queue(current_user: dict = Depends(get_input_user), db: Session = Dep
             "uuid": d.uuid_filename,
             "relative_path": relative_path,
             "folder_group": folder_group,
+            "entered": d.status == "completed" or d.uuid_filename in linked_pdf_uuids,
         })
         
     return {

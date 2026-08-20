@@ -1,7 +1,6 @@
 import os
 import json
 from datetime import datetime, timedelta
-from urllib.parse import quote
 from sqlalchemy.orm import Session
 from fastapi import HTTPException
 
@@ -13,7 +12,7 @@ from server.repositories import (
     SubmissionRepository,
     SubmissionViewRepository,
 )
-from server.services.submission_service import COMPLETED_WITHOUT_FOLDER, _pdf_url
+from server.services.submission_helpers import COMPLETED_WITHOUT_FOLDER, _pdf_url
 from server.services.submission_metadata_service import backfill_submission_metadata
 from server.utils.folder_utils import normalize_folder_path
 
@@ -193,9 +192,11 @@ class ReviewWorkflowService:
     def get_admin_review_folder_groups(
         db: Session,
         template_id: int | None,
+        duplicate_only: bool = False,
     ) -> list[dict]:
         submissions = SubmissionRepository(db).list_active_review_submission_rows(
             template_id=template_id,
+            duplicate_only=duplicate_only,
         )
         user_ids = {
             created_by_user_id

@@ -23,10 +23,36 @@ function removeLinkedPdfFromQueue(queueIndex) {
     updatePdfLinkUI();
 }
 
+function setSubmissionModeButtons(canSubmit = false, isResubmission = false) {
+    const draftContainer = document.getElementById('draftButtonContainer');
+    const submitContainer = document.getElementById('submitButtonContainer');
+    const draftBtn = document.getElementById('draftBtn');
+    const submitBtn = document.getElementById('submitBtn');
+    if (draftContainer) {
+        draftContainer.classList.toggle('col-12', !canSubmit);
+        draftContainer.classList.toggle('col-6', canSubmit);
+    }
+    if (submitContainer) submitContainer.classList.toggle('d-none', !canSubmit);
+    if (draftBtn) draftBtn.innerHTML = canSubmit
+        ? '<i class="fas fa-save"></i> Cập nhật nháp'
+        : '<i class="fas fa-save"></i> Lưu nháp';
+    if (submitBtn) {
+        submitBtn.classList.toggle('d-none', !canSubmit);
+        submitBtn.innerHTML = isResubmission
+            ? '<i class="fas fa-paper-plane"></i> Nộp duyệt lại'
+            : '<i class="fas fa-paper-plane"></i> Nộp duyệt';
+    }
+}
+
 async function submitData(targetStatus = 'draft') {
     const draftBtn = document.getElementById('draftBtn');
     const submitBtn = document.getElementById('submitBtn');
     
+    if (targetStatus === 'pending_review' && currentEditingId === null) {
+        alert('Hãy lưu nháp và mở hồ sơ trong mục Hồ sơ đã nhập trước khi nộp duyệt.');
+        return;
+    }
+
     // Prevent double submissions
     if (draftBtn && draftBtn.disabled && submitBtn && submitBtn.disabled) return;
 
@@ -132,6 +158,9 @@ async function submitData(targetStatus = 'draft') {
         if (!response) return;
         const res = await response.json().catch(() => ({}));
         if (!response.ok) {
+            if (res.detail && res.detail.code === 'duplicate_submission') {
+                throw new Error(res.detail.message || `Có ${res.detail.duplicate_count} báo cáo trùng.`);
+            }
             throw new Error(formatApiErrorDetail(res.detail || res.message || `HTTP ${response.status}`));
         }
         
@@ -181,9 +210,12 @@ async function submitData(targetStatus = 'draft') {
                 fetchSubmissions();
             }
 
-            // Loại PDF đã xử lý khỏi hàng chờ local cho cả hồ sơ mới và hồ sơ nháp
-            // đang được cập nhật. Người kiểm tra sửa nội dung không đi qua nhánh này.
-            if (!isEditing) removeLinkedPdfFromQueue(linkedQueueIndex);
+            // Tài liệu đã nhập vẫn được giữ trong hàng chờ và chỉ đổi trạng thái.
+            if (!isEditing && linkedQueueIndex >= 0 && uploadedFilesQueue[linkedQueueIndex]) {
+                uploadedFilesQueue[linkedQueueIndex].completed = true;
+                saveQueueState();
+                renderFileQueue();
+            }
         } else {
             alert('Lỗi: ' + res.message);
         }
@@ -220,6 +252,7 @@ function cancelEdit() {
     const clearFormBtn = document.getElementById('clearFormBtn');
     if(clearFormBtn) clearFormBtn.classList.remove('d-none');
     document.getElementById('cancelEditBtn').classList.add('d-none');
+    setSubmissionModeButtons(false);
     
     const adminCheckArea = document.getElementById('adminCheckArea');
     if (adminCheckArea) {
@@ -254,7 +287,7 @@ function resetFormData(silent = false) {
     
     // Reset edit state just in case
     currentEditingId = null;
-    document.getElementById('submitBtn').innerText = 'Lưu hồ sơ';
+    setSubmissionModeButtons(false);
     document.getElementById('cancelEditBtn').classList.add('d-none');
     
     isPdfLinked = false;

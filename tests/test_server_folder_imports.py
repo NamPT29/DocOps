@@ -109,7 +109,7 @@ def test_scan_server_folder_reports_available_assignment_levels(monkeypatch, tmp
     ]
 
 
-def test_my_queue_hides_pdf_linked_to_draft_until_draft_is_deleted(database_factory):
+def test_my_queue_keeps_pdf_linked_to_draft_and_marks_it_entered(database_factory):
     db = database_factory()
     user = User(username="linked-draft-user", password="hash", role="user")
     template = Template(name="Mẫu nháp", filename="draft.xlsx")
@@ -133,9 +133,11 @@ def test_my_queue_hides_pdf_linked_to_draft_until_draft_is_deleted(database_fact
     db.add(draft)
     db.commit()
 
-    hidden_queue = get_my_queue(current_user={"id": user.id}, db=db)
-    assert hidden_queue["data"] == []
-    assert hidden_queue["linked_pdf_uuids"] == [document.uuid_filename]
+    entered_queue = get_my_queue(current_user={"id": user.id}, db=db)
+    entered_files = [item for group in entered_queue["data"] for item in group["files"]]
+    assert [item["uuid"] for item in entered_files] == [document.uuid_filename]
+    assert entered_files[0]["entered"] is True
+    assert entered_queue["linked_pdf_uuids"] == [document.uuid_filename]
     assert document.status == "pending"
 
     db.delete(draft)
@@ -143,11 +145,12 @@ def test_my_queue_hides_pdf_linked_to_draft_until_draft_is_deleted(database_fact
     restored_queue = get_my_queue(current_user={"id": user.id}, db=db)
     restored_files = [item for group in restored_queue["data"] for item in group["files"]]
     assert [item["uuid"] for item in restored_files] == [document.uuid_filename]
+    assert restored_files[0]["entered"] is False
     assert restored_queue["linked_pdf_uuids"] == []
     db.close()
 
 
-def test_my_queue_hides_documents_linked_to_any_user_submission(database_factory):
+def test_my_queue_keeps_documents_linked_to_any_user_submission(database_factory):
     db = database_factory()
     assigned_user = User(username="queue-assigned-user", password="hash", role="user")
     other_user = User(username="queue-other-user", password="hash", role="user")
@@ -174,7 +177,9 @@ def test_my_queue_hides_documents_linked_to_any_user_submission(database_factory
 
     queue = get_my_queue(current_user={"id": assigned_user.id}, db=db)
 
-    assert queue["data"] == []
+    queue_files = [item for group in queue["data"] for item in group["files"]]
+    assert [item["uuid"] for item in queue_files] == [document.uuid_filename]
+    assert queue_files[0]["entered"] is True
     assert queue["linked_pdf_uuids"] == [document.uuid_filename]
     db.close()
 

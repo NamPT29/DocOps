@@ -18,12 +18,12 @@ let queueRendered = 0;
 const sandbox = {
     console,
     window: { reviewEditMode: false, activeTemplateId: 1 },
-    currentEditingId: 44,
-    isEditingFromList: true,
+    currentEditingId: null,
+    isEditingFromList: false,
     isPdfLinked: true,
     iframeCurrentIndex: 0,
     uploadedFilesQueue: [
-        { name: 'da-nop.pdf', uuid: 'uuid-da-nop.pdf', url: '/api/files/uuid-da-nop.pdf', temporary_view: true },
+        { name: 'da-nhap.pdf', uuid: 'uuid-da-nhap.pdf', url: '/api/files/uuid-da-nhap.pdf' },
         { name: 'tiep-theo.pdf', uuid: 'uuid-tiep-theo.pdf', url: '/api/files/uuid-tiep-theo.pdf' },
     ],
     document: {
@@ -64,14 +64,15 @@ vm.runInContext(`
 `, sandbox);
 
 (async () => {
-    await vm.runInContext("submitData('pending_review')", sandbox);
+    await vm.runInContext("submitData('draft')", sandbox);
 
-    assert.equal(requestedUrl, '/api/submissions/44');
+    assert.equal(requestedUrl, '/api/submit');
     assert.deepEqual(
         Array.from(sandbox.uploadedFilesQueue, file => file.uuid),
-        ['uuid-tiep-theo.pdf'],
-        'PDF của hồ sơ nháp vừa nộp duyệt phải biến mất khỏi queue local',
+        ['uuid-da-nhap.pdf', 'uuid-tiep-theo.pdf'],
+        'Tài liệu vừa nhập phải được giữ lại trong queue local',
     );
+    assert.equal(sandbox.uploadedFilesQueue[0].completed, true);
     assert.equal(queueSaved, 1);
     assert.equal(queueRendered, 1);
     assert.equal(selectedIndex, null, 'Thoát Xem/Sửa không được tự thêm PDF hồ sơ vào queue');
@@ -87,8 +88,8 @@ vm.runInContext(`
 
     const employeeHtml = fs.readFileSync('frontend/index.html', 'utf8');
     const adminHtml = fs.readFileSync('frontend/admin.html', 'utf8');
-    assert(employeeHtml.includes('js/submission.js?v=7.7'));
-    assert(adminHtml.includes('js/submission.js?v=7.7'));
+    assert(employeeHtml.includes('js/submission.js?v=100.00'));
+    assert(adminHtml.includes('js/submission.js?v=100.00'));
     console.log('Submission queue after save self-check: OK');
 })().catch(error => {
     console.error(error);

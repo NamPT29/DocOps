@@ -1,6 +1,6 @@
 import os
 
-from sqlalchemy import and_, case, exists, func, or_
+from sqlalchemy import case, exists, func, or_
 from server.models import (
     AssignedDocument,
     AssignedDocumentFolder,
@@ -166,37 +166,14 @@ class DocumentRepository(BaseRepository[AssignedDocument]):
             AssignedDocumentFolder.document_id == AssignedDocument.id,
         ).filter(
             AssignedDocument.assigned_to_user_id == user_id,
-            AssignedDocument.status == "pending",
+            AssignedDocument.status.in_(["pending", "completed"]),
         ).order_by(
             AssignedDocument.template_id,
             AssignedDocumentPath.relative_path,
             AssignedDocument.created_at,
         ).all()
 
-        if not all_docs:
-            return []
-
-        doc_ids = [d[0].id for d in all_docs]
-        
-        subs_by_id = self.session.query(Submission.assigned_document_id).filter(
-            Submission.assigned_document_id.in_(doc_ids)
-        ).all()
-        submitted_doc_ids = {s.assigned_document_id for s in subs_by_id}
-
-        legacy_uuids, legacy_filenames = self._legacy_pdf_sets()
-
-        result = []
-        for doc_tuple in all_docs:
-            doc = doc_tuple[0]
-            if doc.id in submitted_doc_ids:
-                continue
-            if doc.uuid_filename and doc.uuid_filename in legacy_uuids:
-                continue
-            if doc.original_filename and doc.original_filename in legacy_filenames:
-                continue
-            result.append(doc_tuple)
-            
-        return result
+        return all_docs
 
     def linked_pdf_uuids(self, user_id: int) -> set[str]:
         all_docs = self.session.query(

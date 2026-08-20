@@ -89,7 +89,7 @@ class TestListInputQueue:
         result = DocumentRepository(session).list_input_queue(uid)
         assert len(result) == 2
 
-    def test_excludes_docs_with_assigned_submission(self, db):
+    def test_keeps_docs_with_assigned_submission(self, db):
         session, uid, tid = db
         doc_a = _add_document(session, uid, tid, "aaa.pdf", "file_a.pdf")
         _add_document(session, uid, tid, "bbb.pdf", "file_b.pdf")
@@ -97,10 +97,9 @@ class TestListInputQueue:
         session.commit()
 
         result = DocumentRepository(session).list_input_queue(uid)
-        assert len(result) == 1
-        assert result[0][0].uuid_filename == "bbb.pdf"
+        assert {row[0].uuid_filename for row in result} == {"aaa.pdf", "bbb.pdf"}
 
-    def test_excludes_docs_matched_by_legacy_uuid(self, db):
+    def test_keeps_docs_matched_by_legacy_uuid(self, db):
         session, uid, tid = db
         _add_document(session, uid, tid, "aaa.pdf", "file_a.pdf")
         _add_document(session, uid, tid, "bbb.pdf", "file_b.pdf")
@@ -109,10 +108,9 @@ class TestListInputQueue:
         session.commit()
 
         result = DocumentRepository(session).list_input_queue(uid)
-        assert len(result) == 1
-        assert result[0][0].uuid_filename == "bbb.pdf"
+        assert {row[0].uuid_filename for row in result} == {"aaa.pdf", "bbb.pdf"}
 
-    def test_excludes_docs_matched_by_legacy_filename(self, db):
+    def test_keeps_docs_matched_by_legacy_filename(self, db):
         session, uid, tid = db
         _add_document(session, uid, tid, "aaa.pdf", "file_a.pdf")
         _add_document(session, uid, tid, "bbb.pdf", "file_b.pdf")
@@ -121,17 +119,26 @@ class TestListInputQueue:
         session.commit()
 
         result = DocumentRepository(session).list_input_queue(uid)
-        assert len(result) == 1
-        assert result[0][0].uuid_filename == "bbb.pdf"
+        assert {row[0].uuid_filename for row in result} == {"aaa.pdf", "bbb.pdf"}
 
-    def test_empty_when_all_submitted(self, db):
+    def test_entered_document_remains_in_queue(self, db):
         session, uid, tid = db
         doc = _add_document(session, uid, tid, "aaa.pdf", "file_a.pdf")
         _add_submission(session, uid, tid, doc=doc)
         session.commit()
 
         result = DocumentRepository(session).list_input_queue(uid)
-        assert result == []
+        assert [row[0].uuid_filename for row in result] == ["aaa.pdf"]
+
+    def test_returns_completed_documents(self, db):
+        session, uid, tid = db
+        doc = _add_document(session, uid, tid, "aaa.pdf", "file_a.pdf")
+        doc.status = "completed"
+        session.commit()
+
+        result = DocumentRepository(session).list_input_queue(uid)
+
+        assert [row[0].status for row in result] == ["completed"]
 
     def test_empty_when_no_docs(self, db):
         session, uid, tid = db

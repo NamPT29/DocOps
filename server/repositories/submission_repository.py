@@ -7,6 +7,21 @@ from server.repositories.base import BaseRepository
 from server.utils.folder_utils import folder_path_key, normalize_folder_path
 
 
+_DUPLICATE_REPORT_STATUSES = ("pending_review", "rejected", "approved")
+
+
+def duplicate_document_ids_query(session):
+    """Document IDs linked to more than one workflow report."""
+    return session.query(Submission.assigned_document_id).filter(
+        Submission.assigned_document_id.isnot(None),
+        Submission.status.in_(_DUPLICATE_REPORT_STATUSES),
+    ).group_by(
+        Submission.assigned_document_id,
+    ).having(
+        func.count(Submission.id) > 1,
+    )
+
+
 class SubmissionRepository(BaseRepository[Submission]):
     model = Submission
 
@@ -16,6 +31,24 @@ class SubmissionRepository(BaseRepository[Submission]):
         return self.session.query(Submission).filter(
             Submission.id.in_(submission_ids)
         ).all()
+
+    def list_exact_duplicate_candidates(
+        self,
+        *,
+        template_id: int | None,
+        folder_path_key_value: str | None,
+        exclude_submission_id: int,
+    ) -> list[Submission]:
+        query = self.session.query(Submission).filter(
+            Submission.id != exclude_submission_id,
+            Submission.folder_path_key == folder_path_key_value,
+            Submission.status.in_(_DUPLICATE_REPORT_STATUSES),
+        )
+        if template_id is None:
+            query = query.filter(Submission.template_id.is_(None))
+        else:
+            query = query.filter(Submission.template_id == template_id)
+        return query.all()
 
     def list_user_drafts(self, user_id: int) -> list[Submission]:
         return self.session.query(Submission).filter(
@@ -70,6 +103,7 @@ class SubmissionRepository(BaseRepository[Submission]):
         *,
         template_id: int | None = None,
         folder_path: str | None = None,
+        duplicate_only: bool = False,
     ) -> list[tuple]:
         query = self._apply_filters(
             self.session.query(
@@ -82,6 +116,7 @@ class SubmissionRepository(BaseRepository[Submission]):
             status='pending_review,rejected',
             template_id=template_id,
             folder_path=folder_path,
+            duplicate_only=duplicate_only,
         )
         return query.order_by(
             Submission.created_at.desc(),
@@ -98,6 +133,7 @@ class SubmissionRepository(BaseRepository[Submission]):
         start_date: str | None = None,
         end_date: str | None = None,
         folder_path: str | None = None,
+        duplicate_only: bool = False,
     ):
         if owner_id is not None:
             query = query.filter(Submission.created_by_user_id == owner_id)
@@ -126,6 +162,12 @@ class SubmissionRepository(BaseRepository[Submission]):
                     Submission.folder_path_key == folder_path_key(normalized),
                     Submission.folder_path == normalized,
                 )
+        if duplicate_only:
+            query = query.filter(
+                Submission.assigned_document_id.in_(
+                    duplicate_document_ids_query(self.session)
+                )
+            )
         return query
 
     def paginate(
@@ -139,6 +181,7 @@ class SubmissionRepository(BaseRepository[Submission]):
         folder_path: str | None,
         page: int,
         page_size: int,
+        duplicate_only: bool = False,
     ) -> tuple[list[Submission], int, int, int]:
         query = self._apply_filters(
             self.session.query(Submission),
@@ -148,6 +191,7 @@ class SubmissionRepository(BaseRepository[Submission]):
             start_date=start_date,
             end_date=end_date,
             folder_path=folder_path,
+            duplicate_only=duplicate_only,
         )
         total = query.count()
         total_pages = max(1, (total + page_size - 1) // page_size)
@@ -166,6 +210,7 @@ class SubmissionRepository(BaseRepository[Submission]):
         template_id: int | None,
         start_date: str | None,
         end_date: str | None,
+        duplicate_only: bool = False,
     ) -> tuple[list[tuple], list[tuple], list[tuple]]:
         query = self._apply_filters(
             self.session.query(Submission),
@@ -173,6 +218,7 @@ class SubmissionRepository(BaseRepository[Submission]):
             template_id=template_id,
             start_date=start_date,
             end_date=end_date,
+            duplicate_only=duplicate_only,
         )
         counts = query.with_entities(
             Submission.folder_path,
@@ -207,10 +253,11 @@ class SubmissionRepository(BaseRepository[Submission]):
         folder_path: str | None,
         start_date: str | None,
         end_date: str | None,
+        include_pending_review: bool = False,
     ) -> list[Submission]:
         query = self._apply_filters(
             self.session.query(Submission),
-            status="approved",
+            status="pending_review,approved" if include_pending_review else "approved",
             template_id=template_id,
             folder_path=folder_path,
             start_date=start_date,
@@ -264,3 +311,16 @@ class SubmissionRepository(BaseRepository[Submission]):
         return self.session.query(Submission).filter(
             Submission.assigned_document_id == document_id,
         ).count()
+
+    def counts_by_document_ids(self, document_ids: set[int]) -> dict[int, int]:
+        if not document_ids:
+            return {}
+        rows = self.session.query(
+            Submission.assigned_document_id,
+            func.count(Submission.id),
+        ).filter(
+            Submission.assigned_document_id.in_(document_ids),
+        ).group_by(
+            Submission.assigned_document_id,
+        ).all()
+        return {document_id: count for document_id, count in rows}

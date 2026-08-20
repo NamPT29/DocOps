@@ -92,7 +92,7 @@ def test_submission_defaults_to_draft():
     assert db.committed
 
 
-def test_pending_review_completes_only_an_owned_document():
+def test_saving_draft_marks_only_an_owned_document_as_entered():
     document = SimpleNamespace(
         id=9,
         original_filename='case.pdf',
@@ -105,14 +105,14 @@ def test_pending_review_completes_only_an_owned_document():
     result = submissions.api_submit(
         submissions.SubmitRequest(
             data={'_pdf_uuid': document.uuid_filename},
-            status='pending_review',
+            status='draft',
         ),
         current_user={'id': 2},
         db=db,
     )
 
     assert result == {'status': 'ok'}
-    assert db.added.status == 'pending_review'
+    assert db.added.status == 'draft'
     assert document.status == 'completed'
 
 

@@ -10,6 +10,7 @@ from server.models import (
     User,
 )
 from server.repositories.base import BaseRepository
+from server.repositories.submission_repository import duplicate_document_ids_query
 from server.utils.folder_utils import folder_path_key, normalize_folder_path
 
 
@@ -134,8 +135,46 @@ class ReviewRepository(BaseRepository[SubmissionReviewAssignment]):
             SubmissionReviewAssignment.submission_id.in_(submission_ids)
         ).delete(synchronize_session=False)
 
-    def reviewer_folder_rows(self, reviewer_id: int, template_id: int | None) -> list[tuple]:
+    def reviewer_folder_rows(
+        self,
+        reviewer_id: int,
+        template_id: int | None,
+        duplicate_only: bool = False,
+    ) -> list[tuple]:
         from sqlalchemy import func
+        if duplicate_only:
+            query = self.session.query(
+                Submission.folder_path,
+                User.username,
+                Template.name,
+                func.count(Submission.id),
+            ).join(
+                SubmissionReviewAssignment,
+                SubmissionReviewAssignment.submission_id == Submission.id,
+            ).outerjoin(
+                User,
+                User.id == Submission.created_by_user_id,
+            ).outerjoin(
+                Template,
+                Template.id == Submission.template_id,
+            ).filter(
+                SubmissionReviewAssignment.reviewer_user_id == reviewer_id,
+                Submission.created_by_user_id != reviewer_id,
+                Submission.status == "pending_review",
+                Submission.assigned_document_id.in_(
+                    duplicate_document_ids_query(self.session)
+                ),
+            )
+            if template_id:
+                query = query.filter(Submission.template_id == template_id)
+            return query.group_by(
+                Submission.folder_path,
+                User.username,
+                Template.name,
+            ).order_by(
+                Submission.folder_path,
+            ).all()
+
         query = self.session.query(
             AssignedDocumentFolder.folder_group,
             User.username,
@@ -215,6 +254,7 @@ class ReviewRepository(BaseRepository[SubmissionReviewAssignment]):
         template_id: int | None,
         offset: int | None = None,
         limit: int | None = None,
+        duplicate_only: bool = False,
     ) -> list[Submission]:
         normalized = normalize_folder_path(folder_path)
         query = self.session.query(Submission).join(
@@ -227,6 +267,12 @@ class ReviewRepository(BaseRepository[SubmissionReviewAssignment]):
             Submission.folder_path_key == folder_path_key(normalized),
             Submission.folder_path == normalized,
         )
+        if duplicate_only:
+            query = query.filter(
+                Submission.assigned_document_id.in_(
+                    duplicate_document_ids_query(self.session)
+                )
+            )
         if template_id:
             query = query.filter(Submission.template_id == template_id)
         query = query.order_by(
@@ -244,6 +290,7 @@ class ReviewRepository(BaseRepository[SubmissionReviewAssignment]):
         reviewer_id: int,
         folder_path: str,
         template_id: int | None,
+        duplicate_only: bool = False,
     ) -> int:
         normalized = normalize_folder_path(folder_path)
         query = self.session.query(Submission.id).join(
@@ -256,6 +303,12 @@ class ReviewRepository(BaseRepository[SubmissionReviewAssignment]):
             Submission.folder_path_key == folder_path_key(normalized),
             Submission.folder_path == normalized,
         )
+        if duplicate_only:
+            query = query.filter(
+                Submission.assigned_document_id.in_(
+                    duplicate_document_ids_query(self.session)
+                )
+            )
         if template_id:
             query = query.filter(Submission.template_id == template_id)
         return query.count()

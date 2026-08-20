@@ -5,6 +5,7 @@ import json
 
 import pytest
 from fastapi import BackgroundTasks, HTTPException
+from pydantic import ValidationError
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
@@ -28,6 +29,7 @@ from server.routers.documents import (
     redistribute_folder_reviewers,
     revoke_user_assignments,
 )
+from server.utils.folder_utils import folder_path_key
 
 
 @pytest.fixture()
@@ -73,6 +75,114 @@ def current_user(user):
     return {"id": user.id, "username": user.username, "role": user.role}
 
 
+def test_duplicate_report_filter_uses_shared_source_document(db):
+    author = add_user(db, "duplicate-author")
+    reviewer = add_user(db, "duplicate-reviewer")
+    template = Template(name="Mẫu lọc trùng", filename="duplicate-filter.xlsx")
+    db.add(template)
+    db.flush()
+
+    duplicate_document = assign_document(
+        db,
+        author,
+        reviewer,
+        filename="duplicate-source.pdf",
+    )
+    unique_review_document = assign_document(
+        db,
+        author,
+        reviewer,
+        filename="unique-review.pdf",
+    )
+    unique_completed_document = assign_document(
+        db,
+        author,
+        reviewer,
+        filename="unique-completed.pdf",
+    )
+    folder = "004/0099"
+    for document in (
+        duplicate_document,
+        unique_review_document,
+        unique_completed_document,
+    ):
+        document.template_id = template.id
+    db.add_all([
+        AssignedDocumentFolder(document_id=document.id, folder_group=folder)
+        for document in (
+            duplicate_document,
+            unique_review_document,
+            unique_completed_document,
+        )
+    ])
+
+    def report(document, status, value):
+        return Submission(
+            template_id=template.id,
+            created_by_user_id=author.id,
+            assigned_document_id=document.id,
+            folder_path=folder,
+            folder_path_key=folder_path_key(folder),
+            data_json=json.dumps({"col_0": value}),
+            status=status,
+        )
+
+    duplicate_review = report(duplicate_document, "pending_review", "dup-review")
+    duplicate_completed = report(duplicate_document, "approved", "dup-completed")
+    unique_review = report(unique_review_document, "pending_review", "unique-review")
+    unique_completed = report(unique_completed_document, "approved", "unique-completed")
+    db.add_all([
+        duplicate_review,
+        duplicate_completed,
+        unique_review,
+        unique_completed,
+    ])
+    db.flush()
+    db.add_all([
+        SubmissionReviewAssignment(
+            submission_id=submission.id,
+            reviewer_user_id=reviewer.id,
+        )
+        for submission in (duplicate_review, unique_review)
+    ])
+    db.commit()
+
+    reviewer_folders = submissions.api_get_review_folders(
+        template_id=template.id,
+        duplicate_only=True,
+        current_user=current_user(reviewer),
+        db=db,
+    )
+    reviewer_rows = submissions.api_get_review_folder_submissions(
+        folder_path=folder,
+        template_id=template.id,
+        duplicate_only=True,
+        current_user=current_user(reviewer),
+        db=db,
+    )
+    completed_folders = submissions.api_get_completed_folders(
+        template_id=template.id,
+        duplicate_only=True,
+        current_user={"id": 1, "role": "admin"},
+        db=db,
+    )
+    completed_rows = submissions.api_get_submissions(
+        template_id=template.id,
+        status="approved",
+        folder_path=folder,
+        duplicate_only=True,
+        current_user={"id": 1, "role": "admin"},
+        db=db,
+    )
+
+    assert reviewer_folders["data"][0]["folder_path"] == folder
+    assert reviewer_folders["data"][0]["submitted_count"] == 1
+    assert [row["id"] for row in reviewer_rows["data"]] == [duplicate_review.id]
+    assert completed_folders["data"][0]["approved_count"] == 1
+    assert [row["id"] for row in completed_rows["data"]] == [duplicate_completed.id]
+
+
+
 def test_excel_export_includes_only_approved_submissions(db, mocker):
     template = Template(name="Mẫu xuất duyệt", filename="approved-export.xlsx")
     db.add(template)
@@ -108,6 +218,44 @@ def test_excel_export_includes_only_approved_submissions(db, mocker):
     exported_submissions = export_call.await_args.args[2]
     assert [submission.id for submission in exported_submissions] == [records[-1].id]
     assert {submission.status for submission in exported_submissions} == {"approved"}
+
+
+def test_legacy_excel_export_all_is_rejected_before_heavy_processing(db, mocker):
+    template = Template(name="Mẫu xuất toàn bộ", filename="all-export.xlsx")
+    db.add(template)
+    db.flush()
+    records = {}
+    for status in ("draft", "pending_review", "rejected", "approved"):
+        record = Submission(
+            template_id=template.id,
+            data_json=f'{{"col_0": "{status}"}}',
+            status=status,
+        )
+        db.add(record)
+        records[status] = record
+    db.commit()
+
+    export_call = mocker.patch(
+        "server.routers.submissions.run_in_threadpool",
+        new=mocker.AsyncMock(return_value=None),
+    )
+    mocker.patch(
+        "server.routers.submissions.FileResponse",
+        return_value={"status": "file-ready"},
+    )
+
+    with pytest.raises(HTTPException) as exc:
+        asyncio.run(submissions.api_export(
+            template.id,
+            BackgroundTasks(),
+            include_pending_review=True,
+            current_user={"id": 1, "role": "admin"},
+            db=db,
+        ))
+
+    assert exc.value.status_code == 409
+    assert "xử lý nền" in exc.value.detail
+    export_call.assert_not_awaited()
 
 
 def test_excel_export_rejects_template_without_approved_submissions(db, mocker):
@@ -745,7 +893,7 @@ def test_folder_redistribution_rejects_self_review_without_partial_updates(db):
     ]
 
 
-def test_submit_uses_document_reviewer_and_draft_is_hidden(db):
+def test_draft_is_submitted_from_existing_report_and_uses_document_reviewer(db):
     author = add_user(db, "author")
     reviewer = add_user(db, "reviewer")
     document = assign_document(db, author, reviewer)
@@ -765,7 +913,9 @@ def test_submit_uses_document_reviewer_and_draft_is_hidden(db):
     )
     assert db.query(SubmissionReviewAssignment).count() == 0
 
-    submissions.api_submit(
+    draft = db.query(Submission).one()
+    submissions.api_update_submission(
+        draft.id,
         submissions.SubmitRequest(
             data={"field": "submitted", "_pdf_uuid": document.uuid_filename},
             status="pending_review",
@@ -782,11 +932,11 @@ def test_submit_uses_document_reviewer_and_draft_is_hidden(db):
         db=db,
     )
 
-    assert rows[0].status == "draft"
-    assert rows[1].status == "pending_review"
-    assert assignment.submission_id == rows[1].id
+    assert len(rows) == 1
+    assert rows[0].status == "pending_review"
+    assert assignment.submission_id == rows[0].id
     assert assignment.reviewer_user_id == reviewer.id
-    assert [item["id"] for item in queue["data"]] == [rows[1].id]
+    assert [item["id"] for item in queue["data"]] == [rows[0].id]
 
 
 def test_admin_reviews_unassigned_reports_and_shows_active_viewer(db):
@@ -1014,12 +1164,22 @@ def test_author_cannot_edit_submission_while_it_is_waiting_for_review(db):
     assert submission.data_json == '{"field": "original"}'
 
 
-def test_submission_fails_when_document_has_no_different_reviewer(db):
+def test_submission_succeeds_without_reviewer_assignment(db):
     author = add_user(db, "author")
     document = assign_document(db, author)
 
-    with pytest.raises(HTTPException) as error:
-        submissions.api_submit(
+    submissions.api_submit(
+        submissions.SubmitRequest(
+            data={"_pdf_uuid": document.uuid_filename},
+            status="draft",
+        ),
+        current_user=current_user(author),
+        db=db,
+    )
+    draft = db.query(Submission).one()
+
+    submissions.api_update_submission(
+            draft.id,
             submissions.SubmitRequest(
                 data={"_pdf_uuid": document.uuid_filename},
                 status="pending_review",
@@ -1028,8 +1188,122 @@ def test_submission_fails_when_document_has_no_different_reviewer(db):
             db=db,
         )
 
+    assert db.query(Submission).one().status == "pending_review"
+    assert db.query(SubmissionReviewAssignment).count() == 0
+
+
+def test_new_submission_cannot_skip_draft_state(db):
+    author = add_user(db, "draft-only-author")
+
+    with pytest.raises(HTTPException) as error:
+        submissions.api_submit(
+            submissions.SubmitRequest(data={"col_0": "value"}, status="pending_review"),
+            current_user=current_user(author),
+            db=db,
+        )
+
     assert error.value.status_code == 409
     assert db.query(Submission).count() == 0
+
+
+def test_exact_path_and_content_duplicate_is_kept_as_draft(db):
+    author = add_user(db, "exact-duplicate-author")
+    template = Template(name="Mẫu kiểm tra trùng", filename="duplicate.xlsx")
+    db.add(template)
+    db.flush()
+    data = {
+        "col_0": "Nội dung giống nhau",
+        "_pdf_relative_path": "001/hoso.pdf",
+        "_folder_path": "001",
+    }
+    submitted = Submission(
+        data_json=json.dumps(data, ensure_ascii=False),
+        template_id=template.id,
+        created_by_user_id=author.id,
+        folder_path="001",
+        folder_path_key=folder_path_key("001"),
+        status="pending_review",
+    )
+    draft = Submission(
+        data_json=json.dumps(data, ensure_ascii=False),
+        template_id=template.id,
+        created_by_user_id=author.id,
+        folder_path="001",
+        folder_path_key=folder_path_key("001"),
+        status="draft",
+    )
+    db.add_all([submitted, draft])
+    db.commit()
+
+    with pytest.raises(HTTPException) as error:
+        submissions.api_update_submission(
+            draft.id,
+            submissions.SubmitRequest(data=data, template_id=template.id, status="pending_review"),
+            current_user=current_user(author),
+            db=db,
+        )
+
+    db.refresh(draft)
+    assert error.value.status_code == 409
+    assert error.value.detail["code"] == "duplicate_submission"
+    assert error.value.detail["duplicate_count"] == 1
+    assert draft.status == "draft"
+    assert db.query(Submission).count() == 2
+
+
+def test_missing_path_submission_is_allowed(db):
+    author = add_user(db, "missing-path-author")
+    draft = Submission(
+        data_json='{"col_0": "Không có path"}',
+        created_by_user_id=author.id,
+        status="draft",
+    )
+    db.add(draft)
+    db.commit()
+
+    submissions.api_update_submission(
+        draft.id,
+        submissions.SubmitRequest(data={"col_0": "Không có path"}, status="pending_review"),
+        current_user=current_user(author),
+        db=db,
+    )
+
+    assert draft.status == "pending_review"
+
+
+def test_configured_required_path_may_be_missing_when_submitting(db):
+    author = add_user(db, "configured-missing-path-author")
+    template = Template(
+        name="Mẫu cho phép thiếu path",
+        filename="missing-path.xlsx",
+        config_json=json.dumps({
+            "required_cols": [39],
+            "linked_pdf_path": {"enabled": True, "col": 39},
+        }),
+    )
+    db.add(template)
+    db.flush()
+    draft = Submission(
+        data_json='{"col_0": "Nội dung"}',
+        template_id=template.id,
+        created_by_user_id=author.id,
+        status="draft",
+    )
+    db.add(draft)
+    db.commit()
+
+    submissions.api_update_submission(
+        draft.id,
+        submissions.SubmitRequest(
+            data={"col_0": "Nội dung"},
+            template_id=template.id,
+            status="pending_review",
+        ),
+        current_user=current_user(author),
+        db=db,
+    )
+
+    assert draft.status == "pending_review"
 
 
 def test_employee_bulk_deletes_only_own_drafts(db):
@@ -1109,83 +1383,12 @@ def test_bulk_delete_is_atomic_when_selection_contains_submitted_report(db):
     ).count() == 2
 
 
-def test_employee_bulk_submits_reports_and_assigns_their_reviewers(db):
-    author = add_user(db, "bulk-submit-author")
-    reviewer = add_user(db, "bulk-submit-reviewer")
-    first_document = assign_document(db, author, reviewer, filename="bulk-1.pdf")
-    second_document = assign_document(db, author, reviewer, filename="bulk-2.pdf")
-    first = Submission(
-        data_json=f'{{"_pdf_uuid": "{first_document.uuid_filename}"}}',
-        created_by_user_id=author.id,
-        status="draft",
-    )
-    second = Submission(
-        data_json=f'{{"_pdf_uuid": "{second_document.uuid_filename}", "_wrong_sections": ["Thông tin"]}}',
-        created_by_user_id=author.id,
-        status="rejected",
-    )
-    db.add_all([first, second])
-    db.commit()
-    selected_ids = [first.id, second.id]
-
-    result = submissions.api_bulk_submission_action(
+def test_bulk_submit_request_is_rejected_by_schema():
+    with pytest.raises(ValidationError):
         submissions.BulkSubmissionActionRequest(
-            submission_ids=selected_ids,
+            submission_ids=[1, 2],
             action="submit_for_review",
-        ),
-        current_user=current_user(author),
-        db=db,
-    )
-
-    refreshed = db.query(Submission).filter(Submission.id.in_(selected_ids)).all()
-    assignments = db.query(SubmissionReviewAssignment).filter(
-        SubmissionReviewAssignment.submission_id.in_(selected_ids)
-    ).all()
-    assert result["processed_count"] == 2
-    assert {submission.status for submission in refreshed} == {"pending_review"}
-    assert len({submission.created_at for submission in refreshed}) == 1
-    assert all("_wrong_sections" not in __import__("json").loads(submission.data_json) for submission in refreshed)
-    assert {assignment.reviewer_user_id for assignment in assignments} == {reviewer.id}
-    assert first_document.status == "completed"
-    assert second_document.status == "completed"
-
-
-def test_bulk_submit_rolls_back_every_report_when_one_has_no_reviewer(db):
-    author = add_user(db, "bulk-submit-atomic-author")
-    reviewer = add_user(db, "bulk-submit-atomic-reviewer")
-    valid_document = assign_document(db, author, reviewer, filename="valid.pdf")
-    invalid_document = assign_document(db, author, filename="invalid.pdf")
-    valid = Submission(
-        data_json=f'{{"_pdf_uuid": "{valid_document.uuid_filename}"}}',
-        created_by_user_id=author.id,
-        status="draft",
-    )
-    invalid = Submission(
-        data_json=f'{{"_pdf_uuid": "{invalid_document.uuid_filename}"}}',
-        created_by_user_id=author.id,
-        status="draft",
-    )
-    db.add_all([valid, invalid])
-    db.commit()
-
-    with pytest.raises(HTTPException) as error:
-        submissions.api_bulk_submission_action(
-            submissions.BulkSubmissionActionRequest(
-                submission_ids=[valid.id, invalid.id],
-                action="submit_for_review",
-            ),
-            current_user=current_user(author),
-            db=db,
         )
-
-    db.refresh(valid)
-    db.refresh(invalid)
-    db.refresh(valid_document)
-    assert error.value.status_code == 409
-    assert valid.status == "draft"
-    assert invalid.status == "draft"
-    assert valid_document.status == "pending"
-    assert db.query(SubmissionReviewAssignment).count() == 0
 
 
 def test_deleting_submission_also_deletes_review_assignment(db):

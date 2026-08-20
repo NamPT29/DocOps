@@ -180,7 +180,7 @@ class ServerFolderImportJob(Base):
     imported_files = Column(Integer, nullable=False, default=0)
     skipped_files = Column(Integer, nullable=False, default=0)
     failed_files = Column(Integer, nullable=False, default=0)
-    current_path = Column(String(1024), nullable=True)
+    current_path = Column("current_path", String(1024), nullable=True, quote=True)
     error_message = Column(String(1000), nullable=True)
     created_at = Column(DateTime, default=get_utc_now)
     completed_at = Column(DateTime, nullable=True)

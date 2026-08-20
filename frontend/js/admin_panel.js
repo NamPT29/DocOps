@@ -184,7 +184,6 @@ function updateBulkSubmissionActions() {
     const selectAllButton = document.getElementById('selectAllSubmissionsBtn');
     const clearButton = document.getElementById('clearSubmissionSelectionBtn');
     const deleteButton = document.getElementById('bulkDeleteSubmissionsBtn');
-    const submitButton = document.getElementById('bulkSubmitSubmissionsBtn');
     document.querySelectorAll('.submission-select-checkbox').forEach(checkbox => {
         const checked = selectedSubmissionIds.has(Number(checkbox.value));
         checkbox.checked = checked;
@@ -205,7 +204,6 @@ function updateBulkSubmissionActions() {
         selectAllButton.setAttribute('aria-pressed', String(allSelected));
     }
     if (clearButton) clearButton.disabled = count === 0;
-    if (submitButton) submitButton.disabled = count === 0;
     if (deleteButton) {
         deleteButton.disabled = count === 0 || Array.from(selectedSubmissionIds).some(
             id => selectableSubmissionStatuses.get(id) !== 'draft'
@@ -234,8 +232,8 @@ function clearSubmissionSelection() {
 async function runBulkSubmissionAction(action) {
     const submissionIds = Array.from(selectedSubmissionIds);
     if (submissionIds.length === 0) return;
-    const isDelete = action === 'delete';
-    const actionLabel = isDelete ? 'xóa' : 'nộp duyệt';
+    if (action !== 'delete') return;
+    const actionLabel = 'xóa';
     if (!confirm(`Bạn có chắc muốn ${actionLabel} ${submissionIds.length} hồ sơ đã chọn?`)) return;
 
     const res = await apiCall('/api/submissions/bulk-action', {
@@ -252,10 +250,6 @@ function bulkDeleteSelectedSubmissions() {
     return runBulkSubmissionAction('delete');
 }
 
-function bulkSubmitSelectedSubmissions() {
-    return runBulkSubmissionAction('submit_for_review');
-}
-
 let activeReviewFolderPath = null;
 let reviewFolderCache = [];
 let activeCompletedFolderPath = null;
@@ -266,6 +260,8 @@ async function fetchReviewSubmissions(resetPage = true) {
     let url = new URL('/api/review-folders', window.location.origin);
     const filterTid = document.getElementById('filterReviewTemplateId');
     if (filterTid && filterTid.value) url.searchParams.append('template_id', filterTid.value);
+    const duplicateFilter = document.getElementById('filterReviewDuplicates');
+    if (duplicateFilter && duplicateFilter.checked) url.searchParams.set('duplicate_only', 'true');
     const res = await apiCall(url.toString());
     if (!res) return;
     reviewFolderCache = Array.isArray(res.data) ? res.data : [];
@@ -312,6 +308,8 @@ async function selectReviewFolder(folderPath, page = 1, rerenderTree = true) {
     url.searchParams.set('page_size', submissionsPageSize);
     const filterTid = document.getElementById('filterReviewTemplateId');
     if (filterTid && filterTid.value) url.searchParams.set('template_id', filterTid.value);
+    const duplicateFilter = document.getElementById('filterReviewDuplicates');
+    if (duplicateFilter && duplicateFilter.checked) url.searchParams.set('duplicate_only', 'true');
     const res = await apiCall(url.toString());
     if (!res) return;
     reviewSubmissionsCurrentPage = Math.max(1, Number(res.pagination?.page) || reviewSubmissionsCurrentPage);
@@ -332,11 +330,13 @@ async function fetchCompletedSubmissions(page = 1, refreshFolders = Number(page)
 
     const startDate = document.getElementById('filterStartDate');
     const endDate = document.getElementById('filterEndDate');
+    const duplicateFilter = document.getElementById('filterCompletedDuplicates');
     if (refreshFolders) {
         const folderUrl = new URL('/api/completed-folders', window.location.origin);
         if (filterTid && filterTid.value) folderUrl.searchParams.set('template_id', filterTid.value);
         if (startDate && startDate.value) folderUrl.searchParams.set('start_date', startDate.value);
         if (endDate && endDate.value) folderUrl.searchParams.set('end_date', endDate.value);
+        if (duplicateFilter && duplicateFilter.checked) folderUrl.searchParams.set('duplicate_only', 'true');
         const folderResponse = await apiCall(folderUrl.toString());
         if (!folderResponse) return;
         completedFolderCache = Array.isArray(folderResponse.data) ? folderResponse.data : [];
@@ -375,6 +375,7 @@ async function fetchCompletedSubmissions(page = 1, refreshFolders = Number(page)
     if (filterTid && filterTid.value) url.searchParams.set('template_id', filterTid.value);
     if (startDate && startDate.value) url.searchParams.set('start_date', startDate.value);
     if (endDate && endDate.value) url.searchParams.set('end_date', endDate.value);
+    if (duplicateFilter && duplicateFilter.checked) url.searchParams.set('duplicate_only', 'true');
     const res = await apiCall(url.toString());
     if (!res) return;
     renderAdminSubmissionsTable(res.data, 'submissionsTableBody', false, res.pagination);
@@ -734,6 +735,7 @@ async function editSubmission(id, isCopied = false) {
     window.reviewEditMode = reviewEditMode;
     window.reviewApproved = canReview && (res.submission_status === 'approved' || res.is_checked === true);
     const isLocked = !isAdmin && !reviewEditMode && (res.submission_status === 'pending_review' || res.submission_status === 'approved');
+    const canSubmitFromEnteredReport = !canReview && ['draft', 'rejected'].includes(res.submission_status);
 
     if (isLocked) {
         if (actionBtns) actionBtns.classList.add('d-none');
@@ -745,10 +747,9 @@ async function editSubmission(id, isCopied = false) {
         if (readonlyNotice) readonlyNotice.style.display = 'none';
 
         // Cập nhật text nút
-        const draftBtn = document.getElementById('draftBtn');
-        const submitBtn = document.getElementById('submitBtn');
-        if (draftBtn) draftBtn.innerHTML = '<i class="fas fa-save"></i> Cập nhật Nháp';
-        if (submitBtn) submitBtn.innerHTML = '<i class="fas fa-paper-plane"></i> Nộp duyệt lại';
+        if (typeof setSubmissionModeButtons === 'function') {
+            setSubmissionModeButtons(canSubmitFromEnteredReport, res.submission_status === 'rejected');
+        }
     }
 
     document.getElementById('cancelEditBtn').classList.remove('d-none');

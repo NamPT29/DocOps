@@ -23,6 +23,10 @@ _SUBMISSION_COLUMNS = {
 _SUBMISSION_INDEXES = {
     "ix_submissions_assigned_document_id": "assigned_document_id",
     "ix_submissions_folder_path_key": "folder_path_key",
+    "ix_submissions_status_template_created_at": "status, template_id, created_at",
+    "ix_submissions_status_template_folder_created_at": (
+        "status, template_id, folder_path_key, created_at"
+    ),
 }
 
 
@@ -64,10 +68,10 @@ def ensure_submission_metadata_schema(engine) -> None:
         index["name"] for index in inspector.get_indexes("submissions")
     }
     with engine.begin() as connection:
-        for index_name, column_name in _SUBMISSION_INDEXES.items():
+        for index_name, index_definition in _SUBMISSION_INDEXES.items():
             if index_name not in existing_indexes:
                 connection.execute(text(
-                    f"CREATE INDEX {index_name} ON submissions ({column_name})"
+                    f"CREATE INDEX {index_name} ON submissions ({index_definition})"
                 ))
 
 

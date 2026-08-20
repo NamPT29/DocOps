@@ -325,10 +325,12 @@
                 <div class="form-section">
                     <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
                         <h4 class="form-section-title mb-0 text-danger" style="border-bottom: none;"><i class="fas fa-search"></i> Kiểm duyệt Hồ sơ</h4>
-                        <div class="d-flex align-items-center">
+                        <div class="d-flex align-items-center flex-wrap gap-2">
                             <select id="filterReviewTemplateId" class="form-select me-2" onchange="fetchReviewSubmissions()">
                                 <option value="">-- Tất cả Biểu mẫu --</option>
                             </select>
+                            <input type="checkbox" class="btn-check" id="filterReviewDuplicates" autocomplete="off" onchange="fetchReviewSubmissions()">
+                            <label class="btn btn-outline-danger text-nowrap me-2" for="filterReviewDuplicates"><i class="fas fa-copy"></i> Báo cáo trùng</label>
                             <button class="btn btn-secondary text-nowrap" onclick="fetchReviewSubmissions()"><i class="fas fa-sync"></i> Tải lại</button>
                         </div>
                     </div>
@@ -364,7 +366,7 @@
                 <div class="form-section">
                     <div class="d-flex justify-content-between align-items-center mb-3">
                         <h4 class="form-section-title mb-0 text-success" style="border-bottom: none;"><i class="fas fa-check-circle"></i> Kho hồ sơ hoàn chỉnh</h4>
-                        <div class="d-flex align-items-center">
+                        <div class="d-flex align-items-center flex-wrap gap-2">
                             <label class="me-2 fw-bold text-nowrap">Từ:</label>
                             <input type="datetime-local" id="filterStartDate" class="form-control me-2" onchange="fetchCompletedSubmissions()" title="Từ ngày giờ">
                             <label class="me-2 fw-bold text-nowrap">Đến:</label>
@@ -372,7 +374,11 @@
                             <select id="filterTemplateId" class="form-select me-2" onchange="fetchCompletedSubmissions()">
                                 <option value="">-- Tất cả Biểu mẫu --</option>
                             </select>
-                            <button class="btn btn-success text-nowrap" onclick="exportExcelByTemplate()"><i class="fas fa-file-export"></i> Xuất Excel</button>
+                            <input type="checkbox" class="btn-check" id="filterCompletedDuplicates" autocomplete="off" onchange="fetchCompletedSubmissions()">
+                            <label class="btn btn-outline-danger text-nowrap me-2" for="filterCompletedDuplicates"><i class="fas fa-copy"></i> Báo cáo trùng</label>
+                            <button class="btn btn-outline-success text-nowrap me-2" onclick="exportExcelByTemplate()" title="Chỉ xuất báo cáo đã duyệt"><i class="fas fa-file-export"></i> Xuất đã duyệt</button>
+                            <button class="btn btn-success text-nowrap" id="exportAllBtn" onclick="exportExcelByTemplate(true)" title="Xuất báo cáo chờ duyệt và đã duyệt"><i class="fas fa-file-export"></i> Xuất toàn bộ</button>
+                            <span id="exportAllStatus" class="small text-muted"></span>
                         </div>
                     </div>
                     <div class="row g-3">
@@ -725,11 +731,11 @@
 
     <!-- JS -->
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
-    <script src="auth.js?v=99.99"></script>
-    <script src="js/pdf_handler.js?v=99.99"></script>
+    <script src="auth.js?v=100.01"></script>
+    <script src="js/pdf_handler.js?v=100.00"></script>
     <script src="js/form_renderer.js?v=99.99"></script>
-    <script src="js/submission.js?v=99.99"></script>
-    <script src="js/admin_panel.js?v=99.99"></script>
+    <script src="js/submission.js?v=100.00"></script>
+    <script src="js/admin_panel.js?v=201.00"></script>
     <script src="js/template_config.js?v=99.99"></script>
     <script src="app.js?v=99.99"></script>
     <script>

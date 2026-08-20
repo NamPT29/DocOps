@@ -161,10 +161,10 @@
                                 </div>
                                 <div class="d-grid gap-2 mb-5 mt-4">
                                     <div class="row g-2" id="actionButtonsRow">
-                                        <div class="col-6">
+                                        <div class="col-12" id="draftButtonContainer">
                                             <button type="button" class="btn btn-secondary w-100" id="draftBtn" onclick="submitData('draft')"><i class="fas fa-save"></i> Lưu nháp</button>
                                         </div>
-                                        <div class="col-6">
+                                        <div class="col-6 d-none" id="submitButtonContainer">
                                             <button type="button" class="btn btn-primary w-100" id="submitBtn" onclick="submitData('pending_review')"><i class="fas fa-paper-plane"></i> Nộp duyệt</button>
                                         </div>
                                     </div>
@@ -190,7 +190,6 @@
                             <button type="button" class="btn btn-outline-primary btn-sm" id="selectAllSubmissionsBtn" onclick="selectAllSubmissionsOnPage()" aria-pressed="false">Chọn tất cả</button>
                             <button type="button" class="btn btn-outline-secondary btn-sm" id="clearSubmissionSelectionBtn" onclick="clearSubmissionSelection()" disabled>Bỏ chọn tất cả</button>
                             <span class="badge bg-light text-dark border" id="selectedSubmissionsCount">Đã chọn: 0</span>
-                            <button type="button" class="btn btn-success btn-sm" id="bulkSubmitSubmissionsBtn" onclick="bulkSubmitSelectedSubmissions()" disabled><i class="fas fa-paper-plane"></i> Nộp duyệt</button>
                             <button type="button" class="btn btn-danger btn-sm" id="bulkDeleteSubmissionsBtn" onclick="bulkDeleteSelectedSubmissions()" disabled><i class="fas fa-trash"></i> Xóa</button>
                             <select id="filterTemplateId" class="form-select me-2" onchange="fetchSubmissions()" style="display:none;">
                                 <!-- Hidden since users likely don't need to filter by template if they are assigned one, but app.js uses it -->
@@ -227,7 +226,11 @@
                 <div class="form-section">
                     <div class="d-flex justify-content-between align-items-center mb-3">
                         <h4 class="form-section-title mb-0 text-danger" style="border-bottom: none;"><i class="fas fa-user-check"></i> Hồ sơ được phân kiểm tra</h4>
-                        <button class="btn btn-secondary text-nowrap" onclick="fetchReviewSubmissions()"><i class="fas fa-sync"></i> Tải lại</button>
+                        <div class="d-flex align-items-center gap-2">
+                            <input type="checkbox" class="btn-check" id="filterReviewDuplicates" autocomplete="off" onchange="fetchReviewSubmissions()">
+                            <label class="btn btn-outline-danger text-nowrap" for="filterReviewDuplicates"><i class="fas fa-copy"></i> Báo cáo trùng</label>
+                            <button class="btn btn-secondary text-nowrap" onclick="fetchReviewSubmissions()"><i class="fas fa-sync"></i> Tải lại</button>
+                        </div>
                     </div>
                     <div class="row g-3">
                         <div class="col-lg-4">
@@ -281,11 +284,11 @@
             }
         }
     </script>
-    <script src="auth.js?v=99.99"></script>
-    <script src="js/pdf_handler.js?v=99.99"></script>
+    <script src="auth.js?v=100.01"></script>
+    <script src="js/pdf_handler.js?v=100.00"></script>
     <script src="js/form_renderer.js?v=99.99"></script>
-    <script src="js/submission.js?v=99.99"></script>
-    <script src="js/admin_panel.js?v=99.99"></script>
+    <script src="js/submission.js?v=100.00"></script>
+    <script src="js/admin_panel.js?v=201.00"></script>
     <script src="app.js?v=99.99"></script>
 </body>
 </html>

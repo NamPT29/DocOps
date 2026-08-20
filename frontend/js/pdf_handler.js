@@ -235,16 +235,11 @@ function appendQueueFileRow(fileQueueList, file, index) {
     btn.style.fontSize = '0.9rem';
     btn.title = file.relative_path || file.name;
 
-    const checkbox = document.createElement('input');
-    checkbox.type = 'checkbox';
-    checkbox.className = 'form-check-input me-2 mt-0';
-    checkbox.checked = file.completed || false;
-    checkbox.onclick = event => {
-        event.stopPropagation();
-        file.completed = checkbox.checked;
-        saveQueueState();
-        renderFileQueue();
-    };
+    const statusBadge = document.createElement('span');
+    statusBadge.className = file.completed
+        ? 'badge bg-success me-2'
+        : 'badge bg-secondary me-2';
+    statusBadge.textContent = file.completed ? 'Đã nhập' : 'Chưa nhập';
 
     const icon = document.createElement('i');
     icon.className = 'fas fa-file-pdf text-danger me-2';
@@ -280,7 +275,7 @@ function appendQueueFileRow(fileQueueList, file, index) {
         renderFileQueue();
     };
 
-    btn.appendChild(checkbox);
+    btn.appendChild(statusBadge);
     btn.appendChild(icon);
     btn.appendChild(textSpan);
     btn.appendChild(removeBtn);
@@ -403,7 +398,7 @@ function updatePdfLinkUI() {
     if (folderBadge) folderBadge.title = activeDocumentFolderPath || 'PDF này không có metadata folder';
 }
 
-async function selectFileFromQueue(index) {
+async function selectFileFromQueue(index, { allowSubmissionNavigation = true } = {}) {
     if (index < 0 || index >= uploadedFilesQueue.length) return;
     
     iframeCurrentIndex = index;
@@ -458,16 +453,10 @@ async function selectFileFromQueue(index) {
     updatePdfLinkUI();
     renderFileQueue();
     
-    // Auto-load submission if in review mode and clicking a new PDF
-    console.log("Checking auto-load:", {
-        isEditingFromList,
-        file_submission_id: file.submission_id,
-        currentEditingId: typeof currentEditingId !== 'undefined' ? currentEditingId : 'undefined',
-        typeof_editSubmission: typeof editSubmission
-    });
-    
-    if (isEditingFromList && file.submission_id && typeof currentEditingId !== 'undefined' && currentEditingId != file.submission_id && typeof editSubmission === 'function') {
-        console.log("Auto-loading submission", file.submission_id);
+    // Only a deliberate click in the review queue may navigate to another
+    // submission. Programmatic selections while opening a review must stay on
+    // the submission requested by the user.
+    if (allowSubmissionNavigation && isEditingFromList && file.submission_id && typeof currentEditingId !== 'undefined' && currentEditingId != file.submission_id && typeof editSubmission === 'function') {
         setTimeout(() => {
             editSubmission(file.submission_id);
         }, 0);
@@ -485,10 +474,6 @@ async function fetchMyQueue() {
         
         if (data.status === 'ok') {
             const queueGroups = data.data;
-            const linkedPdfUuids = new Set(
-                (Array.isArray(data.linked_pdf_uuids) ? data.linked_pdf_uuids : []).map(String)
-            );
-            
             const currentQueueUuids = new Set();
             queueGroups.forEach(group => {
                 if (group.files) {
@@ -501,8 +486,6 @@ async function fetchMyQueue() {
             const activeFile = uploadedFilesQueue[iframeCurrentIndex] || null;
             uploadedFilesQueue = uploadedFilesQueue.filter(file => {
                 if (file.temporary_view === true) return false;
-                if (file.uuid && linkedPdfUuids.has(String(file.uuid))) return false;
-                
                 // Nếu là file được giao từ server (có template_id) 
                 // nhưng lại không nằm trong danh sách queue mới nhất thì xóa khỏi hàng chờ
                 if (file.template_id !== undefined && file.template_id !== null) {
@@ -529,6 +512,7 @@ async function fetchMyQueue() {
                             existingFile.template_id = group.template_id;
                             existingFile.template_name = group.template_name;
                             existingFile.temporary_view = false;
+                            existingFile.completed = doc.entered === true;
                         } else {
                             uploadedFilesQueue.push({
                                 name: doc.name,
@@ -539,6 +523,7 @@ async function fetchMyQueue() {
                                 template_id: group.template_id,
                                 template_name: group.template_name,
                                 temporary_view: false,
+                                completed: doc.entered === true,
                             });
                             added++;
                         }
@@ -683,12 +668,26 @@ function loadReviewFolderFiles(folderFiles, selectedUuid) {
             'vi'
         )
     );
-    const selectedIndex = uploadedFilesQueue.findIndex(file => file.uuid === selectedUuid);
-    const displayIndex = selectedIndex >= 0 ? selectedIndex : 0;
+    let selectedIndex = selectedUuid
+        ? uploadedFilesQueue.findIndex(file => String(file.uuid) === String(selectedUuid))
+        : -1;
+    if (selectedIndex < 0 && typeof currentEditingId !== 'undefined' && currentEditingId !== null) {
+        selectedIndex = uploadedFilesQueue.findIndex(file =>
+            file.temporary_view === true
+            && file.submission_id !== null
+            && String(file.submission_id) === String(currentEditingId)
+        );
+    }
+    const fallbackIndex = uploadedFilesQueue.findIndex(file =>
+        file.temporary_view === true
+        && normalizeQueuePath(file.folder_group) === folderPath
+    );
+    const displayIndex = selectedIndex >= 0 ? selectedIndex : fallbackIndex;
+    if (displayIndex < 0) return false;
     activeQueueFolderKey = getQueueFolderKey(uploadedFilesQueue[displayIndex]);
     renderFileQueue();
     saveQueueState();
-    selectFileFromQueue(displayIndex);
+    selectFileFromQueue(displayIndex, { allowSubmissionNavigation: false });
     isPdfLinked = selectedIndex >= 0;
     return true;
 }

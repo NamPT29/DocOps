@@ -37,6 +37,14 @@ from server.services.submission_metadata_service import (
     backfill_submission_metadata,
 )
 from server.services.submission_service import COMPLETED_WITHOUT_FOLDER, SubmissionService, _load_submission_document_metadata, _pdf_url
+from server.services.export_job_service import (
+    ExportJobBusyError,
+    cleanup_export_job,
+    export_job_output_path,
+    public_export_job,
+    read_export_job,
+    start_export_job,
+)
 from server.utils.folder_utils import (
     NO_FOLDER_SENTINEL,
     normalize_folder_path,
@@ -81,13 +89,16 @@ class ReviewContentRequest(BaseModel):
 
 class BulkSubmissionActionRequest(BaseModel):
     submission_ids: list[int]
-    action: Literal["delete", "submit_for_review"]
+    action: Literal["delete"]
 
 @router.post("/submit")
 def api_submit(req: SubmitRequest, current_user: dict = Depends(get_input_user), db: Session = Depends(get_db)):
     try:
-        if req.status != "draft":
-            SubmissionService.validate_required_fields(req.template_id, req.data, db)
+        if req.status not in {None, "draft"}:
+            raise HTTPException(
+                status_code=409,
+                detail="Hồ sơ mới chỉ được lưu nháp. Hãy mở hồ sơ đã nhập để nộp duyệt.",
+            )
         repository = SubmissionRepository(db)
         data_dict, document = SubmissionService.enrich_pdf_reference(
             req.data, db, current_user["id"], pending_only=True
@@ -96,15 +107,13 @@ def api_submit(req: SubmitRequest, current_user: dict = Depends(get_input_user),
             data_json=json.dumps(data_dict, ensure_ascii=False),
             created_by_user_id=current_user["id"],
             template_id=req.template_id,
-            status=req.status or "draft"
+            status="draft"
         )
         SubmissionService.sync_submission_metadata(sub, data_dict, document, db)
         repository.add(sub)
         if hasattr(db, "flush"):
             repository.flush()
-        if req.status == "pending_review" and sub.id is not None:
-            ReviewWorkflowService.assign_submission_reviewer(sub, db, document=document)
-        if document and req.status == "pending_review":
+        if document:
             document.status = "completed"
 
         if req.sync_cover:
@@ -129,6 +138,7 @@ def api_get_submissions(
     folder_path: str = None,
     page: int = 1,
     page_size: int = 20,
+    duplicate_only: bool = False,
     current_user: dict = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
@@ -150,6 +160,7 @@ def api_get_submissions(
             folder_path=folder_path,
             page=page,
             page_size=page_size,
+            duplicate_only=duplicate_only,
         )
     except HTTPException:
         raise
@@ -162,6 +173,7 @@ def api_get_completed_folders(
     template_id: int = None,
     start_date: str = None,
     end_date: str = None,
+    duplicate_only: bool = False,
     current_user: dict = Depends(get_admin_user),
     db: Session = Depends(get_db),
 ):
@@ -171,6 +183,7 @@ def api_get_completed_folders(
             template_id=template_id,
             start_date=start_date,
             end_date=end_date,
+            duplicate_only=duplicate_only,
         )
     )
 
@@ -222,6 +235,7 @@ def api_get_completed_folders(
 @router.get('/review-folders')
 def api_get_review_folders(
     template_id: int = None,
+    duplicate_only: bool = False,
     current_user: dict = Depends(get_reviewer_user),
     db: Session = Depends(get_db),
 ):
@@ -229,13 +243,21 @@ def api_get_review_folders(
     if current_user.get('role') == 'admin':
         return {
             'status': 'ok',
-            'data': ReviewWorkflowService.get_admin_review_folder_groups(db, template_id),
+            'data': ReviewWorkflowService.get_admin_review_folder_groups(
+                db,
+                template_id,
+                duplicate_only=duplicate_only,
+            ),
         }
     repository = ReviewRepository(db)
 
     groups: dict[str, dict] = {}
     for folder_path, input_name, template_name, count in (
-        repository.reviewer_folder_rows(current_user["id"], template_id)
+        repository.reviewer_folder_rows(
+            current_user["id"],
+            template_id,
+            duplicate_only=duplicate_only,
+        )
     ):
         group = groups.setdefault(
             folder_path,
@@ -249,16 +271,19 @@ def api_get_review_folders(
             },
         )
         group["total_documents"] += count
+        if duplicate_only:
+            group["submitted_count"] += count
         group["input_names"].add(input_name)
         if template_name:
             group["template_names"].add(template_name)
-    submitted_counts = repository.reviewer_submitted_counts(
-        current_user["id"],
-        template_id,
-    )
-    for folder_path, submitted_count in submitted_counts:
-        if folder_path in groups:
-            groups[folder_path]["submitted_count"] = submitted_count
+    if not duplicate_only:
+        submitted_counts = repository.reviewer_submitted_counts(
+            current_user["id"],
+            template_id,
+        )
+        for folder_path, submitted_count in submitted_counts:
+            if folder_path in groups:
+                groups[folder_path]["submitted_count"] = submitted_count
 
     data = []
     for folder_path in sorted(groups, key=lambda value: value.lower()):
@@ -275,6 +300,7 @@ def api_get_review_folder_submissions(
     template_id: int = None,
     page: int = 1,
     page_size: int = 20,
+    duplicate_only: bool = False,
     current_user: dict = Depends(get_reviewer_user),
     db: Session = Depends(get_db),
 ):
@@ -282,7 +308,6 @@ def api_get_review_folder_submissions(
         raise HTTPException(status_code=400, detail="Số trang phải lớn hơn hoặc bằng 1")
     if page_size < 1 or page_size > 100:
         raise HTTPException(status_code=400, detail="Số hồ sơ mỗi trang phải từ 1 đến 100")
-    backfill_submission_metadata(db)
     ReviewWorkflowService.backfill_pending_review_assignments(db)
     review_repository = ReviewRepository(db)
     if current_user.get('role') != 'admin' and not review_repository.reviewer_has_folder(
@@ -303,12 +328,14 @@ def api_get_review_folder_submissions(
             folder_path=folder_path,
             page=page,
             page_size=page_size,
+            duplicate_only=duplicate_only,
         )
     else:
         total = review_repository.reviewer_folder_submissions_count(
             current_user["id"],
             folder_path,
             template_id,
+            duplicate_only=duplicate_only,
         )
         total_pages = max(1, (total + page_size - 1) // page_size)
         current_page = min(page, total_pages)
@@ -319,6 +346,7 @@ def api_get_review_folder_submissions(
             template_id,
             offset=start_index,
             limit=page_size,
+            duplicate_only=duplicate_only,
         )
 
     document_metadata = _load_submission_document_metadata(submissions_in_folder, db)
@@ -513,15 +541,38 @@ def api_update_submission(sub_id: int, req: SubmitRequest, current_user: dict = 
         data_dict, document = SubmissionService.enrich_pdf_reference(
             req.data, db, sub.created_by_user_id
         )
-        SubmissionService.validate_required_fields(req.template_id or sub.template_id, req.data, db)
+        if req.status == "pending_review":
+            SubmissionService.validate_required_fields(
+                req.template_id or sub.template_id,
+                req.data,
+                db,
+                allow_missing_linked_path=True,
+            )
         sub.data_json = json.dumps(data_dict, ensure_ascii=False)
         SubmissionService.sync_submission_metadata(sub, data_dict, document, db)
+        if req.status == "pending_review":
+            SubmissionService.lock_duplicate_scope(sub.template_id, db)
+            duplicate_count = SubmissionService.exact_duplicate_count(sub, data_dict, db)
+            if duplicate_count:
+                raise HTTPException(
+                    status_code=409,
+                    detail={
+                        "code": "duplicate_submission",
+                        "duplicate_count": duplicate_count,
+                        "message": f"Có {duplicate_count} báo cáo trùng path và nội dung. Bản hiện tại vẫn được giữ lại ở trạng thái nháp.",
+                    },
+                )
         sub.created_at = datetime.now(timezone.utc).replace(tzinfo=None)
         if req.status:
             sub.status = req.status
         if req.status == "pending_review":
-            ReviewWorkflowService.assign_submission_reviewer(sub, db, document=document)
-        if document and req.status == "pending_review":
+            ReviewWorkflowService.assign_submission_reviewer(
+                sub,
+                db,
+                document=document,
+                required=False,
+            )
+        if document and req.status in {"draft", "pending_review"}:
             document.status = "completed"
             
         # Nộp lại hồ sơ sau khi báo lỗi thì xóa lỗi đi
@@ -737,8 +788,6 @@ def api_copy_submission(sub_id: int, current_user: dict = Depends(get_current_us
         db.rollback()
         return {"status": "error", "message": str(e)}
 
-from fastapi.concurrency import run_in_threadpool
-
 @router.get("/export")
 async def api_export(
     template_id: int,
@@ -746,10 +795,19 @@ async def api_export(
     folder_path: str = None,
     start_date: str = None,
     end_date: str = None,
+    include_pending_review: bool = False,
     current_user: dict = Depends(get_admin_user),
     db: Session = Depends(get_db),
 ):
     try:
+        if include_pending_review:
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    "Xuất toàn bộ đã chuyển sang xử lý nền. "
+                    "Vui lòng tải lại trang và bấm Xuất toàn bộ lần nữa."
+                ),
+            )
         template = LookupRepository(db).get_template(template_id)
         if not template:
             raise HTTPException(status_code=404, detail="Không tìm thấy template mẫu.")
@@ -761,7 +819,8 @@ async def api_export(
         
         os.makedirs("scratch", exist_ok=True)
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        download_filename = f"BaoCao_{template_id}_{timestamp}{template_extension}"
+        filename_prefix = "BaoCao_TatCa" if include_pending_review else "BaoCao"
+        download_filename = f"{filename_prefix}_{template_id}_{timestamp}{template_extension}"
         download_path = os.path.join("scratch", download_filename)
         
         from server.services.excel_service import export_submissions_to_excel
@@ -772,11 +831,13 @@ async def api_export(
             folder_path=folder_path,
             start_date=start_date,
             end_date=end_date,
+            include_pending_review=include_pending_review,
         )
         if not submissions:
+            export_scope = "chờ duyệt hoặc đã duyệt" if include_pending_review else "đã duyệt"
             raise HTTPException(
                 status_code=404,
-                detail="Không có hồ sơ đã duyệt để xuất báo cáo cho biểu mẫu này.",
+                detail=f"Không có hồ sơ {export_scope} để xuất báo cáo cho biểu mẫu này.",
             )
         await run_in_threadpool(export_submissions_to_excel, template_file_path, submissions, download_path)
         
@@ -793,6 +854,78 @@ async def api_export(
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Không thể xuất báo cáo: {e}")
+
+
+@router.post("/export-jobs", status_code=202)
+def api_start_export_job(
+    template_id: int,
+    folder_path: str = None,
+    start_date: str = None,
+    end_date: str = None,
+    include_pending_review: bool = False,
+    current_user: dict = Depends(get_admin_user),
+    db: Session = Depends(get_db),
+):
+    template = LookupRepository(db).get_template(template_id)
+    if not template:
+        raise HTTPException(status_code=404, detail="Không tìm thấy template mẫu.")
+    extension = os.path.splitext(template.filename)[1].lower()
+    if extension not in {".xlsx", ".xlsm"}:
+        raise HTTPException(status_code=400, detail="Định dạng file mẫu không được hỗ trợ.")
+    try:
+        job = start_export_job(
+            template_id=template_id,
+            extension=extension,
+            include_pending_review=include_pending_review,
+            folder_path=folder_path,
+            start_date=start_date,
+            end_date=end_date,
+            requested_by_user_id=current_user["id"],
+        )
+    except ExportJobBusyError as exc:
+        detail = "Một tác vụ xuất toàn bộ khác đang chạy. Vui lòng chờ tác vụ hiện tại hoàn tất."
+        if exc.job_id:
+            detail += f" Mã tác vụ: {exc.job_id}"
+        raise HTTPException(status_code=409, detail=detail) from exc
+    return {"status": "ok", "job": public_export_job(job)}
+
+
+@router.get("/export-jobs/{job_id}")
+def api_get_export_job(
+    job_id: str,
+    current_user: dict = Depends(get_admin_user),
+):
+    try:
+        job = read_export_job(job_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if not job:
+        raise HTTPException(status_code=404, detail="Không tìm thấy tác vụ xuất")
+    return {"status": "ok", "job": public_export_job(job)}
+
+
+@router.get("/export-jobs/{job_id}/download")
+def api_download_export_job(
+    job_id: str,
+    background_tasks: BackgroundTasks,
+    current_user: dict = Depends(get_admin_user),
+):
+    try:
+        job = read_export_job(job_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if not job:
+        raise HTTPException(status_code=404, detail="Không tìm thấy tác vụ xuất")
+    if job.get("state") != "completed":
+        raise HTTPException(status_code=409, detail=job.get("message") or "File chưa sẵn sàng")
+    try:
+        output_path = export_job_output_path(job_id, job.get("extension"))
+    except ValueError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    if not output_path.is_file():
+        raise HTTPException(status_code=404, detail="File xuất không còn tồn tại")
+    background_tasks.add_task(cleanup_export_job, job_id)
+    return FileResponse(output_path, filename=job.get("filename") or output_path.name)
 
 @router.post("/upload-pdf")
 async def api_upload_pdf(
