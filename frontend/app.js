@@ -1,13 +1,19 @@
-function initApp() {
+async function initApp() {
     // Only run form-related stuff if form-container exists (i.e. not on admin.html)
     if (document.getElementById('form-container')) {
-        fetchSchema();
         setupPdfUpload();
         restoreQueue();
         // Reconcile persisted local files with the current assignment first.
         const hasCheckId = new URLSearchParams(window.location.search).has('check_id');
-        if (!hasCheckId && typeof fetchMyQueue === 'function') {
-            fetchMyQueue(true);
+        let projectWorkspaceLoaded = false;
+        if (!hasCheckId && typeof initializeEmployeeProjectWorkspace === 'function') {
+            projectWorkspaceLoaded = await initializeEmployeeProjectWorkspace();
+        }
+        if (!projectWorkspaceLoaded) {
+            await fetchSchema();
+            if (!hasCheckId && typeof fetchMyQueue === 'function') {
+                fetchMyQueue(true);
+            }
         }
         
         // Wait a brief moment to ensure UI is ready

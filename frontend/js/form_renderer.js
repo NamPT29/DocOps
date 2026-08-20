@@ -107,7 +107,15 @@ async function fetchSchema() {
     }
     if (dataForm) dataForm.style.display = 'none';
     
-    const data = await apiCall(`/api/templates/${window.activeTemplateId}/schema`);
+    const activeWorkspace = window.activeProjectWorkspace;
+    const data = activeWorkspace
+        && Number(activeWorkspace.project?.id) === Number(window.activeProjectId)
+        ? {
+            status: 'ok',
+            data: Array.isArray(activeWorkspace.schema) ? activeWorkspace.schema : [],
+            config: activeWorkspace.config || {},
+        }
+        : await apiCall(`/api/templates/${window.activeTemplateId}/schema`);
     if (loadingEl) loadingEl.style.display = 'none';
     
     if (data) {
