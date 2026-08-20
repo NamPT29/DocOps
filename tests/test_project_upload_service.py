@@ -7,8 +7,14 @@ from sqlalchemy.orm import sessionmaker
 
 from server.database import Base
 from server.models import (
+    AssignedDocument,
+    AssignedDocumentFolder,
+    AssignedDocumentPath,
+    AssignedDocumentReviewAssignment,
     Project,
+    ProjectCase,
     ProjectDocumentAsset,
+    ProjectMember,
     ProjectReportUnit,
     ProjectUploadSession,
     Template,
@@ -234,6 +240,53 @@ def test_finalize_atomically_groups_multiple_pdfs_into_one_report(database):
     assert len({asset.report_unit_id for asset in assets}) == 1
     assert all((tmp_path / "uploads" / asset.storage_filename).is_file() for asset in assets)
     assert not list((tmp_path / "uploads" / ".project_uploads").rglob("*.part"))
+
+
+def test_finalize_materializes_project_assets_for_existing_employee_queue(database):
+    db, _ = database
+    admin, project = seed_project(db, report_mode="pdf")
+    input_user = User(username="project-input", password="hash", role="user")
+    reviewer = User(username="project-reviewer", password="hash", role="user")
+    db.add_all([input_user, reviewer])
+    db.flush()
+    db.add_all([
+        ProjectMember(project_id=project.id, user_id=input_user.id, member_role="input"),
+        ProjectMember(project_id=project.id, user_id=reviewer.id, member_role="reviewer"),
+    ])
+    db.commit()
+
+    content = b"%PDF-project-workspace"
+    session = create_or_resume_upload_session(
+        db,
+        project_id=project.id,
+        created_by_user_id=admin.id,
+        client_session_key="workspace-materialization",
+        raw_items=[raw_item("001/report.pdf", content)],
+    )
+    upload_file = session["files"][0]
+    write_upload_chunk(
+        db,
+        session_id=session["id"],
+        file_id=upload_file["file_id"],
+        offset=0,
+        chunk=content,
+    )
+
+    result = finalize_upload_session(db, session_id=session["id"])
+
+    asset = db.query(ProjectDocumentAsset).one()
+    case_row = db.query(ProjectCase).one()
+    document = db.get(AssignedDocument, asset.assigned_document_id)
+    assert result["workspace_counts"] == {
+        "created_documents": 1,
+        "updated_documents": 1,
+    }
+    assert document.assigned_to_user_id == case_row.assigned_input_user_id == input_user.id
+    assert document.template_id == project.template_id
+    assert document.uuid_filename == asset.storage_filename
+    assert db.query(AssignedDocumentPath).filter_by(document_id=document.id).one().relative_path == "001/report.pdf"
+    assert db.query(AssignedDocumentFolder).filter_by(document_id=document.id).one().folder_group == f"project/{project.id}/001"
+    assert db.query(AssignedDocumentReviewAssignment).filter_by(document_id=document.id).one().reviewer_user_id == reviewer.id
 
 
 def test_project_upload_routes_are_registered():

@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 from server.database import get_db
 from server.routers.auth import get_admin_user, get_current_user
 from server.services.project_service import create_project, list_projects
+from server.services.project_workspace_service import get_project_workspace
 
 
 router = APIRouter(prefix="/api/projects", tags=["projects"])
@@ -63,3 +64,19 @@ def api_list_my_projects(
     db: Session = Depends(get_db),
 ):
     return {"status": "ok", "data": list_projects(db, current_user=current_user)}
+
+
+@router.get("/{project_id}/workspace")
+def api_get_project_workspace(
+    project_id: int,
+    current_user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    return {
+        "status": "ok",
+        "data": get_project_workspace(
+            db,
+            project_id=project_id,
+            current_user=current_user,
+        ),
+    }
