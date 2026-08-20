@@ -14,6 +14,7 @@ from server.models import (
     ProjectUploadSession,
 )
 from server.repositories.project_upload_repository import ProjectUploadRepository
+from server.services.project_assignment_service import assign_unassigned_project_cases
 from server.services.project_manifest_service import (
     ProjectManifestError,
     derive_project_group_keys,
@@ -340,6 +341,7 @@ def finalize_upload_session(db, *, session_id):
     moved_files = []
     imported_files = 0
     reused_files = 0
+    assignment_counts = {"input_assigned": 0, "reviewer_assigned": 0}
     try:
         for upload_file in upload_files:
             staging_path = _staging_path(session, upload_file)
@@ -397,6 +399,11 @@ def finalize_upload_session(db, *, session_id):
             )
             imported_files += 1
 
+        assignment_counts = assign_unassigned_project_cases(
+            db,
+            project_id=project.id,
+            changed_by_user_id=session.created_by_user_id,
+        )
         session.status = "completed"
         session.completed_files = session.requested_files
         session.failed_files = 0
@@ -416,4 +423,5 @@ def finalize_upload_session(db, *, session_id):
     result = serialize_upload_session(db, session)
     result["imported_files"] = imported_files
     result["reused_files"] = reused_files
+    result["assignment_counts"] = assignment_counts
     return result
