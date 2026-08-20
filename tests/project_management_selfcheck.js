@@ -13,5 +13,11 @@ assert(source.includes("'X-Upload-Offset': String(offset)"));
 assert(source.includes('Promise.all(Array.from({length: workerCount}'));
 assert(source.includes('projectUploadResumeV1'));
 assert(source.includes('/api/project-upload-sessions/${encodeURIComponent(session.id)}/finalize'));
+assert(html.includes('id="projectMembersModal"'));
+assert(html.includes('id="projectAssetsModal"'));
+assert(source.includes('/api/projects/${projectId}/members'));
+assert(source.includes('/api/projects/${project.id}/assets'));
+assert(source.includes('deleteButton.disabled = Number(asset.submission_count || 0) > 0'));
+assert(source.includes('method: \'DELETE\''));
 
 console.log('project management self-check passed');

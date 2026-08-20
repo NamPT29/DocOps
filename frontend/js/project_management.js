@@ -2,6 +2,8 @@ let projectManagementLoaded = false;
 let selectedProjectFileRows = [];
 let selectedProjectRootName = '';
 let selectedProjectMaximumDepth = 0;
+let projectManagementUsers = [];
+let projectManagementProjects = [];
 
 function setProjectUploadStatus(message, tone = 'muted') {
     const status = document.getElementById('projectUploadStatus');
@@ -168,6 +170,7 @@ async function loadProjectFormOptions() {
     }
     if (userData) {
         const users = Array.isArray(userData.data) ? userData.data : [];
+        projectManagementUsers = users;
         renderProjectUserOptions('projectInputUsers', users.filter(user => user.role !== 'admin'), 'input');
         renderProjectUserOptions('projectReviewerUsers', users, 'reviewer');
     }
@@ -183,15 +186,16 @@ function appendProjectCell(row, text, className = '') {
 
 async function loadProjectList() {
     const body = document.getElementById('projectListBody');
-    if (body) body.innerHTML = '<tr><td colspan="6" class="text-center text-muted">Đang tải...</td></tr>';
+    if (body) body.innerHTML = '<tr><td colspan="7" class="text-center text-muted">Đang tải...</td></tr>';
     const data = await apiCall('/api/projects', { cache: 'no-store' });
     if (!data || !body) return;
+    projectManagementProjects = Array.isArray(data.data) ? data.data : [];
     body.replaceChildren();
-    if (!data.data.length) {
-        body.innerHTML = '<tr><td colspan="6" class="text-center text-muted">Chưa có dự án.</td></tr>';
+    if (!projectManagementProjects.length) {
+        body.innerHTML = '<tr><td colspan="7" class="text-center text-muted">Chưa có dự án.</td></tr>';
         return;
     }
-    data.data.forEach(project => {
+    projectManagementProjects.forEach(project => {
         const metrics = project.metrics || {};
         const row = document.createElement('tr');
         const nameCell = appendProjectCell(row, '');
@@ -210,8 +214,160 @@ async function loadProjectList() {
         appendProjectCell(row, `${metrics.approved_reports || 0}/${metrics.entered_reports || 0}`);
         const statusCell = appendProjectCell(row, project.status || '');
         statusCell.classList.add(project.status === 'ready' ? 'text-success' : 'text-warning');
+        const actionCell = appendProjectCell(row, '');
+        actionCell.className = 'text-nowrap';
+        const membersButton = document.createElement('button');
+        membersButton.type = 'button';
+        membersButton.className = 'btn btn-sm btn-outline-primary me-1';
+        membersButton.innerHTML = '<i class="fas fa-users"></i> Nhân sự';
+        membersButton.addEventListener('click', () => openProjectMembers(project.id));
+        const assetsButton = document.createElement('button');
+        assetsButton.type = 'button';
+        assetsButton.className = 'btn btn-sm btn-outline-danger';
+        assetsButton.innerHTML = '<i class="fas fa-file-pdf"></i> PDF';
+        assetsButton.addEventListener('click', () => openProjectAssets(project.id));
+        actionCell.append(membersButton, assetsButton);
         body.appendChild(row);
     });
+}
+
+function renderProjectMemberEditor(containerId, users, selectedUserIds, className) {
+    const container = document.getElementById(containerId);
+    if (!container) return;
+    const selected = new Set((selectedUserIds || []).map(Number));
+    container.replaceChildren();
+    if (!users.length) {
+        const empty = document.createElement('span');
+        empty.className = 'text-muted';
+        empty.textContent = 'Không có tài khoản phù hợp.';
+        container.appendChild(empty);
+        return;
+    }
+    users.forEach(user => {
+        const wrapper = document.createElement('div');
+        wrapper.className = 'form-check';
+        const input = document.createElement('input');
+        input.type = 'checkbox';
+        input.className = `form-check-input ${className}`;
+        input.value = String(Number(user.id));
+        input.id = `${className}-${Number(user.id)}`;
+        input.checked = selected.has(Number(user.id));
+        const label = document.createElement('label');
+        label.className = 'form-check-label';
+        label.htmlFor = input.id;
+        label.textContent = `${user.username}${user.role === 'admin' ? ' (Admin)' : ''}`;
+        wrapper.append(input, label);
+        container.appendChild(wrapper);
+    });
+}
+
+function openProjectMembers(projectId) {
+    const project = projectManagementProjects.find(item => Number(item.id) === Number(projectId));
+    if (!project) return alert('Không tìm thấy dự án trong danh sách hiện tại.');
+    document.getElementById('projectMembersProjectId').value = String(project.id);
+    document.getElementById('projectMembersModalTitle').textContent = project.name;
+    renderProjectMemberEditor(
+        'projectMembersInputList',
+        projectManagementUsers.filter(user => user.role !== 'admin'),
+        project.input_user_ids,
+        'project-member-input',
+    );
+    renderProjectMemberEditor(
+        'projectMembersReviewerList',
+        projectManagementUsers,
+        project.reviewer_user_ids,
+        'project-member-reviewer',
+    );
+    new bootstrap.Modal(document.getElementById('projectMembersModal')).show();
+}
+
+function checkedMemberEditorIds(className) {
+    return Array.from(document.querySelectorAll(`.${className}:checked`))
+        .map(input => Number(input.value))
+        .filter(Number.isInteger);
+}
+
+async function saveProjectMembers() {
+    const projectId = Number(document.getElementById('projectMembersProjectId')?.value || 0);
+    if (!projectId) return;
+    if (!confirm('Lưu danh sách nhân sự và tự động chuyển nguyên hồ sơ của những người bị gỡ?')) return;
+    const button = document.getElementById('saveProjectMembersButton');
+    if (button) button.disabled = true;
+    try {
+        const response = await apiCall(`/api/projects/${projectId}/members`, {
+            method: 'PUT',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({
+                input_user_ids: checkedMemberEditorIds('project-member-input'),
+                reviewer_user_ids: checkedMemberEditorIds('project-member-reviewer'),
+            }),
+        });
+        if (!response) return;
+        const result = response.data || {};
+        alert(
+            `Đã cập nhật. Chuyển ${result.input_cases_transferred || 0} hồ sơ nhập, `
+            + `${result.reviewer_cases_transferred || 0} hồ sơ kiểm và ${result.submissions_transferred || 0} báo cáo.`,
+        );
+        bootstrap.Modal.getInstance(document.getElementById('projectMembersModal'))?.hide();
+        await loadProjectList();
+    } finally {
+        if (button) button.disabled = false;
+    }
+}
+
+function formatProjectAssetSize(byteSize) {
+    const size = Number(byteSize || 0);
+    if (size < 1024) return `${size} B`;
+    if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`;
+    return `${(size / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+async function openProjectAssets(projectId) {
+    const project = projectManagementProjects.find(item => Number(item.id) === Number(projectId));
+    if (!project) return alert('Không tìm thấy dự án trong danh sách hiện tại.');
+    document.getElementById('projectAssetsProjectId').value = String(project.id);
+    document.getElementById('projectAssetsModalTitle').textContent = project.name;
+    const body = document.getElementById('projectAssetsTableBody');
+    body.innerHTML = '<tr><td colspan="6" class="text-center text-muted">Đang tải...</td></tr>';
+    bootstrap.Modal.getOrCreateInstance(document.getElementById('projectAssetsModal')).show();
+    const response = await apiCall(`/api/projects/${project.id}/assets`, { cache: 'no-store' });
+    if (!response) return;
+    body.replaceChildren();
+    if (!response.data.length) {
+        body.innerHTML = '<tr><td colspan="6" class="text-center text-muted">Dự án chưa có PDF hoạt động.</td></tr>';
+        return;
+    }
+    response.data.forEach(asset => {
+        const row = document.createElement('tr');
+        appendProjectCell(row, asset.relative_path, 'text-break');
+        appendProjectCell(row, asset.case_name || '');
+        appendProjectCell(row, asset.report_name || '');
+        appendProjectCell(row, formatProjectAssetSize(asset.byte_size));
+        appendProjectCell(row, String(asset.submission_count || 0));
+        const actionCell = appendProjectCell(row, '');
+        const deleteButton = document.createElement('button');
+        deleteButton.type = 'button';
+        deleteButton.className = 'btn btn-sm btn-danger';
+        deleteButton.innerHTML = '<i class="fas fa-trash"></i> Xóa PDF';
+        deleteButton.disabled = Number(asset.submission_count || 0) > 0;
+        deleteButton.title = deleteButton.disabled
+            ? 'PDF đã có dữ liệu nhập nên không thể xóa'
+            : 'Xóa cứng PDF lỗi khỏi dự án';
+        deleteButton.addEventListener('click', () => deleteProjectAsset(project.id, asset.id, asset.relative_path));
+        actionCell.appendChild(deleteButton);
+        body.appendChild(row);
+    });
+}
+
+async function deleteProjectAsset(projectId, assetId, relativePath) {
+    if (!confirm(`Xóa cứng PDF “${relativePath}”? File chỉ xuất hiện lại khi admin chọn lại folder và cập nhật dự án.`)) return;
+    const response = await apiCall(`/api/projects/${Number(projectId)}/assets/${Number(assetId)}`, {
+        method: 'DELETE',
+    });
+    if (!response) return;
+    alert('Đã xóa PDF và lưu nhật ký thao tác.');
+    await openProjectAssets(projectId);
+    await loadProjectList();
 }
 
 async function initializeProjectManagement() {
