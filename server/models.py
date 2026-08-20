@@ -201,7 +201,7 @@ class ServerFolderImportReviewer(Base):
     )
 
 from sqlalchemy.orm import relationship
-from sqlalchemy import UniqueConstraint
+from sqlalchemy import BigInteger, CheckConstraint, UniqueConstraint
 
 class Dictionary(Base):
     __tablename__ = "dictionaries"
@@ -224,3 +224,280 @@ class DictionaryItem(Base):
     value = Column(String(255), nullable=False) # e.g. "Kinh"
     
     dictionary = relationship("Dictionary", back_populates="items")
+
+
+class Project(Base):
+    """A project pins one configured template and one folder hierarchy."""
+
+    __tablename__ = "projects"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String(255), nullable=False)
+    root_folder_name = Column(String(255), nullable=False)
+    template_id = Column(Integer, ForeignKey("templates.id"), nullable=False, index=True)
+    template_name_snapshot = Column(String(255), nullable=False)
+    template_filename_snapshot = Column(String(255), nullable=False)
+    template_config_json_snapshot = Column(Text, nullable=True)
+    form_schema_json_snapshot = Column(Text, nullable=True)
+    start_date = Column(DateTime, nullable=True)
+    end_date = Column(DateTime, nullable=True)
+    case_level = Column(Integer, nullable=False)
+    report_mode = Column(String(32), nullable=False)
+    report_level = Column(Integer, nullable=True)
+    status = Column(String(32), nullable=False, default="configuring", index=True)
+    created_by_user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    created_at = Column(DateTime, nullable=False, default=get_utc_now)
+    updated_at = Column(DateTime, nullable=False, default=get_utc_now, onupdate=get_utc_now)
+
+    __table_args__ = (
+        CheckConstraint("case_level >= 1", name="ck_projects_case_level"),
+        CheckConstraint(
+            "report_mode IN ('folder_level', 'pdf')",
+            name="ck_projects_report_mode",
+        ),
+        CheckConstraint(
+            "(report_mode = 'pdf' AND report_level IS NULL) OR "
+            "(report_mode = 'folder_level' AND report_level > case_level)",
+            name="ck_projects_report_level",
+        ),
+    )
+
+
+class ProjectMember(Base):
+    """Input and reviewer pools; a user may hold both roles."""
+
+    __tablename__ = "project_members"
+
+    project_id = Column(
+        Integer,
+        ForeignKey("projects.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    user_id = Column(
+        Integer,
+        ForeignKey("users.id", ondelete="CASCADE"),
+        primary_key=True,
+        index=True,
+    )
+    member_role = Column(String(16), primary_key=True)
+    is_active = Column(Boolean, nullable=False, default=True)
+    created_at = Column(DateTime, nullable=False, default=get_utc_now)
+    updated_at = Column(DateTime, nullable=False, default=get_utc_now, onupdate=get_utc_now)
+
+    __table_args__ = (
+        CheckConstraint(
+            "member_role IN ('input', 'reviewer')",
+            name="ck_project_members_role",
+        ),
+    )
+
+
+class ProjectCase(Base):
+    """The indivisible assignment unit used when work is transferred."""
+
+    __tablename__ = "project_cases"
+
+    id = Column(Integer, primary_key=True, index=True)
+    project_id = Column(
+        Integer,
+        ForeignKey("projects.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    case_key = Column(String(1024), nullable=False)
+    display_name = Column(String(255), nullable=False)
+    assigned_input_user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
+    assigned_reviewer_user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
+    created_at = Column(DateTime, nullable=False, default=get_utc_now)
+    updated_at = Column(DateTime, nullable=False, default=get_utc_now, onupdate=get_utc_now)
+
+    __table_args__ = (
+        UniqueConstraint("project_id", "case_key", name="uq_project_cases_key"),
+    )
+
+
+class ProjectReportUnit(Base):
+    """One logical report that may own one or many PDF assets."""
+
+    __tablename__ = "project_report_units"
+
+    id = Column(Integer, primary_key=True, index=True)
+    project_id = Column(
+        Integer,
+        ForeignKey("projects.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    case_id = Column(
+        Integer,
+        ForeignKey("project_cases.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    report_key = Column(String(1024), nullable=False)
+    display_name = Column(String(255), nullable=False)
+    status = Column(String(32), nullable=False, default="not_entered", index=True)
+    created_at = Column(DateTime, nullable=False, default=get_utc_now)
+    updated_at = Column(DateTime, nullable=False, default=get_utc_now, onupdate=get_utc_now)
+
+    __table_args__ = (
+        UniqueConstraint("case_id", "report_key", name="uq_project_report_units_key"),
+    )
+
+
+class ProjectDocumentAsset(Base):
+    """A managed PDF attached to a logical report."""
+
+    __tablename__ = "project_document_assets"
+
+    id = Column(Integer, primary_key=True, index=True)
+    project_id = Column(
+        Integer,
+        ForeignKey("projects.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    case_id = Column(
+        Integer,
+        ForeignKey("project_cases.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    report_unit_id = Column(
+        Integer,
+        ForeignKey("project_report_units.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    assigned_document_id = Column(
+        Integer,
+        ForeignKey("assigned_documents.id", ondelete="SET NULL"),
+        nullable=True,
+        unique=True,
+        index=True,
+    )
+    relative_path = Column(String(1024), nullable=False)
+    normalized_relative_path = Column(String(1024), nullable=False)
+    original_filename = Column(String(255), nullable=False)
+    storage_filename = Column(String(255), nullable=False, unique=True)
+    content_sha256 = Column(String(64), nullable=False, index=True)
+    byte_size = Column(BigInteger, nullable=False)
+    client_last_modified = Column(String(64), nullable=True)
+    status = Column(String(32), nullable=False, default="active", index=True)
+    error_message = Column(String(1000), nullable=True)
+    created_at = Column(DateTime, nullable=False, default=get_utc_now)
+    updated_at = Column(DateTime, nullable=False, default=get_utc_now, onupdate=get_utc_now)
+
+    __table_args__ = (
+        UniqueConstraint(
+            "project_id",
+            "normalized_relative_path",
+            "content_sha256",
+            name="uq_project_document_assets_identity",
+        ),
+        CheckConstraint("byte_size >= 0", name="ck_project_document_assets_size"),
+    )
+
+
+class ProjectUploadSession(Base):
+    """Idempotent manifest session for resumable browser uploads."""
+
+    __tablename__ = "project_upload_sessions"
+
+    id = Column(String(64), primary_key=True)
+    project_id = Column(
+        Integer,
+        ForeignKey("projects.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    created_by_user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    client_session_key = Column(String(100), nullable=False)
+    manifest_digest = Column(String(64), nullable=False)
+    status = Column(String(32), nullable=False, default="created", index=True)
+    total_files = Column(Integer, nullable=False, default=0)
+    requested_files = Column(Integer, nullable=False, default=0)
+    completed_files = Column(Integer, nullable=False, default=0)
+    failed_files = Column(Integer, nullable=False, default=0)
+    created_at = Column(DateTime, nullable=False, default=get_utc_now)
+    updated_at = Column(DateTime, nullable=False, default=get_utc_now, onupdate=get_utc_now)
+    expires_at = Column(DateTime, nullable=True, index=True)
+
+    __table_args__ = (
+        UniqueConstraint(
+            "project_id",
+            "client_session_key",
+            name="uq_project_upload_sessions_client_key",
+        ),
+    )
+
+
+class ProjectUploadFile(Base):
+    """Per-file resume cursor; chunks are accepted sequentially and retried safely."""
+
+    __tablename__ = "project_upload_files"
+
+    id = Column(Integer, primary_key=True, index=True)
+    session_id = Column(
+        String(64),
+        ForeignKey("project_upload_sessions.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    relative_path = Column(String(1024), nullable=False)
+    normalized_relative_path = Column(String(1024), nullable=False)
+    expected_sha256 = Column(String(64), nullable=False)
+    expected_size = Column(BigInteger, nullable=False)
+    client_last_modified = Column(String(64), nullable=True)
+    status = Column(String(32), nullable=False, default="pending", index=True)
+    next_offset = Column(BigInteger, nullable=False, default=0)
+    staging_filename = Column(String(255), nullable=True, unique=True)
+    error_message = Column(String(1000), nullable=True)
+    created_at = Column(DateTime, nullable=False, default=get_utc_now)
+    updated_at = Column(DateTime, nullable=False, default=get_utc_now, onupdate=get_utc_now)
+
+    __table_args__ = (
+        UniqueConstraint(
+            "session_id",
+            "normalized_relative_path",
+            name="uq_project_upload_files_path",
+        ),
+        CheckConstraint("expected_size >= 0", name="ck_project_upload_files_size"),
+        CheckConstraint("next_offset >= 0", name="ck_project_upload_files_offset"),
+    )
+
+
+class ProjectAssignmentHistory(Base):
+    __tablename__ = "project_assignment_history"
+
+    id = Column(Integer, primary_key=True, index=True)
+    project_id = Column(Integer, ForeignKey("projects.id"), nullable=False, index=True)
+    case_id = Column(Integer, ForeignKey("project_cases.id"), nullable=False, index=True)
+    assignment_role = Column(String(16), nullable=False)
+    from_user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    to_user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    changed_by_user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    reason = Column(String(255), nullable=True)
+    created_at = Column(DateTime, nullable=False, default=get_utc_now, index=True)
+
+    __table_args__ = (
+        CheckConstraint(
+            "assignment_role IN ('input', 'reviewer')",
+            name="ck_project_assignment_history_role",
+        ),
+    )
+
+
+class ProjectPdfDeletionAudit(Base):
+    """Keeps a minimal audit trail after the managed PDF is hard-deleted."""
+
+    __tablename__ = "project_pdf_deletion_audit"
+
+    id = Column(Integer, primary_key=True, index=True)
+    project_id = Column(Integer, ForeignKey("projects.id"), nullable=False, index=True)
+    case_id = Column(Integer, ForeignKey("project_cases.id"), nullable=False, index=True)
+    report_unit_id = Column(Integer, ForeignKey("project_report_units.id"), nullable=False, index=True)
+    relative_path = Column(String(1024), nullable=False)
+    content_sha256 = Column(String(64), nullable=False)
+    deleted_by_user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    deleted_at = Column(DateTime, nullable=False, default=get_utc_now, index=True)
