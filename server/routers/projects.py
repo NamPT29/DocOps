@@ -8,6 +8,11 @@ from sqlalchemy.orm import Session
 from server.database import get_db
 from server.routers.auth import get_admin_user, get_current_user
 from server.services.project_service import create_project, list_projects
+from server.services.project_admin_service import (
+    hard_delete_project_pdf,
+    list_project_assets,
+    update_project_members,
+)
 from server.services.project_workspace_service import get_project_workspace
 
 
@@ -23,6 +28,11 @@ class ProjectCreateRequest(BaseModel):
     case_level: int
     report_mode: Literal["folder_level", "pdf"]
     report_level: int | None = None
+    input_user_ids: list[int] = Field(default_factory=list)
+    reviewer_user_ids: list[int] = Field(default_factory=list)
+
+
+class ProjectMembersUpdateRequest(BaseModel):
     input_user_ids: list[int] = Field(default_factory=list)
     reviewer_user_ids: list[int] = Field(default_factory=list)
 
@@ -78,5 +88,51 @@ def api_get_project_workspace(
             db,
             project_id=project_id,
             current_user=current_user,
+        ),
+    }
+
+
+@router.put("/{project_id}/members")
+def api_update_project_members(
+    project_id: int,
+    request: ProjectMembersUpdateRequest,
+    current_user: dict = Depends(get_admin_user),
+    db: Session = Depends(get_db),
+):
+    return {
+        "status": "ok",
+        "data": update_project_members(
+            db,
+            project_id=project_id,
+            input_user_ids=request.input_user_ids,
+            reviewer_user_ids=request.reviewer_user_ids,
+            changed_by_user_id=current_user["id"],
+        ),
+    }
+
+
+@router.get("/{project_id}/assets")
+def api_list_project_assets(
+    project_id: int,
+    current_user: dict = Depends(get_admin_user),
+    db: Session = Depends(get_db),
+):
+    return {"status": "ok", "data": list_project_assets(db, project_id=project_id)}
+
+
+@router.delete("/{project_id}/assets/{asset_id}")
+def api_delete_project_asset(
+    project_id: int,
+    asset_id: int,
+    current_user: dict = Depends(get_admin_user),
+    db: Session = Depends(get_db),
+):
+    return {
+        "status": "ok",
+        "data": hard_delete_project_pdf(
+            db,
+            project_id=project_id,
+            asset_id=asset_id,
+            deleted_by_user_id=current_user["id"],
         ),
     }
