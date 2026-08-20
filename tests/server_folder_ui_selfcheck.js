@@ -6,7 +6,8 @@ const source = fs.readFileSync('frontend/js/admin_panel.js', 'utf8');
 
 assert.ok(html.includes('id="serverSourcePath"'));
 assert.ok(html.includes('id="assignmentFolderLevel"'));
-assert.ok(!html.includes('webkitdirectory'));
+assert.ok(html.includes('id="projectFolderPicker"'));
+assert.ok(html.includes('webkitdirectory'));
 assert.ok(source.includes('/api/documents/server-folders'));
 assert.ok(source.includes('/api/documents/server-folder/scan'));
 assert.ok(source.includes('/api/documents/server-folder/import'));

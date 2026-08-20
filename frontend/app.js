@@ -5,13 +5,17 @@ async function initApp() {
         restoreQueue();
         // Reconcile persisted local files with the current assignment first.
         const hasCheckId = new URLSearchParams(window.location.search).has('check_id');
-        let projectWorkspaceLoaded = false;
-        if (!hasCheckId && typeof initializeEmployeeProjectWorkspace === 'function') {
-            projectWorkspaceLoaded = await initializeEmployeeProjectWorkspace();
-        }
-        if (!projectWorkspaceLoaded) {
-            await fetchSchema();
-            if (!hasCheckId && typeof fetchMyQueue === 'function') {
+        if (hasCheckId) {
+            fetchSchema();
+        } else {
+            let projectWorkspaceLoaded = false;
+            if (typeof initializeEmployeeProjectWorkspace === 'function') {
+                projectWorkspaceLoaded = await initializeEmployeeProjectWorkspace();
+            }
+            if (!projectWorkspaceLoaded) {
+                await fetchSchema();
+            }
+            if (!projectWorkspaceLoaded && typeof fetchMyQueue === 'function') {
                 fetchMyQueue(true);
             }
         }
