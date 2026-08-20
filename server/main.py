@@ -116,7 +116,7 @@ app.add_middleware(
 )
 
 # Include routers
-from server.routers import auth, templates, tasks, submissions, documents, processing, dictionaries, notifications, projects
+from server.routers import auth, templates, tasks, submissions, documents, processing, dictionaries, notifications, projects, project_uploads
 app.include_router(auth.router)
 app.include_router(templates.router)
 app.include_router(tasks.router)
@@ -127,6 +127,7 @@ app.include_router(dictionaries.template_dict_router)
 app.include_router(dictionaries.router)
 app.include_router(notifications.router)
 app.include_router(projects.router)
+app.include_router(project_uploads.router)
 
 PDF_STORAGE_PATH = os.getenv("PDF_STORAGE_PATH", "uploads")
 os.makedirs(PDF_STORAGE_PATH, exist_ok=True)
