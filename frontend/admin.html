@@ -39,6 +39,9 @@
                 <button class="nav-link fw-bold text-primary" id="inventory-tab" data-bs-toggle="tab" data-bs-target="#inventory-pane" type="button" role="tab" onclick="fetchDocumentStats()">Kho Tài liệu</button>
             </li>
             <li class="nav-item" role="presentation">
+                <button class="nav-link fw-bold text-primary" id="projects-tab" data-bs-toggle="tab" data-bs-target="#projects-pane" type="button" role="tab" onclick="initializeProjectManagement()">Quản lý Dự án</button>
+            </li>
+            <li class="nav-item" role="presentation">
                 <button class="nav-link fw-bold text-primary" id="assignment-tab" data-bs-toggle="tab" data-bs-target="#assignment-pane" type="button" role="tab" onclick="fetchDocumentStats(); fetchReviewerReassignmentData(); loadServerSourceFolders()">Phân công</button>
             </li>
             <li class="nav-item" role="presentation">
@@ -176,6 +179,97 @@
                                         </tr>
                                     </thead>
                                     <tbody id="poolStatsTableBody"></tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- TAB QUẢN LÝ DỰ ÁN -->
+            <div class="tab-pane fade" id="projects-pane" role="tabpanel">
+                <div class="row g-3">
+                    <div class="col-xl-5">
+                        <div class="form-section">
+                            <h4 class="form-section-title"><i class="fas fa-folder-plus"></i> Thêm dự án</h4>
+                            <div class="mb-3">
+                                <label for="projectFolderPicker" class="form-label fw-semibold">1. Chọn folder trên máy admin</label>
+                                <input type="file" id="projectFolderPicker" class="form-control" accept=".pdf,application/pdf" webkitdirectory directory multiple onchange="handleProjectFolderSelection()">
+                                <div id="projectFolderSummary" class="form-text">Chưa chọn folder.</div>
+                            </div>
+                            <div class="mb-3">
+                                <label for="projectNameInput" class="form-label fw-semibold">Tên dự án</label>
+                                <input type="text" id="projectNameInput" class="form-control" placeholder="Bỏ trống để lấy tên folder">
+                            </div>
+                            <div class="mb-3">
+                                <label for="projectTemplateSelect" class="form-label fw-semibold">2. Biểu mẫu</label>
+                                <select id="projectTemplateSelect" class="form-select"><option value="">Đang tải...</option></select>
+                            </div>
+                            <div class="row g-2 mb-3">
+                                <div class="col-md-6">
+                                    <label for="projectStartDate" class="form-label fw-semibold">Ngày bắt đầu</label>
+                                    <input type="date" id="projectStartDate" class="form-control">
+                                </div>
+                                <div class="col-md-6">
+                                    <label for="projectEndDate" class="form-label fw-semibold">Ngày kết thúc</label>
+                                    <input type="date" id="projectEndDate" class="form-control">
+                                </div>
+                            </div>
+                            <div class="row g-2 mb-3">
+                                <div class="col-md-6">
+                                    <label for="projectCaseLevel" class="form-label fw-semibold">3. Cấp hồ sơ</label>
+                                    <select id="projectCaseLevel" class="form-select" onchange="updateProjectLevelOptions()"><option value="">Chọn folder trước</option></select>
+                                </div>
+                                <div class="col-md-6">
+                                    <label for="projectReportMode" class="form-label fw-semibold">Cách tạo báo cáo</label>
+                                    <select id="projectReportMode" class="form-select" onchange="syncProjectReportMode()">
+                                        <option value="folder_level">Một folder là một báo cáo</option>
+                                        <option value="pdf">Mỗi PDF là một báo cáo</option>
+                                    </select>
+                                </div>
+                            </div>
+                            <div class="mb-3" id="projectReportLevelGroup">
+                                <label for="projectReportLevel" class="form-label fw-semibold">Cấp báo cáo</label>
+                                <select id="projectReportLevel" class="form-select"><option value="">Chọn cấp hồ sơ trước</option></select>
+                                <div class="form-text">Một báo cáo có thể chứa một hoặc nhiều PDF.</div>
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label fw-semibold">4. Người nhập (có thể để trống)</label>
+                                <div id="projectInputUsers" class="border rounded bg-light p-2" style="max-height: 150px; overflow-y: auto;"><span class="text-muted">Đang tải...</span></div>
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label fw-semibold">5. Người kiểm tra (có thể để trống)</label>
+                                <div id="projectReviewerUsers" class="border rounded bg-light p-2" style="max-height: 150px; overflow-y: auto;"><span class="text-muted">Đang tải...</span></div>
+                                <div class="form-text">Một người có thể giữ cả hai vai trò nhưng không được tự duyệt báo cáo của mình.</div>
+                            </div>
+                            <button type="button" id="createProjectButton" class="btn btn-primary w-100 fw-bold py-2" onclick="createAndUploadProject()">
+                                <i class="fas fa-cloud-upload-alt"></i> Tạo dự án và tải PDF
+                            </button>
+                            <div id="projectUploadStatus" class="small text-muted mt-3" aria-live="polite"></div>
+                            <div class="progress mt-2 d-none" id="projectUploadProgressWrap" style="height: 20px;">
+                                <div id="projectUploadProgress" class="progress-bar progress-bar-striped progress-bar-animated" role="progressbar" style="width: 0%">0%</div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-xl-7">
+                        <div class="form-section">
+                            <div class="d-flex justify-content-between align-items-center mb-3">
+                                <h4 class="form-section-title mb-0"><i class="fas fa-diagram-project"></i> Danh sách dự án</h4>
+                                <button type="button" class="btn btn-sm btn-outline-secondary" onclick="loadProjectList()"><i class="fas fa-sync"></i> Tải lại</button>
+                            </div>
+                            <div class="table-responsive">
+                                <table class="table table-bordered table-hover align-middle small">
+                                    <thead class="table-dark">
+                                        <tr>
+                                            <th>Dự án / biểu mẫu</th>
+                                            <th>Phân công hồ sơ</th>
+                                            <th>PDF</th>
+                                            <th>Đã nhập</th>
+                                            <th>Đã kiểm</th>
+                                            <th>Trạng thái</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="projectListBody"><tr><td colspan="6" class="text-center text-muted">Chưa tải danh sách dự án.</td></tr></tbody>
                                 </table>
                             </div>
                         </div>
@@ -736,6 +830,7 @@
     <script src="js/form_renderer.js?v=99.99"></script>
     <script src="js/submission.js?v=100.00"></script>
     <script src="js/admin_panel.js?v=201.00"></script>
+    <script src="js/project_management.js?v=1.00"></script>
     <script src="js/template_config.js?v=99.99"></script>
     <script src="app.js?v=99.99"></script>
     <script>
