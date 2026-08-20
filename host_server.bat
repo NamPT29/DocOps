@@ -1,4 +1,8 @@
 @echo off
+setlocal
+chcp 65001 >nul
+title SỐ HÓA - HOST SERVER
+mode con: cols=145 lines=42 >nul 2>&1
 echo ==============================================
 echo KHOI DONG MAY CHU SO HOA ALL IN ONE
 echo ==============================================
@@ -32,6 +36,6 @@ echo.
 echo (LUU Y: DUNG TAT CUA SO NAY TRONG SUOT QUA TRINH LAM VIEC)
 echo =========================================================
 echo.
-python -m uvicorn server.main:app --host 0.0.0.0 --port 80
-if errorlevel 1 echo [LOI] FastAPI khong khoi dong duoc. Kiem tra PostgreSQL va DATABASE_URL.
+python -X utf8 -u host_console.py
+if errorlevel 1 echo [LOI] FastAPI khong khoi dong duoc. Kiem tra PostgreSQL, DATABASE_URL va log o tren.
 pause
