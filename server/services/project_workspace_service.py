@@ -140,6 +140,9 @@ def get_project_workspace(db, *, project_id, current_user):
         config = {}
 
     rows = repository.list_input_workspace_assets(project.id, current_user["id"])
+    submission_summary = repository.submission_summary_by_report({
+        report.id for _asset, _case_row, report, _document in rows
+    })
     files = []
     for asset, case_row, report, document in rows:
         files.append({
@@ -154,7 +157,7 @@ def get_project_workspace(db, *, project_id, current_user):
             "report_name": report.display_name,
             "template_id": project.template_id,
             "template_name": project.template_name_snapshot,
-            "entered": bool(document and document.status == "completed"),
+            "entered": submission_summary[report.id]["submission_count"] > 0,
         })
 
     return {

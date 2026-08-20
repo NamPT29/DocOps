@@ -13,6 +13,7 @@ from server.models import (
     ProjectDocumentAsset,
     ProjectMember,
     ProjectReportUnit,
+    Submission,
     Template,
     User,
 )
@@ -125,6 +126,13 @@ def test_workspace_uses_pinned_schema_and_only_assigned_cases(database):
             status="active",
         ),
     ])
+    database.add(Submission(
+        data_json=json.dumps({"_pdf_uuid": owned_document.uuid_filename}),
+        template_id=template.id,
+        created_by_user_id=input_user.id,
+        assigned_document_id=owned_document.id,
+        status="draft",
+    ))
     database.commit()
 
     payload = get_project_workspace(
@@ -137,6 +145,7 @@ def test_workspace_uses_pinned_schema_and_only_assigned_cases(database):
     assert payload["schema"] == [{"name": "Pinned section", "fields": []}]
     assert payload["config"] == {"required_cols": [1]}
     assert [item["relative_path"] for item in payload["files"]] == ["001/report.pdf"]
+    assert payload["files"][0]["entered"] is True
 
     with pytest.raises(HTTPException) as forbidden:
         get_project_workspace(

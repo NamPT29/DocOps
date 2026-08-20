@@ -84,6 +84,28 @@ class ProjectWorkspaceRepository:
             result.setdefault(document_id, []).append(status)
         return result
 
+    def submission_summary_by_report(self, report_unit_ids):
+        result = {
+            report_unit_id: {"submission_count": 0, "approved_count": 0}
+            for report_unit_id in report_unit_ids
+        }
+        if not report_unit_ids:
+            return result
+        rows = self.session.query(
+            ProjectDocumentAsset.report_unit_id,
+            Submission.status,
+        ).join(
+            Submission,
+            Submission.assigned_document_id == ProjectDocumentAsset.assigned_document_id,
+        ).filter(
+            ProjectDocumentAsset.report_unit_id.in_(report_unit_ids),
+        ).all()
+        for report_unit_id, status in rows:
+            result[report_unit_id]["submission_count"] += 1
+            if status == "approved":
+                result[report_unit_id]["approved_count"] += 1
+        return result
+
     def add_document(self, document):
         self.session.add(document)
         return document

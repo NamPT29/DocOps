@@ -1,4 +1,4 @@
-from sqlalchemy import case, func
+from sqlalchemy import and_, case, func
 
 from server.models import (
     Project,
@@ -6,6 +6,7 @@ from server.models import (
     ProjectDocumentAsset,
     ProjectMember,
     ProjectReportUnit,
+    Submission,
 )
 from server.repositories.base import BaseRepository
 
@@ -103,12 +104,46 @@ class ProjectRepository(BaseRepository[Project]):
                 metrics["reviewer_unassigned_cases"],
             ) = [int(value or 0) for value in row[1:]]
 
+        submission_summary = (
+            self.session.query(
+                ProjectDocumentAsset.report_unit_id.label("report_unit_id"),
+                func.count(Submission.id).label("submission_count"),
+                func.sum(case((Submission.status == "approved", 1), else_=0)).label(
+                    "approved_count"
+                ),
+            )
+            .outerjoin(
+                Submission,
+                Submission.assigned_document_id == ProjectDocumentAsset.assigned_document_id,
+            )
+            .filter(ProjectDocumentAsset.project_id.in_(project_ids))
+            .group_by(ProjectDocumentAsset.report_unit_id)
+            .subquery()
+        )
         report_rows = (
             self.session.query(
                 ProjectReportUnit.project_id,
                 func.count(ProjectReportUnit.id),
-                func.sum(case((ProjectReportUnit.status != "not_entered", 1), else_=0)),
-                func.sum(case((ProjectReportUnit.status == "approved", 1), else_=0)),
+                func.sum(
+                    case((submission_summary.c.submission_count > 0, 1), else_=0)
+                ),
+                func.sum(
+                    case(
+                        (
+                            and_(
+                                submission_summary.c.submission_count > 0,
+                                submission_summary.c.approved_count
+                                == submission_summary.c.submission_count,
+                            ),
+                            1,
+                        ),
+                        else_=0,
+                    )
+                ),
+            )
+            .outerjoin(
+                submission_summary,
+                submission_summary.c.report_unit_id == ProjectReportUnit.id,
             )
             .filter(ProjectReportUnit.project_id.in_(project_ids))
             .group_by(ProjectReportUnit.project_id)

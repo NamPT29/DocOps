@@ -8,11 +8,13 @@ from sqlalchemy.orm import sessionmaker
 
 from server.database import Base
 from server.models import (
+    AssignedDocument,
     Project,
     ProjectCase,
     ProjectDocumentAsset,
     ProjectMember,
     ProjectReportUnit,
+    Submission,
     Template,
     User,
 )
@@ -160,7 +162,7 @@ def test_project_listing_scopes_employee_and_calculates_metrics(database):
         case_id=case_assigned.id,
         report_key="001/r1",
         display_name="r1",
-        status="approved",
+        status="not_entered",
     )
     waiting = ProjectReportUnit(
         project_id=project.id,
@@ -170,19 +172,36 @@ def test_project_listing_scopes_employee_and_calculates_metrics(database):
     )
     database.add_all([entered, waiting])
     database.flush()
-    database.add(
+    document = AssignedDocument(
+        original_filename="a.pdf",
+        uuid_filename="metric-a.pdf",
+        assigned_to_user_id=worker.id,
+        template_id=project.template_id,
+        status="pending",
+    )
+    database.add(document)
+    database.flush()
+    database.add_all([
         ProjectDocumentAsset(
             project_id=project.id,
             case_id=case_assigned.id,
             report_unit_id=entered.id,
+            assigned_document_id=document.id,
             relative_path="001/r1/a.pdf",
             normalized_relative_path="001/r1/a.pdf",
             original_filename="a.pdf",
             storage_filename="metric-a.pdf",
             content_sha256="a" * 64,
             byte_size=10,
-        )
-    )
+        ),
+        Submission(
+            data_json=json.dumps({"_pdf_uuid": document.uuid_filename}),
+            template_id=project.template_id,
+            created_by_user_id=worker.id,
+            assigned_document_id=document.id,
+            status="approved",
+        ),
+    ])
     database.commit()
 
     employee_rows = list_projects(
