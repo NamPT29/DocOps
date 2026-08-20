@@ -196,6 +196,13 @@
                                 <label for="projectFolderPicker" class="form-label fw-semibold">1. Chọn folder trên máy admin</label>
                                 <input type="file" id="projectFolderPicker" class="form-control" accept=".pdf,application/pdf" webkitdirectory directory multiple onchange="handleProjectFolderSelection()">
                                 <div id="projectFolderSummary" class="form-text">Chưa chọn folder.</div>
+                                <div id="projectUpdateTargetBanner" class="alert alert-warning mt-2 mb-0 d-none">
+                                    <div class="d-flex justify-content-between align-items-center gap-2">
+                                        <span><i class="fas fa-sync-alt"></i> Đang cập nhật: <strong id="projectUpdateTargetName"></strong></span>
+                                        <button type="button" class="btn btn-sm btn-outline-dark" onclick="cancelProjectFolderUpdate()">Hủy cập nhật</button>
+                                    </div>
+                                    <div class="small mt-1">Hãy chọn lại đúng folder gốc. Hệ thống chỉ tải PDF mới hoặc có nội dung thay đổi.</div>
+                                </div>
                             </div>
                             <div class="mb-3">
                                 <label for="projectNameInput" class="form-label fw-semibold">Tên dự án</label>
@@ -243,7 +250,7 @@
                                 <div class="form-text">Một người có thể giữ cả hai vai trò nhưng không được tự duyệt báo cáo của mình.</div>
                             </div>
                             <button type="button" id="createProjectButton" class="btn btn-primary w-100 fw-bold py-2" onclick="createAndUploadProject()">
-                                <i class="fas fa-cloud-upload-alt"></i> Tạo dự án và tải PDF
+                                <i class="fas fa-cloud-upload-alt"></i> <span id="createProjectButtonText">Tạo dự án và tải PDF</span>
                             </button>
                             <div id="projectUploadStatus" class="small text-muted mt-3" aria-live="polite"></div>
                             <div class="progress mt-2 d-none" id="projectUploadProgressWrap" style="height: 20px;">

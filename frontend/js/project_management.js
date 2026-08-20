@@ -4,6 +4,7 @@ let selectedProjectRootName = '';
 let selectedProjectMaximumDepth = 0;
 let projectManagementUsers = [];
 let projectManagementProjects = [];
+let projectUpdateTargetId = null;
 
 function setProjectUploadStatus(message, tone = 'muted') {
     const status = document.getElementById('projectUploadStatus');
@@ -221,14 +222,52 @@ async function loadProjectList() {
         membersButton.className = 'btn btn-sm btn-outline-primary me-1';
         membersButton.innerHTML = '<i class="fas fa-users"></i> Nhân sự';
         membersButton.addEventListener('click', () => openProjectMembers(project.id));
+        const updateButton = document.createElement('button');
+        updateButton.type = 'button';
+        updateButton.className = 'btn btn-sm btn-outline-warning me-1';
+        updateButton.innerHTML = '<i class="fas fa-sync-alt"></i> Cập nhật PDF';
+        updateButton.addEventListener('click', () => prepareProjectFolderUpdate(project.id));
         const assetsButton = document.createElement('button');
         assetsButton.type = 'button';
         assetsButton.className = 'btn btn-sm btn-outline-danger';
         assetsButton.innerHTML = '<i class="fas fa-file-pdf"></i> PDF';
         assetsButton.addEventListener('click', () => openProjectAssets(project.id));
-        actionCell.append(membersButton, assetsButton);
+        actionCell.append(membersButton, updateButton, assetsButton);
         body.appendChild(row);
     });
+}
+
+function prepareProjectFolderUpdate(projectId) {
+    const project = projectManagementProjects.find(item => Number(item.id) === Number(projectId));
+    if (!project) return alert('Không tìm thấy dự án trong danh sách hiện tại.');
+    projectUpdateTargetId = Number(project.id);
+    clearProjectUploadResumeState();
+    selectedProjectFileRows = [];
+    selectedProjectRootName = '';
+    selectedProjectMaximumDepth = 0;
+    const picker = document.getElementById('projectFolderPicker');
+    if (picker) picker.value = '';
+    const summary = document.getElementById('projectFolderSummary');
+    if (summary) summary.textContent = `Chọn lại folder gốc “${project.root_folder_name}”.`;
+    const banner = document.getElementById('projectUpdateTargetBanner');
+    if (banner) banner.classList.remove('d-none');
+    const name = document.getElementById('projectUpdateTargetName');
+    if (name) name.textContent = project.name;
+    const buttonText = document.getElementById('createProjectButtonText');
+    if (buttonText) buttonText.textContent = 'Cập nhật PDF cho dự án đã chọn';
+    setProjectUploadStatus('Chọn lại folder để đối chiếu manifest với dữ liệu hiện có.', 'warning');
+    document.getElementById('projects-pane')?.scrollIntoView({behavior: 'smooth', block: 'start'});
+    if (picker) picker.click();
+}
+
+function cancelProjectFolderUpdate() {
+    projectUpdateTargetId = null;
+    clearProjectUploadResumeState();
+    const banner = document.getElementById('projectUpdateTargetBanner');
+    if (banner) banner.classList.add('d-none');
+    const buttonText = document.getElementById('createProjectButtonText');
+    if (buttonText) buttonText.textContent = 'Tạo dự án và tải PDF';
+    setProjectUploadStatus('');
 }
 
 function renderProjectMemberEditor(containerId, users, selectedUserIds, className) {
@@ -501,15 +540,26 @@ function projectDateValue(elementId) {
 
 async function createAndUploadProject() {
     if (!selectedProjectFileRows.length) return alert('Vui lòng chọn folder có PDF.');
+    const updateProject = projectUpdateTargetId
+        ? projectManagementProjects.find(project => Number(project.id) === Number(projectUpdateTargetId))
+        : null;
+    if (projectUpdateTargetId && !updateProject) return alert('Dự án cần cập nhật không còn trong danh sách.');
+    if (
+        updateProject
+        && String(selectedProjectRootName).toLocaleLowerCase('vi-VN')
+            !== String(updateProject.root_folder_name).toLocaleLowerCase('vi-VN')
+    ) {
+        return alert(`Folder đã chọn là “${selectedProjectRootName}”, cần chọn đúng folder “${updateProject.root_folder_name}”.`);
+    }
     const templateId = Number(document.getElementById('projectTemplateSelect')?.value || 0);
     const caseLevel = Number(document.getElementById('projectCaseLevel')?.value || 0);
     const reportMode = document.getElementById('projectReportMode')?.value || 'folder_level';
     const reportLevel = reportMode === 'folder_level'
         ? Number(document.getElementById('projectReportLevel')?.value || 0)
         : null;
-    if (!templateId) return alert('Vui lòng chọn biểu mẫu.');
-    if (!caseLevel) return alert('Vui lòng chọn cấp hồ sơ.');
-    if (reportMode === 'folder_level' && (!reportLevel || reportLevel <= caseLevel)) {
+    if (!updateProject && !templateId) return alert('Vui lòng chọn biểu mẫu.');
+    if (!updateProject && !caseLevel) return alert('Vui lòng chọn cấp hồ sơ.');
+    if (!updateProject && reportMode === 'folder_level' && (!reportLevel || reportLevel <= caseLevel)) {
         return alert('Cấp báo cáo phải sâu hơn cấp hồ sơ.');
     }
 
@@ -518,26 +568,35 @@ async function createAndUploadProject() {
     try {
         const manifest = await buildProjectManifest();
         let resume = getProjectUploadResumeState();
-        if (!resume || resume.root_name !== selectedProjectRootName) {
-            const created = await apiCall('/api/projects', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({
-                    name: document.getElementById('projectNameInput')?.value.trim() || null,
-                    root_folder_name: selectedProjectRootName,
-                    template_id: templateId,
-                    start_date: projectDateValue('projectStartDate'),
-                    end_date: projectDateValue('projectEndDate'),
-                    case_level: caseLevel,
-                    report_mode: reportMode,
-                    report_level: reportLevel,
-                    input_user_ids: checkedProjectUserIds('project-input-user'),
-                    reviewer_user_ids: checkedProjectUserIds('project-reviewer-user'),
-                }),
-            });
-            if (!created) return;
+        const targetProjectId = updateProject ? Number(updateProject.id) : null;
+        if (
+            !resume
+            || resume.root_name !== selectedProjectRootName
+            || (targetProjectId && Number(resume.project_id) !== targetProjectId)
+        ) {
+            let projectId = targetProjectId;
+            if (!projectId) {
+                const created = await apiCall('/api/projects', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({
+                        name: document.getElementById('projectNameInput')?.value.trim() || null,
+                        root_folder_name: selectedProjectRootName,
+                        template_id: templateId,
+                        start_date: projectDateValue('projectStartDate'),
+                        end_date: projectDateValue('projectEndDate'),
+                        case_level: caseLevel,
+                        report_mode: reportMode,
+                        report_level: reportLevel,
+                        input_user_ids: checkedProjectUserIds('project-input-user'),
+                        reviewer_user_ids: checkedProjectUserIds('project-reviewer-user'),
+                    }),
+                });
+                if (!created) return;
+                projectId = Number(created.project_id);
+            }
             resume = {
-                project_id: Number(created.project_id),
+                project_id: projectId,
                 client_session_key: `browser-${crypto.randomUUID()}`,
                 root_name: selectedProjectRootName,
             };
@@ -566,6 +625,7 @@ async function createAndUploadProject() {
         );
         if (!finalized) return;
         clearProjectUploadResumeState();
+        if (updateProject) cancelProjectFolderUpdate();
         setProjectUploadProgress(1, 1);
         setProjectUploadStatus(
             `Hoàn tất: ${finalized.session.imported_files || 0} PDF mới, ${finalized.session.reused_files || 0} PDF đã có.`,

@@ -19,5 +19,9 @@ assert(source.includes('/api/projects/${projectId}/members'));
 assert(source.includes('/api/projects/${project.id}/assets'));
 assert(source.includes('deleteButton.disabled = Number(asset.submission_count || 0) > 0'));
 assert(source.includes('method: \'DELETE\''));
+assert(html.includes('id="projectUpdateTargetBanner"'));
+assert(source.includes('prepareProjectFolderUpdate(project.id)'));
+assert(source.includes('Number(resume.project_id) !== targetProjectId'));
+assert(html.includes('Hệ thống chỉ tải PDF mới hoặc có nội dung thay đổi.'));
 
 console.log('project management self-check passed');
