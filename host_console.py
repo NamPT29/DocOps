@@ -359,13 +359,29 @@ def format_status_line(
     return (
         f" {state_text} │ {total_text} │ Người dùng {traffic.unique_clients}"
         f" │ Đang xử lý {traffic.active} │ {error_text} │ {traffic.per_minute}/phút"
-        f" │ TB {traffic.average_ms:.0f}ms │ CPU {system.cpu_percent:.1f}%"
-        f" │ RAM {system.process_ram_mb:.0f}MB ({system.system_ram_percent:.0f}%)"
-        f" │ Đĩa {system.disk_percent:.0f}% │ {format_duration(time.monotonic() - STARTED_AT)} "
+        f" │ TB {traffic.average_ms:.0f}ms "
+    )
+
+
+def format_system_line(
+    system: SystemSnapshot,
+    *,
+    use_color: bool,
+    uptime_seconds: float,
+) -> str:
+    label = paint("HỆ THỐNG", Ansi.MAGENTA, use_color, bold=True)
+    return (
+        f" {label} │ CPU toàn máy {system.cpu_percent:.1f}%"
+        f" │ RAM ứng dụng {system.process_ram_mb:.0f}MB"
+        f" │ RAM toàn máy {system.system_ram_percent:.0f}%"
+        f" │ Đĩa {system.disk_percent:.0f}%"
+        f" │ Hoạt động {format_duration(uptime_seconds)} "
     )
 
 
 class ConsoleDashboard:
+    STATUS_ROW = 18
+
     def __init__(self, stats: RequestStats, use_color: bool, interval: float) -> None:
         self.stats = stats
         self.use_color = use_color
@@ -375,6 +391,7 @@ class ConsoleDashboard:
         self._lock = threading.Lock()
         self._stop_event = threading.Event()
         self._thread: threading.Thread | None = None
+        self._last_error: tuple[int, str, str] | None = None
 
     def print_banner(self, host: str, port: int) -> None:
         os.system("cls" if os.name == "nt" else "clear")
@@ -428,9 +445,18 @@ class ConsoleDashboard:
 
     def report_http_error(self, method: str, path: str, status_code: int) -> None:
         with self._lock:
-            print("\r\033[2K", end="")
-            label = paint(f"HTTP {status_code}", Ansi.RED, self.use_color, bold=True)
-            print(f" {label} │ {method} {path}")
+            self._last_error = (status_code, method, path)
+
+    def _render_lines(self, *lines: str) -> None:
+        if self.use_color:
+            frame = "".join(
+                f"\033[{self.STATUS_ROW + offset};1H\033[2K{line}"
+                for offset, line in enumerate(lines)
+            )
+        else:
+            frame = f"\r{lines[0][:118]:<118}"
+        sys.stdout.write(frame)
+        sys.stdout.flush()
 
     def _run(self) -> None:
         while not self._stop_event.is_set():
@@ -443,7 +469,28 @@ class ConsoleDashboard:
                     system,
                     use_color=self.use_color,
                 )
-                print(f"\r\033[2K{line}", end="", flush=True)
+                system_line = format_system_line(
+                    system,
+                    use_color=self.use_color,
+                    uptime_seconds=time.monotonic() - STARTED_AT,
+                )
+                if self._last_error is None:
+                    error_line = paint(
+                        " LỖI GẦN NHẤT │ Không có lỗi HTTP",
+                        Ansi.DIM,
+                        self.use_color,
+                    )
+                else:
+                    status_code, method, path = self._last_error
+                    short_path = path if len(path) <= 80 else f"{path[:77]}..."
+                    error_label = paint(
+                        f"HTTP {status_code}",
+                        Ansi.RED,
+                        self.use_color,
+                        bold=True,
+                    )
+                    error_line = f" LỖI GẦN NHẤT │ {error_label} │ {method} {short_path}"
+                self._render_lines(line, system_line, error_line)
             self._stop_event.wait(self.interval)
 
 

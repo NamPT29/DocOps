@@ -3,12 +3,14 @@ import os
 import time
 
 from host_console import (
+    ConsoleDashboard,
     RequestStats,
     SystemSnapshot,
     TrafficMonitor,
     _read_memory_usage,
     format_duration,
     format_status_line,
+    format_system_line,
 )
 
 
@@ -98,17 +100,45 @@ def test_status_line_contains_requested_live_metrics_without_color():
         disk_percent=61,
     )
 
-    line = format_status_line("ONLINE", stats.snapshot(), system, use_color=False)
+    traffic_line = format_status_line(
+        "ONLINE", stats.snapshot(), system, use_color=False
+    )
+    system_line = format_system_line(system, use_color=False, uptime_seconds=65)
 
-    assert "ONLINE" in line
-    assert "Truy cập 1" in line
-    assert "Người dùng 1" in line
-    assert "Đang xử lý 0" in line
-    assert "Lỗi 0" in line
-    assert "CPU 2.5%" in line
-    assert "RAM 128MB (42%)" in line
-    assert "Đĩa 61%" in line
-    assert "\033[" not in line
+    assert "ONLINE" in traffic_line
+    assert "Truy cập 1" in traffic_line
+    assert "Người dùng 1" in traffic_line
+    assert "Đang xử lý 0" in traffic_line
+    assert "Lỗi 0" in traffic_line
+    assert "CPU toàn máy 2.5%" in system_line
+    assert "RAM ứng dụng 128MB" in system_line
+    assert "RAM toàn máy 42%" in system_line
+    assert "Đĩa 61%" in system_line
+    assert "00:01:05" in system_line
+    assert len(traffic_line) < 120
+    assert len(system_line) < 120
+    assert "\033[" not in traffic_line + system_line
+
+
+def test_http_error_is_stored_without_printing_a_scrolling_line(capsys):
+    dashboard = ConsoleDashboard(RequestStats(), use_color=False, interval=1)
+
+    dashboard.report_http_error("GET", "/api/khong-ton-tai", 404)
+
+    assert capsys.readouterr().out == ""
+    assert dashboard._last_error == (404, "GET", "/api/khong-ton-tai")
+
+
+def test_dashboard_renders_fixed_rows_without_newlines(capsys):
+    dashboard = ConsoleDashboard(RequestStats(), use_color=True, interval=1)
+
+    dashboard._render_lines("traffic", "system", "last error")
+
+    output = capsys.readouterr().out
+    assert "\n" not in output
+    assert "\033[18;1H\033[2Ktraffic" in output
+    assert "\033[19;1H\033[2Ksystem" in output
+    assert "\033[20;1H\033[2Klast error" in output
 
 
 def test_format_duration_supports_long_running_server():
