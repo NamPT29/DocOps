@@ -2,6 +2,7 @@ import asyncio
 import os
 import time
 
+import host_console
 from host_console import (
     ConsoleDashboard,
     RequestStats,
@@ -129,7 +130,8 @@ def test_http_error_is_stored_without_printing_a_scrolling_line(capsys):
     assert dashboard._last_error == (404, "GET", "/api/khong-ton-tai")
 
 
-def test_dashboard_renders_fixed_rows_without_newlines(capsys):
+def test_dashboard_renders_fixed_rows_without_newlines(monkeypatch, capsys):
+    monkeypatch.setattr(host_console, "IS_WINDOWS", False, raising=False)
     dashboard = ConsoleDashboard(RequestStats(), use_color=True, interval=1)
 
     dashboard._render_lines("traffic", "system", "last error")
@@ -139,6 +141,36 @@ def test_dashboard_renders_fixed_rows_without_newlines(capsys):
     assert "\033[18;1H\033[2Ktraffic" in output
     assert "\033[19;1H\033[2Ksystem" in output
     assert "\033[20;1H\033[2Klast error" in output
+
+
+def test_dashboard_uses_native_writer_on_windows(monkeypatch, capsys):
+    calls = []
+
+    def fake_writer(lines, start_row, width):
+        calls.append((lines, start_row, width))
+        return True
+
+    monkeypatch.setattr(host_console, "IS_WINDOWS", True, raising=False)
+    monkeypatch.setattr(
+        host_console,
+        "_write_windows_console_rows",
+        fake_writer,
+        raising=False,
+    )
+    dashboard = ConsoleDashboard(RequestStats(), use_color=True, interval=1)
+
+    dashboard._render_lines("traffic", "system", "last error")
+
+    assert calls == [(("traffic", "system", "last error"), 18, 145)]
+    assert capsys.readouterr().out == ""
+
+
+def test_windows_line_padding_ignores_ansi_color_bytes():
+    colored = "\033[92mONLINE\033[0m"
+
+    padded = host_console._pad_console_line(colored, width=12)
+
+    assert padded == f"{colored}{' ' * 5}"
 
 
 def test_format_duration_supports_long_running_server():

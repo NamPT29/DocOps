@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import ctypes
 import os
+import re
 import shutil
 import socket
 import sys
@@ -20,6 +21,9 @@ from dotenv import load_dotenv
 
 BASE_DIR = Path(__file__).resolve().parent
 STARTED_AT = time.monotonic()
+IS_WINDOWS = os.name == "nt"
+CONSOLE_WIDTH = 145
+ANSI_ESCAPE_RE = re.compile(r"\033\[[0-9;]*m")
 
 
 class Ansi:
@@ -207,6 +211,47 @@ class _FileTime(ctypes.Structure):
         ("dwLowDateTime", ctypes.c_ulong),
         ("dwHighDateTime", ctypes.c_ulong),
     ]
+
+
+class _ConsoleCoord(ctypes.Structure):
+    _fields_ = [("X", ctypes.c_short), ("Y", ctypes.c_short)]
+
+
+def _pad_console_line(line: str, width: int) -> str:
+    visible_length = len(ANSI_ESCAPE_RE.sub("", line))
+    writable_width = max(1, width - 1)
+    return f"{line}{' ' * max(0, writable_width - visible_length)}"
+
+
+def _write_windows_console_rows(
+    lines: tuple[str, ...],
+    start_row: int,
+    width: int,
+) -> bool:
+    """Position and overwrite rows with the native Windows console API."""
+    try:
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel32.GetStdHandle.argtypes = [ctypes.c_ulong]
+        kernel32.GetStdHandle.restype = ctypes.c_void_p
+        kernel32.SetConsoleCursorPosition.argtypes = [
+            ctypes.c_void_p,
+            _ConsoleCoord,
+        ]
+        kernel32.SetConsoleCursorPosition.restype = ctypes.c_int
+        stdout_handle = kernel32.GetStdHandle(-11 & 0xFFFFFFFF)
+        if not stdout_handle or stdout_handle == ctypes.c_void_p(-1).value:
+            return False
+
+        sys.stdout.flush()
+        for offset, line in enumerate(lines):
+            position = _ConsoleCoord(0, max(0, start_row - 1 + offset))
+            if not kernel32.SetConsoleCursorPosition(stdout_handle, position):
+                return False
+            sys.stdout.write(_pad_console_line(line, width))
+            sys.stdout.flush()
+        return True
+    except (AttributeError, OSError, ValueError):
+        return False
 
 
 def _filetime_value(value: _FileTime) -> int:
@@ -448,6 +493,9 @@ class ConsoleDashboard:
             self._last_error = (status_code, method, path)
 
     def _render_lines(self, *lines: str) -> None:
+        if IS_WINDOWS:
+            _write_windows_console_rows(lines, self.STATUS_ROW, CONSOLE_WIDTH)
+            return
         if self.use_color:
             frame = "".join(
                 f"\033[{self.STATUS_ROW + offset};1H\033[2K{line}"
