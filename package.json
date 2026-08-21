@@ -1,0 +1,7 @@
+{
+  "name": "scan-to-text",
+  "private": true,
+  "scripts": {
+    "test:frontend": "node tests/run_selfchecks.js"
+  }
+}
