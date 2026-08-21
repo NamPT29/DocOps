@@ -1,0 +1,15 @@
+fastapi
+uvicorn
+sqlalchemy
+psycopg[binary]
+python-multipart
+pydantic
+pandas
+numpy
+openpyxl
+packaging
+python-dotenv
+PyJWT
+pytest
+pytest-mock
+cachetools
