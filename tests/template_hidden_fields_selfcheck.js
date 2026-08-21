@@ -37,7 +37,13 @@ const configSandbox = {
     escapeHTML: value => String(value),
     document: {
         getElementById: id => elements[id] || null,
-        querySelectorAll: () => [],
+        querySelectorAll(selector) {
+            if (selector === '.unified-chk-hidden') return hiddenCheckboxes;
+            if (selector === '.unified-chk-hidden:checked') {
+                return hiddenCheckboxes.filter(item => item.checked);
+            }
+            return [];
+        },
     },
 };
 
@@ -78,6 +84,6 @@ assert.deepEqual(
 );
 
 const adminHtml = fs.readFileSync('frontend/admin.html', 'utf8');
-assert(adminHtml.includes('id="hiddenColSelect"'));
-assert(adminHtml.includes('Ẩn ô nhập'));
+assert(adminHtml.includes('id="unifiedColConfigBody"'));
+assert(adminHtml.includes('title="Ẩn cột trên form"'));
 console.log('Template hidden fields self-check: OK');

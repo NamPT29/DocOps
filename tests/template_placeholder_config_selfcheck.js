@@ -2,31 +2,24 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
 
-function checkbox(value) {
-    return { value: String(value), checked: false };
-}
-
 function hintInput(col) {
-    return { value: '', dataCol: String(col) };
+    return {
+        value: '',
+        dataCol: String(col),
+        getAttribute(name) {
+            return name === 'data-col' ? this.dataCol : null;
+        },
+    };
 }
 
-const hintCheckboxes = [checkbox(8), checkbox(13)];
 const hintInputs = [hintInput(8), hintInput(13)];
 const placeholderContainer = {
     innerHTML: '',
     querySelectorAll(selector) {
-        if (selector === '.placeholder-rule-enabled') return hintCheckboxes;
-        if (selector === '.placeholder-rule-enabled:checked') {
-            return hintCheckboxes.filter(item => item.checked);
-        }
         if (selector === '.placeholder-rule-text') return hintInputs;
         return [];
     },
     querySelector(selector) {
-        const checkboxMatch = selector.match(/^#chk_placeholder_(\d+)$/);
-        if (checkboxMatch) {
-            return hintCheckboxes.find(item => item.value === checkboxMatch[1]) || null;
-        }
         const inputMatch = selector.match(/^\.placeholder-rule-text\[data-col="(\d+)"\]$/);
         if (inputMatch) {
             return hintInputs.find(item => item.dataCol === inputMatch[1]) || null;
@@ -54,7 +47,8 @@ const sandbox = {
     escapeHTML: value => String(value),
     document: {
         getElementById: id => elements[id] || null,
-        querySelectorAll: () => [],
+        querySelectorAll: selector => placeholderContainer.querySelectorAll(selector),
+        querySelector: selector => placeholderContainer.querySelector(selector),
     },
 };
 
@@ -67,12 +61,10 @@ vm.runInContext(`currentConfigObj = {
     ],
 }; renderVisualUiFromJSON();`, sandbox);
 
-assert.equal(hintCheckboxes[0].checked, true);
-assert.equal(hintCheckboxes[1].checked, true);
 assert.equal(hintInputs[0].value, 'Ví dụ: Nguyễn Văn A');
 assert.equal(hintInputs[1].value, 'Nhập số giấy tờ');
 
-hintCheckboxes[1].checked = false;
+hintInputs[1].value = '';
 vm.runInContext('buildConfigFromUI()', sandbox);
 const saved = JSON.parse(elements.configJsonInput.value);
 assert.deepEqual(saved.placeholder_rules, [
@@ -80,6 +72,6 @@ assert.deepEqual(saved.placeholder_rules, [
 ]);
 
 const adminHtml = fs.readFileSync('frontend/admin.html', 'utf8');
-assert(adminHtml.includes('id="placeholderColSelect"'));
-assert(adminHtml.includes('Gán gợi ý cho ô nhập'));
+assert(adminHtml.includes('id="unifiedColConfigBody"'));
+assert(adminHtml.includes('Chữ gợi ý (Placeholder)'));
 console.log('Template placeholder config self-check: OK');

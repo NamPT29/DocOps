@@ -48,6 +48,6 @@ assert(submissionSource.includes("resizeDynamicFormInputs(document.getElementByI
 assert(adminPanelSource.includes("#dataForm input, #dataForm textarea, #dataForm select"));
 assert(adminPanelSource.includes("resizeDynamicFormInputs(document.getElementById('dataForm'))"));
 assert(employeeHtml.includes('overflow-y: auto; overflow-x: hidden;'));
-assert(employeeHtml.includes('js/form_renderer.js?v=7.6'));
+assert.match(employeeHtml, /<script src="js\/form_renderer\.js\?v=[^"]+"><\/script>/);
 
 console.log('Dynamic input height self-check: OK');
