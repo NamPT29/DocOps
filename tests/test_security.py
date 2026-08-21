@@ -45,8 +45,13 @@ class StaticDb:
 def test_password_hash_and_legacy_login_migration():
     user = SimpleNamespace(id=7, username='legacy', password='old-password', role='user')
     db = StaticDb(user)
+    request = SimpleNamespace(client=SimpleNamespace(host='127.0.0.1'))
 
-    result = auth.api_login(auth.LoginRequest(username='legacy', password='old-password'), db=db)
+    result = auth.api_login(
+        auth.LoginRequest(username='legacy', password='old-password'),
+        request=request,
+        db=db,
+    )
 
     assert result['status'] == 'ok'
     assert user.password.startswith('scrypt$')

@@ -1,4 +1,5 @@
-from fastapi import APIRouter, Depends, HTTPException, Header
+from fastapi import APIRouter, Depends, HTTPException, Header, Request
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 import hashlib
@@ -11,6 +12,7 @@ from datetime import datetime, timedelta, timezone
 from server.database import get_db, SessionLocal
 from server.models import User
 from server.repositories import UserRepository
+from server.services.login_rate_limit_service import LoginRateLimiter
 from server.settings import settings
 
 router = APIRouter(prefix="/api", tags=["auth"])
@@ -19,6 +21,10 @@ SECRET_KEY = settings.secret_key
 
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 1440 # 24 hours
+login_rate_limiter = LoginRateLimiter(
+    settings.login_max_failures,
+    settings.login_failure_window_seconds,
+)
 
 _SCRYPT_N = 2 ** 14
 _SCRYPT_R = 8
@@ -172,10 +178,39 @@ class LoginRequest(BaseModel):
     password: str = Field(max_length=128)
 
 @router.post("/login")
-def api_login(req: LoginRequest, db: Session = Depends(get_db)):
+def api_login(
+    req: LoginRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    client_host = request.client.host if request.client else "unknown"
+    rate_limit_key = f"{client_host}:{req.username.strip().casefold()}"
+    retry_after = login_rate_limiter.retry_after(rate_limit_key)
+    if retry_after:
+        return JSONResponse(
+            status_code=429,
+            content={
+                "status": "error",
+                "message": "Đăng nhập thất bại quá nhiều lần. Vui lòng thử lại sau.",
+            },
+            headers={"Retry-After": str(retry_after)},
+        )
+
     user = UserRepository(db).get_by_username(req.username)
     if not user or not verify_password(req.password, user.password):
+        retry_after = login_rate_limiter.record_failure(rate_limit_key)
+        if retry_after:
+            return JSONResponse(
+                status_code=429,
+                content={
+                    "status": "error",
+                    "message": "Đăng nhập thất bại quá nhiều lần. Vui lòng thử lại sau.",
+                },
+                headers={"Retry-After": str(retry_after)},
+            )
         return {"status": "error", "message": "Sai tên đăng nhập hoặc mật khẩu"}
+
+    login_rate_limiter.reset(rate_limit_key)
 
     if not user.password.startswith("scrypt$"):
         user.password = hash_password(req.password)
