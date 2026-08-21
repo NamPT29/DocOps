@@ -11,6 +11,7 @@ from dotenv import load_dotenv
 # Environment-backed settings must be available before database/auth modules import.
 load_dotenv()
 from server.settings import settings
+from server.security_headers import SecurityHeadersMiddleware
 
 # ---------------------------------------------------------------------------
 # Logging configuration
@@ -111,6 +112,7 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+app.add_middleware(SecurityHeadersMiddleware)
 
 # Include routers
 from server.routers import auth, templates, tasks, submissions, documents, processing, dictionaries, notifications, projects, project_uploads
