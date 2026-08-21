@@ -10,6 +10,7 @@ load_dotenv()
 
 from server.database import SessionLocal
 from server.repositories import LookupRepository, SubmissionRepository
+from server.repositories.project_reporting_repository import ProjectReportingRepository
 from server.services.excel_service import export_submissions_to_excel
 from server.services.export_job_service import (
     export_job_output_path,
@@ -17,6 +18,7 @@ from server.services.export_job_service import (
     release_export_lock,
     update_export_job,
 )
+from server.services.project_reporting_service import resolve_project_template_path
 
 
 def run_export_job(args) -> int:
@@ -29,17 +31,30 @@ def run_export_job(args) -> int:
             state="running",
             message="Đang đọc dữ liệu báo cáo",
         )
-        template = LookupRepository(db).get_template(args.template_id)
-        if not template:
-            raise RuntimeError("Không tìm thấy template mẫu")
-        template_file_path = os.path.join("templates", template.filename)
-        submissions = SubmissionRepository(db).approved_for_export(
-            template_id=args.template_id,
-            folder_path=args.folder_path,
-            start_date=args.start_date,
-            end_date=args.end_date,
-            include_pending_review=args.include_pending_review,
-        )
+        if args.project_id is not None:
+            project_repository = ProjectReportingRepository(db)
+            project = project_repository.get_project(args.project_id)
+            if not project:
+                raise RuntimeError("Không tìm thấy dự án")
+            if project.template_id != args.template_id:
+                raise RuntimeError("Biểu mẫu xuất không thuộc dự án")
+            template_file_path = str(resolve_project_template_path(project))
+            submissions = project_repository.submissions_for_export(
+                project.id,
+                include_pending_review=args.include_pending_review,
+            )
+        else:
+            template = LookupRepository(db).get_template(args.template_id)
+            if not template:
+                raise RuntimeError("Không tìm thấy template mẫu")
+            template_file_path = os.path.join("templates", template.filename)
+            submissions = SubmissionRepository(db).approved_for_export(
+                template_id=args.template_id,
+                folder_path=args.folder_path,
+                start_date=args.start_date,
+                end_date=args.end_date,
+                include_pending_review=args.include_pending_review,
+            )
         if not submissions:
             raise RuntimeError("Không có báo cáo phù hợp để xuất")
         update_export_job(
@@ -84,6 +99,7 @@ def parse_args():
     parser.add_argument("--template-id", required=True, type=int)
     parser.add_argument("--extension", required=True, choices=(".xlsx", ".xlsm"))
     parser.add_argument("--include-pending-review", action="store_true")
+    parser.add_argument("--project-id", type=int)
     parser.add_argument("--folder-path")
     parser.add_argument("--start-date")
     parser.add_argument("--end-date")

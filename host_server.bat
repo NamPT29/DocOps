@@ -29,8 +29,6 @@ echo Dang khoi dong he thong...
 echo.
 echo =========================================================
 echo Dang khoi dong FastAPI...
-echo De cac may khac trong cong ty truy cap vao duoc:
-echo 1. Kiem tra IP cua may nay (vd: 192.168.31.24)
 echo 2. Cac may khac mo trinh duyet va go: http://Dia_chi_IP
 echo.
 echo (LUU Y: DUNG TAT CUA SO NAY TRONG SUOT QUA TRINH LAM VIEC)

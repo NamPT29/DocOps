@@ -77,6 +77,7 @@ def public_export_job(payload: dict) -> dict:
         "job_id",
         "state",
         "template_id",
+        "project_id",
         "include_pending_review",
         "rows_total",
         "filename",
@@ -132,16 +133,22 @@ def start_export_job(
     start_date: str | None,
     end_date: str | None,
     requested_by_user_id: int,
+    project_id: int | None = None,
 ) -> dict:
     job_id = uuid.uuid4().hex
     _acquire_export_lock(job_id)
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    filename_prefix = "BaoCao_TatCa" if include_pending_review else "BaoCao"
-    filename = f"{filename_prefix}_{template_id}_{timestamp}{extension}"
+    if project_id is not None:
+        filename_prefix = "DuAn_TatCa" if include_pending_review else "DuAn_HoanChinh"
+        filename = f"{filename_prefix}_{project_id}_{timestamp}{extension}"
+    else:
+        filename_prefix = "BaoCao_TatCa" if include_pending_review else "BaoCao"
+        filename = f"{filename_prefix}_{template_id}_{timestamp}{extension}"
     payload = {
         "job_id": job_id,
         "state": "queued",
         "template_id": template_id,
+        "project_id": project_id,
         "include_pending_review": include_pending_review,
         "rows_total": 0,
         "filename": filename,
@@ -166,6 +173,8 @@ def start_export_job(
     ]
     if include_pending_review:
         command.append("--include-pending-review")
+    if project_id is not None:
+        command.extend(("--project-id", str(project_id)))
     for option, value in (
         ("--folder-path", folder_path),
         ("--start-date", start_date),

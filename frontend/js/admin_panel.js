@@ -573,6 +573,7 @@ function reviewNavigationParams() {
     return {
         folderPath: params.get('return_folder') || '',
         returnTarget: params.get('return_to') || 'review',
+        projectId: params.get('return_project') || '',
     };
 }
 
@@ -583,9 +584,13 @@ async function refreshReviewNextAction() {
         return;
     }
     const navigation = reviewNavigationParams();
-    if (!navigation) return;
+    if (!navigation || !['review', 'project_review'].includes(navigation.returnTarget)) {
+        button.classList.add('d-none');
+        return;
+    }
     const params = new URLSearchParams({ current_id: String(currentEditingId) });
     if (navigation.folderPath) params.set('folder_path', navigation.folderPath);
+    if (navigation.projectId) params.set('project_id', navigation.projectId);
     const res = await apiCall(`/api/review-next-submission?${params.toString()}`);
     if (!res || !button) return;
     const nextId = Number(res.data?.id);
@@ -607,6 +612,7 @@ function goToNextReviewSubmission() {
         return_to: navigation.returnTarget || 'review',
     });
     if (navigation.folderPath) params.set('return_folder', navigation.folderPath);
+    if (navigation.projectId) params.set('return_project', navigation.projectId);
     window.location.href = `index.html?${params.toString()}`;
 }
 

@@ -22,6 +22,12 @@ assert(source.includes('method: \'DELETE\''));
 assert(html.includes('id="projectUpdateTargetBanner"'));
 assert(source.includes('prepareProjectFolderUpdate(project.id)'));
 assert(source.includes('Number(resume.project_id) !== targetProjectId'));
+assert(source.includes("'Xóa dự án'"));
+assert(source.includes('async function deleteProject(project)'));
+assert(source.includes('/api/projects/${Number(project.id)}'));
+assert(source.includes("method: 'DELETE'"));
+assert(source.includes('Nhập chính xác tên dự án để xác nhận'));
+assert(source.includes('Toàn bộ folder, PDF, báo cáo đã lưu, phân công và công việc kiểm duyệt'));
 assert(html.includes('Hệ thống chỉ tải PDF mới hoặc có nội dung thay đổi.'));
 
 console.log('project management self-check passed');

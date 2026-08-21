@@ -339,6 +339,12 @@ function _buildCategorySection(category, index, schema, config, draftData) {
     return section;
 }
 
+function updatePdfLinkStateFromForm(linked) {
+    if (typeof isPdfLinked === 'undefined') return;
+    isPdfLinked = linked === true;
+    if (typeof updatePdfLinkUI === 'function') updatePdfLinkUI();
+}
+
 function _buildFieldGroup(field, config, draftData) {
     const col = document.createElement('div');
     col.className = 'col-12';
@@ -439,7 +445,7 @@ function _buildFieldGroup(field, config, draftData) {
                 updateLinkBtnState();
                 if (typeof saveFormDraft === 'function') saveFormDraft();
                 resizeDynamicFormInput(input);
-                if (typeof window.isPdfLinked !== 'undefined') window.isPdfLinked = false;
+                updatePdfLinkStateFromForm(false);
             } else {
                 if (typeof activeDocumentRelativePath !== 'undefined' && activeDocumentRelativePath) {
                     const levels = Number.isInteger(Number(linkedPathConfig.folder_levels)) ? Math.min(20, Math.max(0, Number(linkedPathConfig.folder_levels))) : 0;
@@ -447,7 +453,7 @@ function _buildFieldGroup(field, config, draftData) {
                     updateLinkBtnState();
                     if (typeof saveFormDraft === 'function') saveFormDraft();
                     resizeDynamicFormInput(input);
-                    if (typeof window.isPdfLinked !== 'undefined') window.isPdfLinked = true;
+                    updatePdfLinkStateFromForm(true);
                 } else {
                     alert('Vui lòng chọn một file PDF trước khi lưu liên kết.');
                 }

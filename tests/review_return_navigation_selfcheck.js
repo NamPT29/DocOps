@@ -63,7 +63,7 @@ const appSandbox = {
     currentUser: { id: 1, role: 'admin' },
     window: {
         location: {
-            search: '?check_id=103&return_to=review&return_folder=00000000%2F004%2F0011',
+            search: '?check_id=103&return_to=project_review&return_project=7&return_folder=00000000%2F004%2F0011',
         },
     },
     document: {
@@ -91,13 +91,12 @@ vm.runInContext(appSource, appSandbox, { filename: 'frontend/app.js' });
 appSandbox.initApp();
 assert.equal(
     backToAdminBtn.href,
-    '/admin.html?return_folder=00000000%2F004%2F0011#review',
+    '/admin.html?project_id=7&project_view=review&return_folder=00000000%2F004%2F0011#projects',
 );
-assert(backToAdminBtn.innerHTML.includes('Về kiểm duyệt hồ sơ'));
+assert(backToAdminBtn.innerHTML.includes('Về kiểm duyệt hồ sơ dự án'));
 
-assert(adminHtml.includes("window.location.hash === '#review'"));
-assert(adminHtml.includes("urlParams.get('return_folder')"));
-assert(adminHtml.includes('activeReviewFolderPath = returnFolder'));
-assert(adminHtml.includes('fetchReviewSubmissions()'));
+assert(adminHtml.includes("window.location.hash === '#projects'"));
+assert(adminHtml.includes('restoreProjectManagementNavigation()'));
+assert(!adminHtml.includes('id="review-tab"'));
 
 console.log('Review return navigation self-check: OK');

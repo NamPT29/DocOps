@@ -12,8 +12,11 @@ from server.models import (
     ProjectMember,
     ProjectPdfDeletionAudit,
     ProjectReportUnit,
+    ProjectUploadFile,
+    ProjectUploadSession,
     Submission,
     SubmissionReviewAssignment,
+    SubmissionViewPresence,
 )
 
 
@@ -213,3 +216,115 @@ class ProjectAdminRepository:
             if document:
                 self.session.delete(document)
         self.session.delete(asset)
+
+    def project_delete_manifest(self, project_id):
+        asset_rows = self.session.query(
+            ProjectDocumentAsset.storage_filename,
+            ProjectDocumentAsset.assigned_document_id,
+        ).filter(
+            ProjectDocumentAsset.project_id == project_id,
+        ).all()
+        session_ids = [
+            row[0]
+            for row in self.session.query(ProjectUploadSession.id).filter(
+                ProjectUploadSession.project_id == project_id,
+            ).all()
+        ]
+        return {
+            "storage_filenames": sorted({row[0] for row in asset_rows if row[0]}),
+            "assigned_document_ids": sorted({row[1] for row in asset_rows if row[1] is not None}),
+            "upload_session_ids": session_ids,
+        }
+
+    def delete_project_graph(self, project, manifest):
+        project_id = project.id
+        document_ids = list(manifest["assigned_document_ids"])
+        session_ids = list(manifest["upload_session_ids"])
+        submission_ids = []
+        if document_ids:
+            submission_ids = [
+                row[0]
+                for row in self.session.query(Submission.id).filter(
+                    Submission.assigned_document_id.in_(document_ids),
+                ).all()
+            ]
+
+        counts = {}
+        if submission_ids:
+            counts["submission_view_presence"] = self.session.query(
+                SubmissionViewPresence
+            ).filter(
+                SubmissionViewPresence.submission_id.in_(submission_ids),
+            ).delete(synchronize_session=False)
+            counts["submission_review_assignments"] = self.session.query(
+                SubmissionReviewAssignment
+            ).filter(
+                SubmissionReviewAssignment.submission_id.in_(submission_ids),
+            ).delete(synchronize_session=False)
+        else:
+            counts["submission_view_presence"] = 0
+            counts["submission_review_assignments"] = 0
+
+        if document_ids:
+            counts["submissions"] = self.session.query(Submission).filter(
+                Submission.assigned_document_id.in_(document_ids),
+            ).delete(synchronize_session=False)
+            counts["document_review_assignments"] = self.session.query(
+                AssignedDocumentReviewAssignment
+            ).filter(
+                AssignedDocumentReviewAssignment.document_id.in_(document_ids),
+            ).delete(synchronize_session=False)
+            counts["document_paths"] = self.session.query(AssignedDocumentPath).filter(
+                AssignedDocumentPath.document_id.in_(document_ids),
+            ).delete(synchronize_session=False)
+            counts["document_folders"] = self.session.query(AssignedDocumentFolder).filter(
+                AssignedDocumentFolder.document_id.in_(document_ids),
+            ).delete(synchronize_session=False)
+        else:
+            counts.update({
+                "submissions": 0,
+                "document_review_assignments": 0,
+                "document_paths": 0,
+                "document_folders": 0,
+            })
+
+        counts["pdf_deletion_audits"] = self.session.query(ProjectPdfDeletionAudit).filter(
+            ProjectPdfDeletionAudit.project_id == project_id,
+        ).delete(synchronize_session=False)
+        counts["assignment_history"] = self.session.query(ProjectAssignmentHistory).filter(
+            ProjectAssignmentHistory.project_id == project_id,
+        ).delete(synchronize_session=False)
+        counts["assets"] = self.session.query(ProjectDocumentAsset).filter(
+            ProjectDocumentAsset.project_id == project_id,
+        ).delete(synchronize_session=False)
+        counts["report_units"] = self.session.query(ProjectReportUnit).filter(
+            ProjectReportUnit.project_id == project_id,
+        ).delete(synchronize_session=False)
+        counts["cases"] = self.session.query(ProjectCase).filter(
+            ProjectCase.project_id == project_id,
+        ).delete(synchronize_session=False)
+
+        if session_ids:
+            counts["upload_files"] = self.session.query(ProjectUploadFile).filter(
+                ProjectUploadFile.session_id.in_(session_ids),
+            ).delete(synchronize_session=False)
+        else:
+            counts["upload_files"] = 0
+        counts["upload_sessions"] = self.session.query(ProjectUploadSession).filter(
+            ProjectUploadSession.project_id == project_id,
+        ).delete(synchronize_session=False)
+        counts["members"] = self.session.query(ProjectMember).filter(
+            ProjectMember.project_id == project_id,
+        ).delete(synchronize_session=False)
+
+        self.session.delete(project)
+        self.session.flush()
+        counts["projects"] = 1
+
+        if document_ids:
+            counts["assigned_documents"] = self.session.query(AssignedDocument).filter(
+                AssignedDocument.id.in_(document_ids),
+            ).delete(synchronize_session=False)
+        else:
+            counts["assigned_documents"] = 0
+        return counts

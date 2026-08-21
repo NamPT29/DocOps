@@ -32,6 +32,15 @@ const expectedCompletedSubmissionHeaders = [
     'Thao tác',
 ];
 const expectedReviewHeaders = expectedCompletedSubmissionHeaders.slice(1);
+const expectedProjectSubmissionHeaders = [
+    'STT',
+    'Biểu mẫu',
+    'Ngày giờ',
+    'Đường dẫn PDF',
+    'Người nhập',
+    'Trạng thái',
+    'Thao tác',
+];
 const expectedEmployeeSubmissionHeaders = [
     'Chọn',
     ...expectedCompletedSubmissionHeaders.slice(0, 5),
@@ -46,10 +55,11 @@ function headersBeforeBody(html, bodyId) {
         .map(match => match[1].replace(/<[^>]+>/g, '').trim());
 }
 assert.deepEqual(headersBeforeBody(indexHtml, 'submissionsTableBody'), expectedEmployeeSubmissionHeaders);
-assert.deepEqual(headersBeforeBody(adminHtml, 'reviewTableBody'), expectedReviewHeaders);
-assert.deepEqual(headersBeforeBody(adminHtml, 'submissionsTableBody'), expectedCompletedSubmissionHeaders);
+assert.deepEqual(headersBeforeBody(adminHtml, 'projectReportsTableBody'), expectedProjectSubmissionHeaders);
+assert.ok(!adminHtml.includes('id="reviewTableBody"'));
+assert.ok(!adminHtml.includes('id="submissionsTableBody"'));
 assert.ok(indexHtml.includes('id="submissionsPagination"'));
-assert.ok(adminHtml.includes('id="submissionsPagination"'));
+assert.ok(adminHtml.includes('id="projectReportsPagination"'));
 assert.ok(adminPanelSource.includes('sub.serial_number'));
 assert.ok(adminPanelSource.includes('renderSubmissionsPagination'));
 assert.ok(indexHtml.includes('selectAllSubmissionsOnPage()'));

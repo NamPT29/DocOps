@@ -55,22 +55,20 @@ const sandbox = {
     confirm() { return true; },
 };
 
-assert(adminHtml.includes('data-bs-target="#inventory-pane"'));
-assert(adminHtml.includes('data-bs-target="#assignment-pane"'));
+assert(!adminHtml.includes('data-bs-target="#inventory-pane"'));
+assert(!adminHtml.includes('data-bs-target="#assignment-pane"'));
 assert(!adminHtml.includes('Kho Tài liệu &amp; Phân công'));
 assert(!adminHtml.includes('id="assignmentPermissionsTableBody"'));
 assert(!adminHtml.includes('fetchAssignmentPermissions()'));
-assert(adminHtml.includes('id="assignInputUserCheckboxes"'));
-assert(adminHtml.includes('id="assignReviewerCheckboxes"'));
-assert(adminHtml.includes('id="assignmentRevocationTableBody"'));
-assert(adminHtml.includes('Thu hồi công việc'));
-assert(adminHtml.includes('id="reassignReviewerCheckboxes"'));
-assert(adminHtml.includes('id="reviewerFolderReassignmentPreview"'));
-assert(adminHtml.includes('Gán lại người kiểm tra'));
-assert(adminHtml.includes('auth.js?v=7.10'));
-assert(adminHtml.includes('js/admin_panel.js?v=200.02'));
-assert(employeeHtml.includes('js/admin_panel.js?v=200.02'));
-assert(adminHtml.includes('id="reviewFolderTree"'));
+assert(!adminHtml.includes('id="assignInputUserCheckboxes"'));
+assert(!adminHtml.includes('id="assignReviewerCheckboxes"'));
+assert(!adminHtml.includes('id="assignmentRevocationTableBody"'));
+assert(!adminHtml.includes('id="reassignReviewerCheckboxes"'));
+assert(!adminHtml.includes('id="reviewerFolderReassignmentPreview"'));
+assert(adminHtml.includes('auth.js?v=100.01'));
+assert(adminHtml.includes('js/admin_panel.js?v=202.00'));
+assert(employeeHtml.includes('js/admin_panel.js?v=202.00'));
+assert(!adminHtml.includes('id="reviewFolderTree"'));
 assert(employeeHtml.includes('id="reviewFolderTree"'));
 assert(!adminHtml.includes('id="newUserCanReview"'));
 assert(!adminHtml.includes('id="newUserCanInput"'));

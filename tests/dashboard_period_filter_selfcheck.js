@@ -55,12 +55,12 @@ vm.runInContext(authSource, sandbox);
 
 (async () => {
     const dashboardPane = adminHtml.split('id="dashboard-pane"')[1].split('id="kpi-pane"')[0];
-    const inventoryPane = adminHtml.split('id="inventory-pane"')[1].split('id="assignment-pane"')[0];
     assert.match(dashboardPane, /id="dashPeriodDocs"/);
     assert.match(dashboardPane, /option value="range">Từ ngày đến ngày<\/option>/);
     assert.match(dashboardPane, /type="datetime-local" id="dashboardStartDate"/);
     assert.match(dashboardPane, /type="datetime-local" id="dashboardEndDate"/);
-    assert.doesNotMatch(inventoryPane, /id="dashPeriodDocs"/);
+    assert.doesNotMatch(adminHtml, /id="inventory-pane"/);
+    assert.doesNotMatch(adminHtml, /id="assignment-pane"/);
 
     const day = sandbox.getDashboardPeriodRange('day', '2026-08-14');
     assert.deepEqual(JSON.parse(JSON.stringify(day)), {

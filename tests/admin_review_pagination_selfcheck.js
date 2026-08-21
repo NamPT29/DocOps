@@ -77,7 +77,8 @@ const sandbox = {
 
 const adminHtml = fs.readFileSync('frontend/admin.html', 'utf8');
 const employeeHtml = fs.readFileSync('frontend/index.html', 'utf8');
-assert(adminHtml.includes('id="reviewSubmissionsPagination"'));
+assert(!adminHtml.includes('id="reviewSubmissionsPagination"'));
+assert(adminHtml.includes('id="projectReportsPagination"'));
 assert(employeeHtml.includes('id="reviewSubmissionsPagination"'));
 
 vm.createContext(sandbox);

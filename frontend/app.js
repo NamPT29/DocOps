@@ -31,7 +31,18 @@ async function initApp() {
                     if (currentUser && currentUser.role === 'admin') {
                         const returnTarget = urlParams.get('return_to');
                         const returnFolder = urlParams.get('return_folder');
-                        if (returnTarget === 'review') {
+                        const returnProject = urlParams.get('return_project');
+                        if (returnTarget === 'project_review' || returnTarget === 'project_completed') {
+                            const adminParams = new URLSearchParams({
+                                project_id: returnProject || '',
+                                project_view: returnTarget === 'project_review' ? 'review' : 'completed',
+                            });
+                            if (returnFolder) adminParams.set('return_folder', returnFolder);
+                            backBtn.href = `/admin.html?${adminParams.toString()}#projects`;
+                            backBtn.innerHTML = returnTarget === 'project_review'
+                                ? '<i class="fas fa-arrow-left"></i> Về kiểm duyệt hồ sơ dự án'
+                                : '<i class="fas fa-arrow-left"></i> Về hồ sơ hoàn chỉnh của dự án';
+                        } else if (returnTarget === 'review') {
                             const adminParams = new URLSearchParams();
                             if (returnFolder) adminParams.set('return_folder', returnFolder);
                             const query = adminParams.toString();

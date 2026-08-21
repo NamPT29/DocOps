@@ -6,8 +6,8 @@ const adminHtml = fs.readFileSync('frontend/admin.html', 'utf8');
 const employeeHtml = fs.readFileSync('frontend/index.html', 'utf8');
 const source = fs.readFileSync('frontend/js/admin_panel.js', 'utf8');
 
-assert(adminHtml.includes('id="filterReviewDuplicates"'));
-assert(adminHtml.includes('id="filterCompletedDuplicates"'));
+assert(!adminHtml.includes('id="filterReviewDuplicates"'));
+assert(!adminHtml.includes('id="filterCompletedDuplicates"'));
 assert(employeeHtml.includes('id="filterReviewDuplicates"'));
 
 const calls = [];

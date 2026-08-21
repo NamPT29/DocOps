@@ -32,6 +32,7 @@ from server.repositories import (
     SubmissionViewRepository,
     TemplateRepository,
 )
+from server.repositories.project_reporting_repository import ProjectReportingRepository
 from server.services.submission_metadata_service import (
     apply_submission_metadata,
     backfill_submission_metadata,
@@ -393,6 +394,7 @@ def api_get_review_folder_submissions(
 def api_get_next_review_submission(
     current_id: int,
     folder_path: str = None,
+    project_id: int = None,
     current_user: dict = Depends(get_reviewer_user),
     db: Session = Depends(get_db),
 ):
@@ -403,6 +405,20 @@ def api_get_next_review_submission(
     current = submission_repository.get(current_id)
     if not current:
         raise HTTPException(status_code=404, detail="Không tìm thấy hồ sơ đang kiểm tra")
+    if project_id is not None:
+        if current_user.get("role") != "admin":
+            raise HTTPException(status_code=403, detail="Chỉ quản trị viên được duyệt theo dự án")
+        project_repository = ProjectReportingRepository(db)
+        if not project_repository.get_project(project_id):
+            raise HTTPException(status_code=404, detail="Không tìm thấy dự án")
+        if not project_repository.submission_belongs_to_project(project_id, current.id):
+            raise HTTPException(status_code=404, detail="Hồ sơ không thuộc dự án")
+        candidates = project_repository.active_review_submissions(
+            project_id,
+            folder_path=folder_path,
+        )
+    else:
+        candidates = None
     if current_user.get("role") != "admin" and not ReviewWorkflowService.can_review_submission(
         current,
         current_user,
@@ -411,7 +427,9 @@ def api_get_next_review_submission(
         raise HTTPException(status_code=403, detail="Hồ sơ không được phân cho bạn kiểm tra")
 
     normalized_folder = normalize_folder_path(folder_path) if folder_path else None
-    if current_user.get("role") == "admin":
+    if candidates is not None:
+        pass
+    elif current_user.get("role") == "admin":
         candidates = submission_repository.list_active_review_submissions(
             folder_path=normalized_folder,
         )

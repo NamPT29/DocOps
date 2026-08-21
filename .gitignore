@@ -64,3 +64,6 @@ tai_lieu_mau/~$*.xlsx
 
 .agents/
 .grapuco/
+.env.docker
+docker-data/
+backups/

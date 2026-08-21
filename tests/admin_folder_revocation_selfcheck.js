@@ -6,7 +6,7 @@ const source = fs.readFileSync('frontend/js/admin_panel.js', 'utf8');
 
 assert(html.includes('id="assignedFoldersModal"'));
 assert(html.includes('id="assignedFoldersList"'));
-assert(html.includes('js/admin_panel.js?v=201.00'));
+assert(html.includes('js/admin_panel.js?v=202.00'));
 assert(source.includes('Tài liệu đã giao'));
 assert(source.includes('/api/documents/assignments/folders?user_id='));
 assert(source.includes('folder_path: folderPath'));
