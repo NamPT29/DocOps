@@ -1,4 +1,5 @@
 import asyncio
+import inspect
 import json
 from io import BytesIO
 from types import SimpleNamespace
@@ -311,6 +312,28 @@ def test_manual_upload_rejects_disguised_html(monkeypatch, tmp_path):
         asyncio.run(submissions.api_upload_pdf(upload, current_user={'id': 2}, db=db))
 
     assert error.value.status_code == 400
+    assert db.rolled_back
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_manual_upload_requires_input_capability():
+    dependency = inspect.signature(submissions.api_upload_pdf).parameters[
+        'current_user'
+    ].default
+
+    assert dependency.dependency is submissions.get_input_user
+
+
+def test_manual_upload_rejects_file_over_configured_limit(monkeypatch, tmp_path):
+    monkeypatch.setattr(submissions, 'PDF_STORAGE_PATH', str(tmp_path))
+    monkeypatch.setattr(submissions, 'DOCUMENT_UPLOAD_MAX_BYTES', 12)
+    upload = UploadFile(filename='large.pdf', file=BytesIO(b'%PDF-' + b'x' * 20))
+    db = FakeDb()
+
+    with pytest.raises(HTTPException, match='File vượt quá giới hạn') as error:
+        asyncio.run(submissions.api_upload_pdf(upload, current_user={'id': 2}, db=db))
+
+    assert error.value.status_code == 413
     assert db.rolled_back
     assert list(tmp_path.iterdir()) == []
 

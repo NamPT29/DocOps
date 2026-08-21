@@ -24,6 +24,7 @@ from server.routers.auth import (
     get_reviewer_user,
 )
 from server.services.upload_service import save_validated_upload
+from server.settings import settings
 from server.repositories import (
     DocumentRepository,
     LookupRepository,
@@ -54,7 +55,8 @@ from fastapi import HTTPException
 
 router = APIRouter(prefix="/api", tags=["submissions"])
 logger = logging.getLogger(__name__)
-PDF_STORAGE_PATH = os.getenv("PDF_STORAGE_PATH", "uploads")
+PDF_STORAGE_PATH = str(settings.pdf_storage_path)
+DOCUMENT_UPLOAD_MAX_BYTES = settings.document_upload_max_bytes
 COMPLETED_WITHOUT_FOLDER = NO_FOLDER_SENTINEL
 
 
@@ -948,7 +950,7 @@ def api_download_export_job(
 @router.post("/upload-pdf")
 async def api_upload_pdf(
     file: UploadFile = File(...),
-    current_user: dict = Depends(get_current_user),
+    current_user: dict = Depends(get_input_user),
     db: Session = Depends(get_db),
 ):
     filepath = None
@@ -960,7 +962,12 @@ async def api_upload_pdf(
         new_filename = f"{uuid.uuid4()}_{original_filename}"
         filepath = os.path.join(PDF_STORAGE_PATH, new_filename)
 
-        save_validated_upload(file, filepath, kind="document")
+        save_validated_upload(
+            file,
+            filepath,
+            kind="document",
+            max_bytes=DOCUMENT_UPLOAD_MAX_BYTES,
+        )
         document = AssignedDocument(
             original_filename=original_filename,
             uuid_filename=new_filename,
