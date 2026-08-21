@@ -67,3 +67,11 @@ tai_lieu_mau/~$*.xlsx
 .env.docker
 docker-data/
 backups/
+
+.claude/
+.grapuco
+
+AGENTS.md
+
+ARCHITECTURE.md
+CLAUDE.md
