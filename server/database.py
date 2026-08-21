@@ -1,20 +1,13 @@
-import os
 from datetime import datetime, timezone
 
 from sqlalchemy import create_engine
 from sqlalchemy.orm import declarative_base, sessionmaker
-from dotenv import load_dotenv
-
-load_dotenv()
+from server.settings import settings
 
 def get_utc_now():
     return datetime.now(timezone.utc).replace(tzinfo=None)
 
-# Use DATABASE_URL from .env or fallback to default
-SQLALCHEMY_DATABASE_URL = os.environ.get(
-    "DATABASE_URL",
-    "postgresql+psycopg://postgres:postgres@127.0.0.1:5432/scan_data",
-)
+SQLALCHEMY_DATABASE_URL = settings.database_url
 
 if SQLALCHEMY_DATABASE_URL.startswith("sqlite"):
     engine = create_engine(
@@ -27,10 +20,10 @@ else:
         pool_pre_ping=True,
         # Keep enough headroom for parallel API requests while allowing the
         # values to be tuned without another code change.
-        pool_size=int(os.environ.get("DB_POOL_SIZE", "20")),
-        max_overflow=int(os.environ.get("DB_MAX_OVERFLOW", "10")),
-        pool_timeout=int(os.environ.get("DB_POOL_TIMEOUT", "30")),
-        pool_recycle=int(os.environ.get("DB_POOL_RECYCLE", "1800")),
+        pool_size=settings.db_pool_size,
+        max_overflow=settings.db_max_overflow,
+        pool_timeout=settings.db_pool_timeout,
+        pool_recycle=settings.db_pool_recycle,
     )
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 

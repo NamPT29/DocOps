@@ -10,6 +10,7 @@ from dotenv import load_dotenv
 
 # Environment-backed settings must be available before database/auth modules import.
 load_dotenv()
+from server.settings import settings
 
 # ---------------------------------------------------------------------------
 # Logging configuration
@@ -102,11 +103,7 @@ async def _global_exception_handler(request: Request, exc: Exception):
         content={"status": "error", "message": "Lỗi máy chủ nội bộ"},
     )
 
-cors_origins = [
-    origin.strip()
-    for origin in os.getenv("CORS_ORIGINS", "").split(",")
-    if origin.strip()
-]
+cors_origins = list(settings.cors_origins)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=cors_origins,
@@ -129,12 +126,12 @@ app.include_router(notifications.router)
 app.include_router(projects.router)
 app.include_router(project_uploads.router)
 
-PDF_STORAGE_PATH = os.getenv("PDF_STORAGE_PATH", "uploads")
+PDF_STORAGE_PATH = str(settings.pdf_storage_path)
 os.makedirs(PDF_STORAGE_PATH, exist_ok=True)
 
 # Ensure internal upload dirs exist
 os.makedirs("scratch", exist_ok=True)
-os.makedirs("templates", exist_ok=True)
+os.makedirs(settings.template_storage_path, exist_ok=True)
 
 # Mount static directories
 app.mount("/frontend", StaticFiles(directory="frontend"), name="frontend")

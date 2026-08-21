@@ -4,7 +4,6 @@ from sqlalchemy.orm import Session
 import hashlib
 import hmac
 import jwt
-import logging
 import os
 import secrets
 from typing import Literal
@@ -12,20 +11,11 @@ from datetime import datetime, timedelta, timezone
 from server.database import get_db, SessionLocal
 from server.models import User
 from server.repositories import UserRepository
+from server.settings import settings
 
 router = APIRouter(prefix="/api", tags=["auth"])
 
-logger = logging.getLogger(__name__)
-
-SECRET_KEY = os.getenv("SECRET_KEY")
-if SECRET_KEY:
-    if len(SECRET_KEY.encode("utf-8")) < 32:
-        raise RuntimeError("SECRET_KEY phải có ít nhất 32 byte.")
-else:
-    SECRET_KEY = secrets.token_urlsafe(48)
-    logger.warning(
-        "SECRET_KEY chưa được cấu hình; token sẽ hết hiệu lực khi server khởi động lại."
-    )
+SECRET_KEY = settings.secret_key
 
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 1440 # 24 hours
