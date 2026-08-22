@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from server.database import get_db
@@ -20,7 +20,7 @@ def api_create_task(req: CreateTaskRequest, current_user: dict = Depends(get_adm
     # Check if template exists
     template = TemplateRepository(db).get(req.template_id)
     if not template:
-        return {"status": "error", "message": "Template not found"}
+        raise HTTPException(status_code=404, detail="Template not found")
         
     task = Task(user_id=req.user_id, template_id=req.template_id, title=req.title, target_quantity=req.target_quantity)
     TaskRepository(db).add(task)

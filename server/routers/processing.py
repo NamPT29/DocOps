@@ -1,7 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
-import logging
 import os
 
 from server.database import get_db
@@ -11,8 +10,6 @@ from server.routers.auth import get_current_user
 from server.repositories import TemplateRepository
 
 router = APIRouter(prefix="/api/templates", tags=["processing"])
-logger = logging.getLogger(__name__)
-
 class ProcessFieldRequest(BaseModel):
     field_name: str
     value: str
@@ -48,21 +45,15 @@ def get_mappings(template_id: int, db: Session):
 
 @router.post("/{template_id}/process-field")
 def api_process_field(template_id: int, req: ProcessFieldRequest, current_user: dict = Depends(get_current_user), db: Session = Depends(get_db)):
-    try:
-        mappings = get_mappings(template_id, db)
+    mappings = get_mappings(template_id, db)
+
+    if req.field_name in ['col_20', 'col_37', 'col_92']:
+        result = process_address(
+            val=req.value,
+            field_name=req.field_name,
+            ma_xa_mapping=mappings["ma_xa"],
+            don_vi_do_mapping=mappings["don_vi"]
+        )
+        return {"status": "ok", "data": result}
         
-        if req.field_name in ['col_20', 'col_37', 'col_92']:
-            result = process_address(
-                val=req.value,
-                field_name=req.field_name,
-                ma_xa_mapping=mappings["ma_xa"],
-                don_vi_do_mapping=mappings["don_vi"]
-            )
-            return {"status": "ok", "data": result}
-            
-        return {"status": "ok", "data": {}}
-    except HTTPException as e:
-        raise e
-    except Exception as e:
-        logger.exception("API error: %s", e)
-        return {"status": "error", "message": str(e)}
+    return {"status": "ok", "data": {}}

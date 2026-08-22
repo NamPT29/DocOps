@@ -1,3 +1,4 @@
+import asyncio
 from io import BytesIO
 from pathlib import Path
 from types import SimpleNamespace
@@ -7,7 +8,7 @@ import pytest
 from fastapi import HTTPException, UploadFile
 
 from server.models import User
-from server.routers import auth, processing
+from server.routers import auth, documents, processing
 from server.services.address_service import normalize_str, process_address
 from server.services.server_folder_service import (
     ServerSourceDocument,
@@ -367,6 +368,23 @@ def test_field_processing_dispatches_only_supported_address_columns(mocker):
         ma_xa_mapping=mappings["ma_xa"],
         don_vi_do_mapping=mappings["don_vi"],
     )
+
+
+def test_document_assignment_rejects_malformed_user_list():
+    with pytest.raises(HTTPException) as error:
+        asyncio.run(
+            documents.upload_and_assign_documents(
+                template_id=1,
+                user_ids="not-a-number",
+                reviewer_user_ids="2",
+                files=[],
+                current_user={"id": 1, "role": "admin"},
+                db=object(),
+            )
+        )
+
+    assert error.value.status_code == 400
+    assert error.value.detail == "Danh sách nhân viên không hợp lệ."
 
 
 def test_password_hashes_are_salted_and_malformed_hashes_fail_closed():

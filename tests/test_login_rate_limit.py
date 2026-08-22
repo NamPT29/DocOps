@@ -1,5 +1,7 @@
-import json
 from types import SimpleNamespace
+
+import pytest
+from fastapi import HTTPException
 
 from server.routers import auth
 from server.services.login_rate_limit_service import LoginRateLimiter
@@ -44,13 +46,13 @@ def test_login_endpoint_returns_429_with_existing_error_contract(monkeypatch):
     request = SimpleNamespace(client=SimpleNamespace(host='192.0.2.10'))
     credentials = auth.LoginRequest(username='member', password='wrong')
 
-    first = auth.api_login(credentials, request=request, db=MissingUserDb())
-    second = auth.api_login(credentials, request=request, db=MissingUserDb())
+    with pytest.raises(HTTPException) as first:
+        auth.api_login(credentials, request=request, db=MissingUserDb())
+    with pytest.raises(HTTPException) as second:
+        auth.api_login(credentials, request=request, db=MissingUserDb())
 
-    assert first == {'status': 'error', 'message': 'Sai tên đăng nhập hoặc mật khẩu'}
-    assert second.status_code == 429
-    assert second.headers['retry-after'] == '60'
-    assert json.loads(second.body) == {
-        'status': 'error',
-        'message': 'Đăng nhập thất bại quá nhiều lần. Vui lòng thử lại sau.',
-    }
+    assert first.value.status_code == 401
+    assert first.value.detail == 'Sai tên đăng nhập hoặc mật khẩu'
+    assert second.value.status_code == 429
+    assert second.value.headers['Retry-After'] == '60'
+    assert second.value.detail == 'Đăng nhập thất bại quá nhiều lần. Vui lòng thử lại sau.'

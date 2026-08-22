@@ -1,3 +1,4 @@
+import asyncio
 from datetime import datetime, timedelta
 
 import pytest
@@ -169,14 +170,45 @@ def test_admin_cannot_delete_own_account(db):
     admin = _add_user(db, "admin", role="admin")
     db.commit()
 
-    result = auth.api_delete_user(
-        admin.id,
-        current_user=_current_user(admin),
-        db=db,
-    )
+    with pytest.raises(HTTPException) as error:
+        auth.api_delete_user(
+            admin.id,
+            current_user=_current_user(admin),
+            db=db,
+        )
 
-    assert result["status"] == "error"
+    assert error.value.status_code == 409
     assert db.get(User, admin.id) is not None
+
+
+def test_duplicate_username_returns_conflict(db):
+    admin = _add_user(db, "admin", role="admin")
+    _add_user(db, "existing")
+    db.commit()
+
+    with pytest.raises(HTTPException) as error:
+        auth.api_create_user(
+            auth.CreateUserRequest(username="existing", password="password123"),
+            current_user=_current_user(admin),
+            db=db,
+        )
+
+    assert error.value.status_code == 409
+
+
+def test_changing_password_for_missing_user_returns_not_found(db):
+    admin = _add_user(db, "admin", role="admin")
+    db.commit()
+
+    with pytest.raises(HTTPException) as error:
+        auth.api_change_user_password(
+            999,
+            auth.ChangePasswordRequest(new_password="password123"),
+            current_user=_current_user(admin),
+            db=db,
+        )
+
+    assert error.value.status_code == 404
 
 
 def test_template_configuration_round_trip_and_soft_delete(db):
@@ -276,16 +308,25 @@ def test_task_is_not_created_when_template_does_not_exist(db):
     employee = _add_user(db, "employee")
     db.commit()
 
-    result = tasks.api_create_task(
-        tasks.CreateTaskRequest(
-            user_id=employee.id,
-            template_id=999,
-            title="Không được lưu",
-            target_quantity=1,
-        ),
-        current_user=_current_user(admin),
-        db=db,
-    )
+    with pytest.raises(HTTPException) as error:
+        tasks.api_create_task(
+            tasks.CreateTaskRequest(
+                user_id=employee.id,
+                template_id=999,
+                title="Không được lưu",
+                target_quantity=1,
+            ),
+            current_user=_current_user(admin),
+            db=db,
+        )
 
-    assert result == {"status": "error", "message": "Template not found"}
+    assert error.value.status_code == 404
+
+
+def test_template_schema_returns_not_found_for_unknown_template(db):
+    with pytest.raises(HTTPException) as error:
+        asyncio.run(templates.get_template_schema(999, db=db))
+
+    assert error.value.status_code == 404
+    assert error.value.detail == "Template not found"
     assert db.query(Task).count() == 0

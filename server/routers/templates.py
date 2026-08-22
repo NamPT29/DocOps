@@ -1,4 +1,3 @@
-import logging
 import os
 import uuid
 from fastapi import APIRouter, Depends, UploadFile, File, HTTPException
@@ -12,8 +11,6 @@ from server.services.upload_service import save_validated_upload
 from server.repositories import DictionaryRepository, TemplateRepository
 
 router = APIRouter(prefix="/api/templates", tags=["templates"])
-logger = logging.getLogger(__name__)
-
 TEMPLATES_DIR = "templates"
 os.makedirs(TEMPLATES_DIR, exist_ok=True)
 
@@ -82,7 +79,7 @@ def get_templates(db: Session = Depends(get_db)):
 async def get_template_schema(template_id: int, db: Session = Depends(get_db)):
     template = TemplateRepository(db).get(template_id)
     if not template:
-        return {"status": "error", "message": "Template not found"}
+        raise HTTPException(status_code=404, detail="Template not found")
     
     file_path = os.path.join(TEMPLATES_DIR, template.filename)
     
@@ -94,41 +91,28 @@ async def get_template_schema(template_id: int, db: Session = Depends(get_db)):
         except:
             pass
             
-    try:
-        # Load dictionaries from DB
-        dicts = DictionaryRepository(db).option_map_for_template(template_id)
-            
-        schema = await run_in_threadpool(get_form_schema, file_path, dicts, config)
-        return {"status": "ok", "data": schema, "config": config}
-    except Exception as e:
-        logger.exception("API error: %s", e)
-        return {"status": "error", "message": str(e)}
+    # Load dictionaries from DB. Unexpected failures are handled centrally.
+    dicts = DictionaryRepository(db).option_map_for_template(template_id)
+    schema = await run_in_threadpool(get_form_schema, file_path, dicts, config)
+    return {"status": "ok", "data": schema, "config": config}
 
 @router.get("/{template_id}/maxa_mapping")
 async def get_template_maxa_mapping(template_id: int, db: Session = Depends(get_db)):
     template = TemplateRepository(db).get(template_id)
     if not template:
-        return {"status": "error", "message": "Template not found"}
+        raise HTTPException(status_code=404, detail="Template not found")
     file_path = os.path.join(TEMPLATES_DIR, template.filename)
-    try:
-        mapping = await run_in_threadpool(get_ma_xa_mapping, file_path)
-        return {"status": "ok", "data": mapping}
-    except Exception as e:
-        logger.exception("API error: %s", e)
-        return {"status": "error", "message": str(e)}
+    mapping = await run_in_threadpool(get_ma_xa_mapping, file_path)
+    return {"status": "ok", "data": mapping}
 
 @router.get("/{template_id}/don_vi_do_mapping")
 async def get_template_don_vi_do_mapping(template_id: int, db: Session = Depends(get_db)):
     template = TemplateRepository(db).get(template_id)
     if not template:
-        return {"status": "error", "message": "Template not found"}
+        raise HTTPException(status_code=404, detail="Template not found")
     file_path = os.path.join(TEMPLATES_DIR, template.filename)
-    try:
-        mapping = await run_in_threadpool(get_don_vi_do_mapping, file_path)
-        return {"status": "ok", "data": mapping}
-    except Exception as e:
-        logger.exception("API error: %s", e)
-        return {"status": "error", "message": str(e)}
+    mapping = await run_in_threadpool(get_don_vi_do_mapping, file_path)
+    return {"status": "ok", "data": mapping}
 
 @router.get("/{template_id}/config")
 def get_template_config(template_id: int, db: Session = Depends(get_db)):

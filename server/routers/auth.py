@@ -1,5 +1,4 @@
 from fastapi import APIRouter, Depends, HTTPException, Header, Request
-from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 import hashlib
@@ -187,12 +186,9 @@ def api_login(
     rate_limit_key = f"{client_host}:{req.username.strip().casefold()}"
     retry_after = login_rate_limiter.retry_after(rate_limit_key)
     if retry_after:
-        return JSONResponse(
+        raise HTTPException(
             status_code=429,
-            content={
-                "status": "error",
-                "message": "Đăng nhập thất bại quá nhiều lần. Vui lòng thử lại sau.",
-            },
+            detail="Đăng nhập thất bại quá nhiều lần. Vui lòng thử lại sau.",
             headers={"Retry-After": str(retry_after)},
         )
 
@@ -200,15 +196,12 @@ def api_login(
     if not user or not verify_password(req.password, user.password):
         retry_after = login_rate_limiter.record_failure(rate_limit_key)
         if retry_after:
-            return JSONResponse(
+            raise HTTPException(
                 status_code=429,
-                content={
-                    "status": "error",
-                    "message": "Đăng nhập thất bại quá nhiều lần. Vui lòng thử lại sau.",
-                },
+                detail="Đăng nhập thất bại quá nhiều lần. Vui lòng thử lại sau.",
                 headers={"Retry-After": str(retry_after)},
             )
-        return {"status": "error", "message": "Sai tên đăng nhập hoặc mật khẩu"}
+        raise HTTPException(status_code=401, detail="Sai tên đăng nhập hoặc mật khẩu")
 
     login_rate_limiter.reset(rate_limit_key)
 
@@ -238,7 +231,7 @@ class CreateUserRequest(BaseModel):
 def api_create_user(req: CreateUserRequest, current_user: dict = Depends(get_admin_user), db: Session = Depends(get_db)):
     repository = UserRepository(db)
     if repository.get_by_username(req.username):
-        return {"status": "error", "message": "Username already exists"}
+        raise HTTPException(status_code=409, detail="Username already exists")
     user = User(
         username=req.username,
         password=hash_password(req.password),
@@ -251,12 +244,12 @@ def api_create_user(req: CreateUserRequest, current_user: dict = Depends(get_adm
 @router.delete("/users/{user_id}")
 def api_delete_user(user_id: int, current_user: dict = Depends(get_admin_user), db: Session = Depends(get_db)):
     if current_user["id"] == user_id:
-        return {"status": "error", "message": "Không thể tự xóa tài khoản của chính mình"}
+        raise HTTPException(status_code=409, detail="Không thể tự xóa tài khoản của chính mình")
         
     repository = UserRepository(db)
     user = repository.get(user_id)
     if not user:
-        return {"status": "error", "message": "Không tìm thấy người dùng"}
+        raise HTTPException(status_code=404, detail="Không tìm thấy người dùng")
         
     try:
         repository.detach_references_and_delete(user)
@@ -279,7 +272,7 @@ def api_change_user_password(
     repository = UserRepository(db)
     user = repository.get(user_id)
     if not user:
-        return {"status": "error", "message": "Không tìm thấy người dùng"}
+        raise HTTPException(status_code=404, detail="Không tìm thấy người dùng")
     
     user.password = hash_password(req.new_password)
     db.commit()

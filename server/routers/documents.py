@@ -144,17 +144,17 @@ async def upload_and_assign_documents(
     try:
         user_id_list = [int(id.strip()) for id in user_ids.split(",") if id.strip()]
         if not user_id_list:
-            return {"status": "error", "message": "Vui lòng chọn ít nhất 1 nhân viên."}
-    except:
-        return {"status": "error", "message": "Danh sách nhân viên không hợp lệ."}
+            raise HTTPException(status_code=400, detail="Vui lòng chọn ít nhất 1 nhân viên.")
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="Danh sách nhân viên không hợp lệ.") from exc
     try:
         reviewer_id_list = [
             int(value.strip()) for value in reviewer_user_ids.split(",") if value.strip()
         ]
         if not reviewer_id_list:
-            return {"status": "error", "message": "Vui lòng chọn ít nhất 1 người kiểm tra."}
-    except ValueError:
-        return {"status": "error", "message": "Danh sách người kiểm tra không hợp lệ."}
+            raise HTTPException(status_code=400, detail="Vui lòng chọn ít nhất 1 người kiểm tra.")
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="Danh sách người kiểm tra không hợp lệ.") from exc
         
     from dotenv import load_dotenv
     load_dotenv()
