@@ -10,7 +10,7 @@ from server.models import (
     User,
 )
 from server.repositories.base import BaseRepository
-from server.repositories.submission_repository import duplicate_document_ids_query
+from server.repositories.submission_query_helpers import duplicate_document_ids_query
 from server.utils.folder_utils import folder_path_key, normalize_folder_path
 
 

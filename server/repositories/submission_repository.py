@@ -4,22 +4,11 @@ from sqlalchemy import func, or_
 
 from server.models import Submission, Template, User
 from server.repositories.base import BaseRepository
+from server.repositories.submission_query_helpers import (
+    DUPLICATE_REPORT_STATUSES as _DUPLICATE_REPORT_STATUSES,
+    duplicate_document_ids_query,
+)
 from server.utils.folder_utils import folder_path_key, normalize_folder_path
-
-
-_DUPLICATE_REPORT_STATUSES = ("pending_review", "rejected", "approved")
-
-
-def duplicate_document_ids_query(session):
-    """Document IDs linked to more than one workflow report."""
-    return session.query(Submission.assigned_document_id).filter(
-        Submission.assigned_document_id.isnot(None),
-        Submission.status.in_(_DUPLICATE_REPORT_STATUSES),
-    ).group_by(
-        Submission.assigned_document_id,
-    ).having(
-        func.count(Submission.id) > 1,
-    )
 
 
 class SubmissionRepository(BaseRepository[Submission]):
