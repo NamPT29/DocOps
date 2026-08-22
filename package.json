@@ -2,6 +2,10 @@
   "name": "scan-to-text",
   "private": true,
   "scripts": {
-    "test:frontend": "node tests/run_selfchecks.js"
+    "test:frontend": "node tests/run_selfchecks.js",
+    "typecheck": "python scripts/run_typecheck.py"
+  },
+  "devDependencies": {
+    "pyright": "^1.1.413"
   }
 }

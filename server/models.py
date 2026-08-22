@@ -1,4 +1,7 @@
+from datetime import datetime
+
 from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Boolean, Text
+from sqlalchemy.orm import Mapped, mapped_column
 from server.database import Base, get_utc_now
 
 class User(Base):
@@ -25,9 +28,9 @@ class ApiRateLimitBucket(Base):
 
     __tablename__ = "api_rate_limit_buckets"
 
-    bucket_key = Column(String(64), primary_key=True)
-    request_count = Column(Integer, nullable=False, default=0)
-    expires_at = Column(DateTime, nullable=False, index=True)
+    bucket_key: Mapped[str] = mapped_column(String(64), primary_key=True)
+    request_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    expires_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, index=True)
 
 
 class Notification(Base):

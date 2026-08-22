@@ -1,0 +1,14 @@
+{
+  "include": [
+    "server/models.py",
+    "server/settings.py",
+    "server/services/api_rate_limit_service.py"
+  ],
+  "exclude": [
+    "node_modules",
+    "scratch"
+  ],
+  "pythonVersion": "3.12",
+  "typeCheckingMode": "strict",
+  "reportMissingTypeStubs": "none"
+}
