@@ -1763,6 +1763,45 @@ def test_marking_wrong_fields_does_not_return_report_to_input_user(db):
     assert stored["_wrong_fields"] == ["col_8"]
 
 
+@pytest.mark.parametrize(
+    "operation",
+    [
+        lambda db: submissions.api_get_submission(
+            999,
+            current_user={"id": 1, "role": "admin"},
+            db=db,
+        ),
+        lambda db: submissions.api_update_submission(
+            999,
+            submissions.SubmitRequest(data={}),
+            current_user={"id": 1, "role": "admin"},
+            db=db,
+        ),
+        lambda db: submissions.api_toggle_check(
+            999,
+            current_user={"id": 1, "role": "admin"},
+            db=db,
+        ),
+        lambda db: submissions.api_update_errors(
+            999,
+            submissions.ErrorSectionsRequest(wrong_sections=[]),
+            current_user={"id": 1, "role": "admin"},
+            db=db,
+        ),
+        lambda db: submissions.api_delete_submission(
+            999,
+            current_user={"id": 1, "role": "admin"},
+            db=db,
+        ),
+    ],
+)
+def test_missing_submission_operations_return_not_found(db, operation):
+    with pytest.raises(HTTPException) as error:
+        operation(db)
+
+    assert error.value.status_code == 404
+
+
 def test_next_review_submission_skips_completed_current_item(db):
     author = add_user(db, "next-review-author")
     reviewer = add_user(db, "next-review-reviewer")

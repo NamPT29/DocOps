@@ -1,7 +1,6 @@
 from server.services.review_workflow_service import ReviewWorkflowService
 import os
 import json
-import logging
 import uuid
 from typing import Literal, Optional
 from urllib.parse import quote
@@ -54,7 +53,6 @@ from server.utils.folder_utils import (
 from fastapi import HTTPException
 
 router = APIRouter(prefix="/api", tags=["submissions"])
-logger = logging.getLogger(__name__)
 PDF_STORAGE_PATH = str(settings.pdf_storage_path)
 DOCUMENT_UPLOAD_MAX_BYTES = settings.document_upload_max_bytes
 COMPLETED_WITHOUT_FOLDER = NO_FOLDER_SENTINEL
@@ -127,10 +125,9 @@ def api_submit(req: SubmitRequest, current_user: dict = Depends(get_input_user),
     except HTTPException:
         db.rollback()
         raise
-    except Exception as e:
-        logger.exception("API error: %s", e)
+    except Exception:
         db.rollback()
-        return {"status": "error", "message": str(e)}
+        raise
 
 @router.get("/submissions")
 def api_get_submissions(
@@ -167,8 +164,8 @@ def api_get_submissions(
         )
     except HTTPException:
         raise
-    except Exception as e:
-        return {"status": "error", "message": str(e)}
+    except Exception:
+        raise
 
 
 @router.get("/completed-folders")
@@ -472,14 +469,14 @@ def api_get_submission(sub_id: int, current_user: dict = Depends(get_current_use
     try:
         sub = SubmissionRepository(db).get(sub_id)
         if not sub:
-            return {"status": "error", "message": "Không tìm thấy hồ sơ."}
+            raise HTTPException(status_code=404, detail="Không tìm thấy hồ sơ.")
         can_review = ReviewWorkflowService.can_review_submission(sub, current_user, db)
         if (
             current_user["role"] != "admin"
             and sub.created_by_user_id != current_user["id"]
             and not can_review
         ):
-            return {"status": "error", "message": "Không có quyền truy cập hồ sơ này."}
+            raise HTTPException(status_code=403, detail="Không có quyền truy cập hồ sơ này.")
         data_dict, document = SubmissionService.enrich_pdf_reference(
             json.loads(sub.data_json),
             db,
@@ -498,8 +495,8 @@ def api_get_submission(sub_id: int, current_user: dict = Depends(get_current_use
             # separate authority for approving or rejecting the submission.
             "folder_files": SubmissionService.folder_files_for_document(document, db),
         }
-    except Exception as e:
-        return {"status": "error", "message": str(e)}
+    except Exception:
+        raise
 
 @router.put('/submissions/{sub_id}/view')
 def api_claim_submission_view(
@@ -548,7 +545,7 @@ def api_update_submission(sub_id: int, req: SubmitRequest, current_user: dict = 
     try:
         sub = SubmissionRepository(db).get(sub_id)
         if not sub:
-            return {"status": "error", "message": "Không tìm thấy hồ sơ."}
+            raise HTTPException(status_code=404, detail="Không tìm thấy hồ sơ.")
             
         if current_user["role"] != "admin" and sub.created_by_user_id != current_user["id"]:
             raise HTTPException(status_code=403, detail="Bạn không có quyền sửa hồ sơ này.")
@@ -609,10 +606,9 @@ def api_update_submission(sub_id: int, req: SubmitRequest, current_user: dict = 
     except HTTPException:
         db.rollback()
         raise
-    except Exception as e:
-        logger.exception("API error: %s", e)
+    except Exception:
         db.rollback()
-        return {"status": "error", "message": str(e)}
+        raise
 
 
 @router.put("/submissions/{sub_id}/review-content")
@@ -652,17 +648,16 @@ def api_update_review_content(
     except HTTPException:
         db.rollback()
         raise
-    except Exception as e:
-        logger.exception("API error: %s", e)
+    except Exception:
         db.rollback()
-        return {"status": "error", "message": str(e)}
+        raise
 
 @router.put("/submissions/{sub_id}/toggle_check")
 def api_toggle_check(sub_id: int, current_user: dict = Depends(get_reviewer_user), db: Session = Depends(get_db)):
     try:
         sub = SubmissionRepository(db).get(sub_id)
         if not sub:
-            return {"status": "error", "message": "Không tìm thấy hồ sơ."}
+            raise HTTPException(status_code=404, detail="Không tìm thấy hồ sơ.")
         ReviewWorkflowService.require_assigned_reviewer(sub, current_user, db)
         if sub.status != "pending_review":
             raise HTTPException(status_code=409, detail="Hồ sơ không ở trạng thái chờ duyệt")
@@ -674,10 +669,9 @@ def api_toggle_check(sub_id: int, current_user: dict = Depends(get_reviewer_user
     except HTTPException:
         db.rollback()
         raise
-    except Exception as e:
-        logger.exception("API error: %s", e)
+    except Exception:
         db.rollback()
-        return {"status": "error", "message": str(e)}
+        raise
 
 
 @router.put("/submissions/{sub_id}/reopen-review")
@@ -715,7 +709,7 @@ def api_update_errors(sub_id: int, req: ErrorSectionsRequest, current_user: dict
     try:
         sub = SubmissionRepository(db).get(sub_id)
         if not sub:
-            return {"status": "error", "message": "Không tìm thấy hồ sơ."}
+            raise HTTPException(status_code=404, detail="Không tìm thấy hồ sơ.")
         ReviewWorkflowService.require_assigned_reviewer(sub, current_user, db)
         if sub.status not in {"pending_review", "rejected"}:
             raise HTTPException(status_code=409, detail="Hồ sơ không ở trạng thái kiểm tra")
@@ -739,17 +733,16 @@ def api_update_errors(sub_id: int, req: ErrorSectionsRequest, current_user: dict
     except HTTPException:
         db.rollback()
         raise
-    except Exception as e:
-        logger.exception("API error: %s", e)
+    except Exception:
         db.rollback()
-        return {"status": "error", "message": str(e)}
+        raise
 
 @router.delete("/submissions/{sub_id}")
 def api_delete_submission(sub_id: int, current_user: dict = Depends(get_current_user), db: Session = Depends(get_db)):
     try:
         sub = SubmissionRepository(db).get(sub_id)
         if not sub:
-            return {"status": "error", "message": "Không tìm thấy hồ sơ."}
+            raise HTTPException(status_code=404, detail="Không tìm thấy hồ sơ.")
             
         is_assigned_reviewer = False
         if current_user["role"] != "admin":
@@ -763,10 +756,9 @@ def api_delete_submission(sub_id: int, current_user: dict = Depends(get_current_
     except HTTPException:
         db.rollback()
         raise
-    except Exception as e:
-        logger.exception("API error: %s", e)
+    except Exception:
         db.rollback()
-        return {"status": "error", "message": str(e)}
+        raise
 
 
 @router.post("/submissions/bulk-action")
@@ -791,22 +783,20 @@ def api_bulk_submission_action(
     except HTTPException:
         db.rollback()
         raise
-    except Exception as e:
-        logger.exception("API error: %s", e)
+    except Exception:
         db.rollback()
-        return {"status": "error", "message": str(e)}
+        raise
 
 @router.post("/submissions/{sub_id}/copy")
 def api_copy_submission(sub_id: int, current_user: dict = Depends(get_current_user), db: Session = Depends(get_db)):
     try:
         new_id = SubmissionService.copy_submission(db, sub_id, current_user)
         return {"status": "ok", "new_id": new_id}
-    except HTTPException as e:
-        raise e
-    except Exception as e:
-        logger.exception("API error: %s", e)
+    except HTTPException:
+        raise
+    except Exception:
         db.rollback()
-        return {"status": "error", "message": str(e)}
+        raise
 
 @router.get("/export")
 async def api_export(
@@ -872,8 +862,8 @@ async def api_export(
         return FileResponse(download_path, filename=download_filename)
     except HTTPException:
         raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Không thể xuất báo cáo: {e}")
+    except Exception:
+        raise
 
 
 @router.post("/export-jobs", status_code=202)
