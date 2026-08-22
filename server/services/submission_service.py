@@ -233,7 +233,7 @@ class SubmissionService:
         return enriched, document
 
     @staticmethod
-    def delete_submission(db: Session, sub_id: int, current_user: dict, is_assigned_reviewer: bool = False) -> None:
+    def delete_submission(db: Session, sub_id: int, current_user: dict) -> None:
         submission_repository = SubmissionRepository(db)
         sub = submission_repository.get(sub_id)
         if not sub:
@@ -243,7 +243,7 @@ class SubmissionService:
             is_creator = sub.created_by_user_id == current_user["id"]
             if is_creator and sub.status != "draft":
                 raise HTTPException(status_code=409, detail="Nhân viên chỉ có thể xóa hồ sơ đang lưu nháp")
-            if not is_creator and not is_assigned_reviewer:
+            if not is_creator:
                 raise HTTPException(status_code=403, detail="Bạn không có quyền xóa hồ sơ này")
 
         doc_id = sub.assigned_document_id

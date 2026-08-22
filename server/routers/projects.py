@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 
 from server.database import get_db
 from server.routers.auth import get_admin_user, get_current_user
+from server.routers.project_access import get_project_input_member
 from server.services.project_service import create_project, list_projects
 from server.services.project_admin_service import (
     delete_project,
@@ -171,7 +172,7 @@ def api_start_project_export_job(
 @router.get("/{project_id}/workspace")
 def api_get_project_workspace(
     project_id: int,
-    current_user: dict = Depends(get_current_user),
+    current_user: dict = Depends(get_project_input_member),
     db: Session = Depends(get_db),
 ):
     return {

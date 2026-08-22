@@ -738,20 +738,13 @@ def api_update_errors(sub_id: int, req: ErrorSectionsRequest, current_user: dict
         raise
 
 @router.delete("/submissions/{sub_id}")
-def api_delete_submission(sub_id: int, current_user: dict = Depends(get_current_user), db: Session = Depends(get_db)):
+def api_delete_submission(sub_id: int, current_user: dict = Depends(get_input_user), db: Session = Depends(get_db)):
     try:
         sub = SubmissionRepository(db).get(sub_id)
         if not sub:
             raise HTTPException(status_code=404, detail="Không tìm thấy hồ sơ.")
             
-        is_assigned_reviewer = False
-        if current_user["role"] != "admin":
-            is_assigned_reviewer = (
-                sub.status == "pending_review"
-                and ReviewWorkflowService.can_review_submission(sub, current_user, db)
-            )
-
-        SubmissionService.delete_submission(db, sub_id, current_user, is_assigned_reviewer)
+        SubmissionService.delete_submission(db, sub_id, current_user)
         return {"status": "ok"}
     except HTTPException:
         db.rollback()
@@ -788,7 +781,7 @@ def api_bulk_submission_action(
         raise
 
 @router.post("/submissions/{sub_id}/copy")
-def api_copy_submission(sub_id: int, current_user: dict = Depends(get_current_user), db: Session = Depends(get_db)):
+def api_copy_submission(sub_id: int, current_user: dict = Depends(get_input_user), db: Session = Depends(get_db)):
     try:
         new_id = SubmissionService.copy_submission(db, sub_id, current_user)
         return {"status": "ok", "new_id": new_id}

@@ -508,8 +508,6 @@ function renderAdminSubmissionsTable(data, tbodyId, isReviewTab, pagination = nu
                 actions += `<button class="btn btn-sm btn-outline-warning" onclick="reopenSubmissionReview(${safeId})" title="Chuyển hồ sơ đã duyệt về hàng chờ kiểm tra"><i class="fas fa-undo"></i> Về chờ duyệt</button>`;
             }
             actions += `<button class="btn btn-sm btn-outline-danger" onclick="deleteSubmission(${safeId})" title="Xóa hồ sơ"><i class="fas fa-trash"></i></button>`;
-        } else if (isReviewTab && sub.status === 'pending_review') {
-            actions += `<button class="btn btn-sm btn-outline-danger" onclick="deleteSubmission(${safeId})" title="Xóa báo cáo và trả PDF về cho người nhập"><i class="fas fa-trash"></i> Xóa</button>`;
         }
 
         tr.innerHTML = `
