@@ -9,9 +9,11 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
+from server.settings import settings
+
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
-EXPORT_SCRATCH_DIR = PROJECT_ROOT / "scratch"
+EXPORT_SCRATCH_DIR = settings.export_work_dir.resolve()
 EXPORT_LOCK_PATH = EXPORT_SCRATCH_DIR / "export_all.lock"
 _JOB_ID_PATTERN = re.compile(r"^[0-9a-f]{32}$")
 _ACTIVE_STATES = {"queued", "running"}

@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 import os
 import secrets
+import tempfile
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
@@ -48,6 +49,7 @@ class Settings:
     pdf_storage_path: Path
     template_storage_path: Path
     document_source_root: Path
+    export_work_dir: Path
     cors_origins: tuple[str, ...]
     db_pool_size: int
     db_max_overflow: int
@@ -91,6 +93,7 @@ class Settings:
             "PDF_STORAGE_PATH": _text(source, "PDF_STORAGE_PATH"),
             "TEMPLATE_STORAGE_PATH": _text(source, "TEMPLATE_STORAGE_PATH"),
             "DOCUMENT_SOURCE_ROOT": _text(source, "DOCUMENT_SOURCE_ROOT"),
+            "EXPORT_WORK_DIR": _text(source, "EXPORT_WORK_DIR"),
         }
         if is_production:
             missing = [name for name, value in storage_values.items() if not value]
@@ -113,6 +116,10 @@ class Settings:
             pdf_storage_path=Path(storage_values["PDF_STORAGE_PATH"] or "uploads"),
             template_storage_path=Path(storage_values["TEMPLATE_STORAGE_PATH"] or "templates"),
             document_source_root=Path(storage_values["DOCUMENT_SOURCE_ROOT"] or "source_documents"),
+            export_work_dir=Path(
+                storage_values["EXPORT_WORK_DIR"]
+                or Path(tempfile.gettempdir()) / "scan_to_excel" / "export_jobs"
+            ),
             cors_origins=cors_origins,
             db_pool_size=_positive_int(source, "DB_POOL_SIZE", 20),
             db_max_overflow=_positive_int(source, "DB_MAX_OVERFLOW", 10),
