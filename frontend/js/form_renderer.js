@@ -340,8 +340,8 @@ function _buildCategorySection(category, index, schema, config, draftData) {
 }
 
 function updatePdfLinkStateFromForm(linked) {
-    if (typeof isPdfLinked === 'undefined') return;
-    isPdfLinked = linked === true;
+    if (!window.pdfLinkState) return;
+    window.pdfLinkState.setLinked(linked);
     if (typeof updatePdfLinkUI === 'function') updatePdfLinkUI();
 }
 

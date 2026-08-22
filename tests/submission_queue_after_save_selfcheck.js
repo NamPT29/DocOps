@@ -20,7 +20,6 @@ const sandbox = {
     window: { reviewEditMode: false, activeTemplateId: 1 },
     currentEditingId: null,
     isEditingFromList: false,
-    isPdfLinked: true,
     iframeCurrentIndex: 0,
     uploadedFilesQueue: [
         { name: 'da-nhap.pdf', uuid: 'uuid-da-nhap.pdf', url: '/api/files/uuid-da-nhap.pdf' },
@@ -53,6 +52,8 @@ const sandbox = {
 };
 
 vm.createContext(sandbox);
+vm.runInContext(fs.readFileSync('frontend/js/pdf_link_state.js', 'utf8'), sandbox);
+vm.runInContext('window.pdfLinkState.setLinked(true)', sandbox);
 vm.runInContext(fs.readFileSync('frontend/js/submission.js', 'utf8'), sandbox);
 vm.runInContext(`
     clearTemporaryPdfView = function() {
@@ -79,7 +80,7 @@ vm.runInContext(`
 
     sandbox.uploadedFilesQueue = [{ name: 'cuoi-cung.pdf', uuid: 'uuid-cuoi-cung.pdf' }];
     sandbox.iframeCurrentIndex = 0;
-    sandbox.isPdfLinked = true;
+    sandbox.window.pdfLinkState.setLinked(true);
     vm.runInContext('removeLinkedPdfFromQueue(0)', sandbox);
     assert.equal(sandbox.uploadedFilesQueue.length, 0);
     assert.equal(sandbox.iframeCurrentIndex, -1);
@@ -88,8 +89,8 @@ vm.runInContext(`
 
     const employeeHtml = fs.readFileSync('frontend/index.html', 'utf8');
     const adminHtml = fs.readFileSync('frontend/admin.html', 'utf8');
-    assert(employeeHtml.includes('js/submission.js?v=100.00'));
-    assert(adminHtml.includes('js/submission.js?v=100.00'));
+    assert(employeeHtml.includes('js/submission.js?v=100.01'));
+    assert(adminHtml.includes('js/submission.js?v=100.01'));
     console.log('Submission queue after save self-check: OK');
 })().catch(error => {
     console.error(error);

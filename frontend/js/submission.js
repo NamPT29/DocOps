@@ -19,7 +19,7 @@ function removeLinkedPdfFromQueue(queueIndex) {
         placeholder.innerHTML = 'Đã hoàn thành toàn bộ tài liệu!';
     }
     if (iframe) iframe.style.display = 'none';
-    isPdfLinked = false;
+    window.pdfLinkState.setLinked(false);
     updatePdfLinkUI();
 }
 
@@ -67,7 +67,7 @@ async function submitData(targetStatus = 'draft') {
         });
         
         // Attach PDF filename if linked
-        if (isPdfLinked && iframeCurrentIndex >= 0 && iframeCurrentIndex < uploadedFilesQueue.length) {
+        if (window.pdfLinkState.isLinked() && iframeCurrentIndex >= 0 && iframeCurrentIndex < uploadedFilesQueue.length) {
             const linkedPdf = uploadedFilesQueue[iframeCurrentIndex];
             data['_pdf_filename'] = linkedPdf.name;
             if (linkedPdf.uuid) data['_pdf_uuid'] = linkedPdf.uuid;
@@ -80,7 +80,7 @@ async function submitData(targetStatus = 'draft') {
         
         const isEditing = currentEditingId !== null;
         const isReviewEdit = isEditing && window.reviewEditMode === true;
-        const linkedQueueIndex = isPdfLinked
+        const linkedQueueIndex = window.pdfLinkState.isLinked()
             && iframeCurrentIndex >= 0
             && iframeCurrentIndex < uploadedFilesQueue.length
             ? iframeCurrentIndex
@@ -260,8 +260,8 @@ function cancelEdit() {
     }
     
     if (typeof clearTemporaryPdfView === 'function') clearTemporaryPdfView();
-    if (isPdfLinked) {
-        isPdfLinked = false;
+    if (window.pdfLinkState.isLinked()) {
+        window.pdfLinkState.setLinked(false);
         updatePdfLinkUI();
     }
 }
@@ -290,7 +290,7 @@ function resetFormData(silent = false) {
     setSubmissionModeButtons(false);
     document.getElementById('cancelEditBtn').classList.add('d-none');
     
-    isPdfLinked = false;
+    window.pdfLinkState.setLinked(false);
     updatePdfLinkUI();
     
     // Remove drafting if it exists

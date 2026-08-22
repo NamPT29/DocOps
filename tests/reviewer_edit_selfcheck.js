@@ -23,7 +23,6 @@ const sandbox = {
     },
     currentEditingId: 71,
     isEditingFromList: true,
-    isPdfLinked: false,
     iframeCurrentIndex: -1,
     uploadedFilesQueue: [],
     document: {
@@ -49,6 +48,7 @@ const sandbox = {
 };
 
 vm.createContext(sandbox);
+vm.runInContext(fs.readFileSync('frontend/js/pdf_link_state.js', 'utf8'), sandbox);
 vm.runInContext(fs.readFileSync('frontend/js/submission.js', 'utf8'), sandbox);
 
 (async () => {

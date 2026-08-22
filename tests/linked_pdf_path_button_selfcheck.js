@@ -64,6 +64,7 @@ sandbox.globalThis = sandbox;
 vm.createContext(sandbox);
 
 const source = [
+    fs.readFileSync('frontend/js/pdf_link_state.js', 'utf8'),
     fs.readFileSync('frontend/js/pdf_handler.js', 'utf8'),
     fs.readFileSync('frontend/js/form_renderer.js', 'utf8'),
     `
@@ -71,7 +72,7 @@ const source = [
     let pdfLinkUiUpdates = 0;
     updatePdfLinkUI = () => { pdfLinkUiUpdates++; };
     activeDocumentRelativePath = 'du-an/ho-so/bao-cao.pdf';
-    isPdfLinked = false;
+    window.pdfLinkState.setLinked(false);
 
     const fieldGroup = _buildFieldGroup(
         { name: 'col_2', label: 'Đường dẫn PDF', col_index: 2 },
@@ -84,12 +85,12 @@ const source = [
 
     linkButton.listeners.click();
     assert.equal(pathInput.value, 'ho-so/bao-cao.pdf');
-    assert.equal(isPdfLinked, true, 'Lưu liên kết phải bật metadata PDF cho báo cáo');
+    assert.equal(window.pdfLinkState.isLinked(), true, 'Lưu liên kết phải bật metadata PDF cho báo cáo');
     assert.equal(pdfLinkUiUpdates, 1, 'Nhãn trạng thái PDF phải được đồng bộ sau khi liên kết');
 
     linkButton.listeners.click();
     assert.equal(pathInput.value, '');
-    assert.equal(isPdfLinked, false, 'Hủy liên kết phải bỏ metadata PDF khỏi báo cáo');
+    assert.equal(window.pdfLinkState.isLinked(), false, 'Hủy liên kết phải bỏ metadata PDF khỏi báo cáo');
     assert.equal(pdfLinkUiUpdates, 2, 'Nhãn trạng thái PDF phải được đồng bộ sau khi hủy');
     `,
 ].join('\n');

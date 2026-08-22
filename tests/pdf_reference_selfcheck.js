@@ -80,7 +80,8 @@ global.document = {};
 global.alert = message => { throw new Error(message); };
 global.assert = assert;
 
-const source = fs.readFileSync('frontend/js/pdf_handler.js', 'utf8') + `
+const source = fs.readFileSync('frontend/js/pdf_link_state.js', 'utf8')
+    + fs.readFileSync('frontend/js/pdf_handler.js', 'utf8') + `
 uploadedFilesQueue = [
     { name: 'duoc-giao.pdf', uuid: 'uuid-queue.pdf' },
     { name: 'xem-lai.pdf', uuid: 'uuid-temporary.pdf', temporary_view: true },

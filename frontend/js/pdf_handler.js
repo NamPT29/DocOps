@@ -107,7 +107,7 @@ function showEmptyPdfQueueState(message = 'Chưa có tài liệu trong hàng ch�
     activeDocumentRelativePath = null;
     activeDocumentFolderPath = null;
     activeQueueFolderKey = null;
-    isPdfLinked = false;
+    window.pdfLinkState.setLinked(false);
     const iframe = document.getElementById('pdfIframe');
     const placeholder = document.getElementById('pdfPlaceholder');
     if (iframe) iframe.style.display = 'none';
@@ -368,11 +368,10 @@ function renderFileQueue() {
 }
 
 
-let isPdfLinked = false;
 let isEditingFromList = false;
 
 function togglePdfLink() {
-    isPdfLinked = !isPdfLinked;
+    window.pdfLinkState.toggle();
     updatePdfLinkUI();
 }
 
@@ -383,7 +382,7 @@ function updatePdfLinkUI() {
     const folderText = document.getElementById('folderLinkText');
     if (!btn || !text) return;
     
-    if (isPdfLinked) {
+    if (window.pdfLinkState.isLinked()) {
         btn.classList.remove('btn-outline-secondary');
         btn.classList.add('btn-success');
         text.innerText = 'Đã liên kết PDF';
@@ -449,7 +448,7 @@ async function selectFileFromQueue(index, { allowSubmissionNavigation = true } =
     // Switching the reference PDF must not erase in-progress form data.
     setActiveDocumentRelativePath(file.relative_path || null, templateChanged);
     // Tự động liên kết file PDF này với form đang nhập
-    isPdfLinked = true;
+    window.pdfLinkState.setLinked(true);
     updatePdfLinkUI();
     renderFileQueue();
     
@@ -635,7 +634,7 @@ function addFileToQueueAndSelect(attachedPdf, attachedPdfUuid, attachedPdfUrl, m
     }
     
     selectFileFromQueue(fileIndex);
-    isPdfLinked = true;
+    window.pdfLinkState.setLinked(true);
 }
 
 function loadReviewFolderFiles(folderFiles, selectedUuid) {
@@ -688,6 +687,6 @@ function loadReviewFolderFiles(folderFiles, selectedUuid) {
     renderFileQueue();
     saveQueueState();
     selectFileFromQueue(displayIndex, { allowSubmissionNavigation: false });
-    isPdfLinked = selectedIndex >= 0;
+    window.pdfLinkState.setLinked(selectedIndex >= 0);
     return true;
 }

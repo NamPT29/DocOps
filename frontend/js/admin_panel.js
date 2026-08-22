@@ -880,7 +880,7 @@ async function editSubmission(id, isCopied = false) {
             temporary_view: true,
         });
     } else {
-        isPdfLinked = false;
+        window.pdfLinkState.setLinked(false);
     }
 }
 
