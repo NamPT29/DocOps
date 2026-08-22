@@ -9,6 +9,8 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
+from server.logging_config import request_log_context
+
 
 logger = logging.getLogger("server")
 
@@ -94,15 +96,21 @@ async def unhandled_exception_handler(
     request: Request,
     exc: Exception,
 ) -> JSONResponse:
+    log_context = request_log_context(request.scope, status_code=500)
     logger.error(
         "Unhandled exception: %s %s",
         request.method,
         request.url.path,
         exc_info=exc,
+        extra=log_context,
     )
+    response_headers = {}
+    if log_context["request_id"] != "-":
+        response_headers["X-Request-ID"] = str(log_context["request_id"])
     return JSONResponse(
         status_code=500,
         content=_error_content("Lỗi máy chủ nội bộ"),
+        headers=response_headers,
     )
 
 

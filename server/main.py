@@ -1,6 +1,5 @@
 import os
 import logging
-import logging.handlers
 from pathlib import Path
 from fastapi import FastAPI, HTTPException
 from fastapi.staticfiles import StaticFiles
@@ -12,46 +11,10 @@ from dotenv import load_dotenv
 load_dotenv()
 from server.settings import settings
 from server.api_errors import API_ERROR_RESPONSES, register_exception_handlers
+from server.logging_config import RequestLoggingMiddleware, configure_logging
 from server.security_headers import SecurityHeadersMiddleware
 
-# ---------------------------------------------------------------------------
-# Logging configuration
-# ---------------------------------------------------------------------------
-LOG_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "logs")
-os.makedirs(LOG_DIR, exist_ok=True)
-
-# Root logger — captures all loggers (uvicorn, sqlalchemy, app routers, etc.)
-root_logger = logging.getLogger()
-root_logger.setLevel(logging.INFO)
-
-# Formatter with timestamp, level, module, and message
-_fmt = logging.Formatter(
-    "%(asctime)s | %(levelname)-8s | %(name)s:%(funcName)s:%(lineno)d | %(message)s",
-    datefmt="%Y-%m-%d %H:%M:%S",
-)
-
-# File handler — ERROR+ only, rotates at 5 MB, keeps 5 backups
-_error_file = logging.handlers.RotatingFileHandler(
-    os.path.join(LOG_DIR, "error.log"),
-    maxBytes=5 * 1024 * 1024,
-    backupCount=5,
-    encoding="utf-8",
-)
-_error_file.setLevel(logging.ERROR)
-_error_file.setFormatter(_fmt)
-root_logger.addHandler(_error_file)
-
-# File handler — ALL levels, for full audit trail
-_all_file = logging.handlers.RotatingFileHandler(
-    os.path.join(LOG_DIR, "app.log"),
-    maxBytes=10 * 1024 * 1024,
-    backupCount=3,
-    encoding="utf-8",
-)
-_all_file.setLevel(logging.INFO)
-_all_file.setFormatter(_fmt)
-root_logger.addHandler(_all_file)
-
+configure_logging()
 logger = logging.getLogger("server")
 
 # Initialize database
@@ -95,8 +58,10 @@ app.add_middleware(
     allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["X-Request-ID"],
 )
 app.add_middleware(SecurityHeadersMiddleware)
+app.add_middleware(RequestLoggingMiddleware, secret_key=settings.secret_key)
 
 # Include routers
 from server.routers import auth, templates, tasks, submissions, documents, processing, dictionaries, notifications, projects, project_uploads
