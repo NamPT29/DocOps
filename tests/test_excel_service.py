@@ -10,7 +10,12 @@ from openpyxl import Workbook
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from starlette.datastructures import UploadFile
 from server.routers import templates
-from server.services.excel_service import export_submissions_to_excel, get_form_schema, get_ma_xa_mapping
+from server.services.excel_service import (
+    ExcelExportError,
+    export_submissions_to_excel,
+    get_form_schema,
+    get_ma_xa_mapping,
+)
 
 
 def test_get_form_schema_only_applies_admin_dictionary_config(mocker):
@@ -146,6 +151,32 @@ def test_export_uses_detected_sheet_and_data_start(mocker):
 
     workbook.__getitem__.assert_called_once_with('tmp')
     worksheet.delete_rows.assert_called_once_with(6, 1)
+
+
+def test_export_closes_workbook_when_submission_data_is_invalid(mocker):
+    mocker.patch(
+        'server.services.excel_service._detect_excel_layout',
+        return_value=('Data', [0, 1, 2, 3]),
+    )
+    mocker.patch('server.services.excel_service.shutil.copy')
+    workbook = MagicMock()
+    worksheet = MagicMock()
+    worksheet.max_row = 4
+    worksheet.max_column = 1
+    workbook.__getitem__.return_value = worksheet
+    mocker.patch(
+        'server.services.excel_service.openpyxl.load_workbook',
+        return_value=workbook,
+    )
+
+    with pytest.raises(ExcelExportError, match='Không thể tạo file Excel'):
+        export_submissions_to_excel(
+            'template.xlsx',
+            [MagicMock(data_json='{invalid-json')],
+            'report.xlsx',
+        )
+
+    workbook.close.assert_called_once_with()
 
 
 def test_export_keeps_original_excel_columns_when_an_input_column_is_absent(tmp_path):

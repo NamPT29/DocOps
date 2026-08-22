@@ -1,9 +1,21 @@
 import pandas as pd
 import os
 import json
+import logging
 import shutil
 import openpyxl
 from copy import copy
+
+
+logger = logging.getLogger(__name__)
+
+
+class ExcelTemplateError(ValueError):
+    """The workbook cannot be interpreted as an input form."""
+
+
+class ExcelExportError(RuntimeError):
+    """The workbook or submission data cannot be exported safely."""
 
 
 def _detect_excel_layout(excel_path):
@@ -59,8 +71,10 @@ def _load_excel_headers(excel_path):
             nrows=0,
         )
         return sheet_name, df_head
-    except Exception as e:
-        raise ValueError(f"Không thể tự nhận diện biểu mẫu Excel: {e}") from e
+    except Exception as exc:
+        raise ExcelTemplateError(
+            f"Không thể tự nhận diện biểu mẫu Excel: {exc}"
+        ) from exc
 
 def _build_field_schema(col_idx, levels, is_legacy_data_sheet, config, dicts):
     levels = [str(value).strip() for value in levels]
@@ -269,8 +283,8 @@ def get_ma_xa_mapping(excel_path):
             "mapping_3_cap": mapping_3_cap,
             "mapping_2_cap": mapping_2_cap
         }
-    except Exception as e:
-        print(f"Error loading MaXa mapping: {e}")
+    except Exception:
+        logger.warning("Không thể đọc mapping mã xã từ %s", excel_path, exc_info=True)
         return {"mapping_3_cap": {}, "mapping_2_cap": {}}
 
 def get_don_vi_do_mapping(excel_path):
@@ -298,8 +312,12 @@ def get_don_vi_do_mapping(excel_path):
                 if ngay.replace('.', '', 1).isdigit():
                     try:
                         ngay = pd.to_datetime(float(ngay), origin='1899-12-30', unit='D').strftime("%d/%m/%Y")
-                    except:
-                        pass
+                    except (TypeError, ValueError, OverflowError):
+                        logger.debug(
+                            "Giá trị ngày đo đạc không hợp lệ: %r",
+                            ngay,
+                            exc_info=True,
+                        )
             else:
                 ngay = ""
 
@@ -312,8 +330,12 @@ def get_don_vi_do_mapping(excel_path):
                     "ngay_hoan_thanh": ngay
                 }
         return mapping
-    except Exception as e:
-        print(f"Error reading QNH_ThongTinDoDac: {e}")
+    except Exception:
+        logger.warning(
+            "Không thể đọc mapping đơn vị đo từ %s",
+            excel_path,
+            exc_info=True,
+        )
         return {}
 
 def export_submissions_to_excel(template_file_path: str, submissions: list, download_path: str):
@@ -321,56 +343,64 @@ def export_submissions_to_excel(template_file_path: str, submissions: list, down
     Exports a list of submissions into a provided Excel template.
     Returns the path to the exported file.
     """
-    sheet_name, header_rows = _detect_excel_layout(template_file_path)
-    shutil.copy(template_file_path, download_path)
-    keep_vba = os.path.splitext(template_file_path)[1].lower() == '.xlsm'
-    wb = openpyxl.load_workbook(download_path, keep_vba=keep_vba)
-    
-    ws = wb[sheet_name]
-    data_start_row = max(header_rows) + 2
+    workbook = None
+    try:
+        sheet_name, header_rows = _detect_excel_layout(template_file_path)
+        shutil.copy(template_file_path, download_path)
+        keep_vba = os.path.splitext(template_file_path)[1].lower() == '.xlsm'
+        workbook = openpyxl.load_workbook(download_path, keep_vba=keep_vba)
 
-    # Capture only the cell frames before deleting sample/old data. Exported
-    # values should use Excel's default font/fill/alignment/number format while
-    # retaining the border layout designed by the template. Header rows above
-    # data_start_row remain untouched.
-    template_column_count = ws.max_column
-    template_borders = [
-        copy(ws.cell(data_start_row, column).border)
-        for column in range(1, template_column_count + 1)
-    ]
+        worksheet = workbook[sheet_name]
+        data_start_row = max(header_rows) + 2
 
-    if ws.max_row >= data_start_row:
-        ws.delete_rows(data_start_row, ws.max_row - data_start_row + 1)
-    
-    def process_value(idx, val):
-        if val and " - " in str(val):
-            parts = str(val).split(" - ", 1)
-            if len(parts) == 2 and parts[0].strip().isdigit():
-                val = parts[0].strip()
-        
-        return val
-        
-    for row_offset, sub in enumerate(submissions):
-        data_dict = json.loads(sub.data_json)
-        target_row = data_start_row + row_offset
+        # Capture only the cell frames before deleting sample/old data. Exported
+        # values should use Excel's default font/fill/alignment/number format while
+        # retaining the border layout designed by the template. Header rows above
+        # data_start_row remain untouched.
+        template_column_count = worksheet.max_column
+        template_borders = [
+            copy(worksheet.cell(data_start_row, column).border)
+            for column in range(1, template_column_count + 1)
+        ]
 
-        for column, cell_border in enumerate(template_borders, start=1):
-            ws.cell(target_row, column).border = copy(cell_border)
-        target_dimension = ws.row_dimensions[target_row]
-        target_dimension.height = None
-        target_dimension.hidden = False
-        target_dimension.outlineLevel = 0
-        target_dimension.collapsed = False
+        if worksheet.max_row >= data_start_row:
+            worksheet.delete_rows(
+                data_start_row,
+                worksheet.max_row - data_start_row + 1,
+            )
 
-        for key, value in data_dict.items():
-            if key.startswith('col_'):
-                idx = int(key.split('_')[1])
-                ws.cell(
-                    row=target_row,
-                    column=idx + 1,
-                    value=process_value(idx, value),
-                )
-        
-    wb.save(download_path)
-    wb.close()
-    return download_path
+        def process_value(_index, value):
+            if value and " - " in str(value):
+                parts = str(value).split(" - ", 1)
+                if len(parts) == 2 and parts[0].strip().isdigit():
+                    value = parts[0].strip()
+            return value
+
+        for row_offset, submission in enumerate(submissions):
+            data_dict = json.loads(submission.data_json)
+            target_row = data_start_row + row_offset
+
+            for column, cell_border in enumerate(template_borders, start=1):
+                worksheet.cell(target_row, column).border = copy(cell_border)
+            target_dimension = worksheet.row_dimensions[target_row]
+            target_dimension.height = None
+            target_dimension.hidden = False
+            target_dimension.outlineLevel = 0
+            target_dimension.collapsed = False
+
+            for key, value in data_dict.items():
+                if key.startswith('col_'):
+                    column_index = int(key.split('_')[1])
+                    worksheet.cell(
+                        row=target_row,
+                        column=column_index + 1,
+                        value=process_value(column_index, value),
+                    )
+
+        workbook.save(download_path)
+        return download_path
+    except (KeyError, OSError, TypeError, ValueError) as exc:
+        raise ExcelExportError(f"Không thể tạo file Excel: {exc}") from exc
+    finally:
+        if workbook is not None:
+            workbook.close()

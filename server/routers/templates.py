@@ -6,7 +6,12 @@ from sqlalchemy.orm import Session
 from server.database import get_db
 from server.models import Template
 from server.routers.auth import get_admin_user
-from server.services.excel_service import get_form_schema, get_ma_xa_mapping, get_don_vi_do_mapping
+from server.services.excel_service import (
+    ExcelTemplateError,
+    get_don_vi_do_mapping,
+    get_form_schema,
+    get_ma_xa_mapping,
+)
 from server.services.upload_service import save_validated_upload
 from server.repositories import DictionaryRepository, TemplateRepository
 
@@ -93,7 +98,10 @@ async def get_template_schema(template_id: int, db: Session = Depends(get_db)):
             
     # Load dictionaries from DB. Unexpected failures are handled centrally.
     dicts = DictionaryRepository(db).option_map_for_template(template_id)
-    schema = await run_in_threadpool(get_form_schema, file_path, dicts, config)
+    try:
+        schema = await run_in_threadpool(get_form_schema, file_path, dicts, config)
+    except ExcelTemplateError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     return {"status": "ok", "data": schema, "config": config}
 
 @router.get("/{template_id}/maxa_mapping")
