@@ -2,7 +2,7 @@ import hashlib
 
 import pytest
 from fastapi import HTTPException
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, event
 from sqlalchemy.orm import sessionmaker
 
 from server.database import Base
@@ -16,6 +16,7 @@ from server.models import (
     ProjectDocumentAsset,
     ProjectMember,
     ProjectReportUnit,
+    ProjectUploadFile,
     ProjectUploadSession,
     Template,
     User,
@@ -117,6 +118,44 @@ def test_create_session_requests_only_new_or_changed_files_and_is_idempotent(dat
             raw_items=[raw_item("001/other.pdf", b"%PDF-other")],
         )
     assert conflict.value.status_code == 409
+
+
+def test_create_session_flush_count_does_not_scale_with_file_count(database):
+    db, _ = database
+    admin, project = seed_project(db, report_mode="pdf")
+    flush_count = 0
+
+    def count_flushes(*_args):
+        nonlocal flush_count
+        flush_count += 1
+
+    event.listen(db, "before_flush", count_flushes)
+    try:
+        session = create_or_resume_upload_session(
+            db,
+            project_id=project.id,
+            created_by_user_id=admin.id,
+            client_session_key="batch-flush",
+            raw_items=[
+                raw_item(f"001/report-{index:03d}.pdf", f"%PDF-{index}".encode())
+                for index in range(25)
+            ],
+        )
+    finally:
+        event.remove(db, "before_flush", count_flushes)
+
+    assert session["requested_files"] == 25
+    assert flush_count == 2
+    upload_files = (
+        db.query(ProjectUploadFile)
+        .filter(ProjectUploadFile.session_id == session["id"])
+        .all()
+    )
+    assert len(upload_files) == 25
+    assert all(
+        item.staging_filename == f"{item.id}-{item.expected_sha256}.part"
+        for item in upload_files
+    )
 
 
 def test_chunk_upload_supports_resume_and_idempotent_retry(database):

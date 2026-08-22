@@ -142,7 +142,7 @@ def create_or_resume_upload_session(
         requested_files=len(required_items),
     )
     db.add(session)
-    db.flush()
+    upload_files = []
     for item in required_items:
         upload_file = ProjectUploadFile(
             session_id=session.id,
@@ -156,8 +156,11 @@ def create_or_resume_upload_session(
                 else None
             ),
         )
-        db.add(upload_file)
-        db.flush()
+        upload_files.append(upload_file)
+
+    db.add_all(upload_files)
+    db.flush()
+    for upload_file in upload_files:
         upload_file.staging_filename = f"{upload_file.id}-{upload_file.expected_sha256}.part"
     project.status = "importing" if required_items else project.status
     db.commit()
