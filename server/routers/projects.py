@@ -21,6 +21,7 @@ from server.services.export_job_service import (
     public_export_job,
     start_export_job,
 )
+from server.services.api_rate_limit_service import enforce_heavy_api_rate_limit
 from server.services.project_reporting_service import (
     get_project_or_404,
     get_project_submissions,
@@ -148,6 +149,7 @@ def api_start_project_export_job(
     current_user: dict = Depends(get_admin_user),
     db: Session = Depends(get_db),
 ):
+    enforce_heavy_api_rate_limit("project-export", current_user["id"], cost=30)
     project = get_project_or_404(db, project_id)
     snapshot_path = resolve_project_template_path(project)
     try:

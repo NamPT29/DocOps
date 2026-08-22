@@ -20,6 +20,16 @@ class UserCapability(Base):
     updated_at = Column(DateTime, nullable=False, default=get_utc_now)
 
 
+class ApiRateLimitBucket(Base):
+    """Shared fixed-window counters used by all API worker processes."""
+
+    __tablename__ = "api_rate_limit_buckets"
+
+    bucket_key = Column(String(64), primary_key=True)
+    request_count = Column(Integer, nullable=False, default=0)
+    expires_at = Column(DateTime, nullable=False, index=True)
+
+
 class Notification(Base):
     __tablename__ = "notifications"
 

@@ -30,6 +30,8 @@ def test_development_settings_keep_compatible_defaults():
         Path(tempfile.gettempdir()) / "scan_to_excel" / "export_jobs"
     )
     assert configured.document_upload_max_bytes == 100 * 1024 * 1024
+    assert configured.heavy_api_rate_limit == 240
+    assert configured.heavy_api_rate_window_seconds == 60
 
 
 @pytest.mark.parametrize(

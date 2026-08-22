@@ -10,6 +10,7 @@ from server.services.project_upload_service import (
     get_upload_session,
     write_upload_chunk,
 )
+from server.services.api_rate_limit_service import enforce_heavy_api_rate_limit
 
 
 router = APIRouter(tags=["project-uploads"])
@@ -34,6 +35,7 @@ def api_create_project_upload_session(
     current_user: dict = Depends(get_admin_user),
     db: Session = Depends(get_db),
 ):
+    enforce_heavy_api_rate_limit("project-upload-session", current_user["id"], cost=5)
     return {
         "status": "ok",
         "session": create_or_resume_upload_session(
@@ -72,6 +74,7 @@ async def api_upload_project_file_chunk(
     current_user: dict = Depends(get_admin_user),
     db: Session = Depends(get_db),
 ):
+    enforce_heavy_api_rate_limit("project-upload-chunk", current_user["id"])
     chunk = await request.body()
     return write_upload_chunk(
         db,
@@ -88,6 +91,7 @@ def api_finalize_project_upload_session(
     current_user: dict = Depends(get_admin_user),
     db: Session = Depends(get_db),
 ):
+    enforce_heavy_api_rate_limit("project-upload-finalize", current_user["id"], cost=10)
     return {
         "status": "ok",
         "session": finalize_upload_session(db, session_id=session_id),

@@ -46,6 +46,7 @@ from server.services.export_job_service import (
     read_export_job,
     start_export_job,
 )
+from server.services.api_rate_limit_service import enforce_heavy_api_rate_limit
 from server.utils.folder_utils import (
     NO_FOLDER_SENTINEL,
     normalize_folder_path,
@@ -869,6 +870,7 @@ def api_start_export_job(
     current_user: dict = Depends(get_admin_user),
     db: Session = Depends(get_db),
 ):
+    enforce_heavy_api_rate_limit("submission-export", current_user["id"], cost=30)
     template = LookupRepository(db).get_template(template_id)
     if not template:
         raise HTTPException(status_code=404, detail="Không tìm thấy template mẫu.")

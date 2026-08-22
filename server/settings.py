@@ -58,6 +58,8 @@ class Settings:
     document_upload_max_bytes: int
     login_max_failures: int
     login_failure_window_seconds: int
+    heavy_api_rate_limit: int
+    heavy_api_rate_window_seconds: int
 
     @property
     def is_production(self) -> bool:
@@ -135,6 +137,12 @@ class Settings:
                 source,
                 "LOGIN_FAILURE_WINDOW_SECONDS",
                 15 * 60,
+            ),
+            heavy_api_rate_limit=_positive_int(source, "HEAVY_API_RATE_LIMIT", 240),
+            heavy_api_rate_window_seconds=_positive_int(
+                source,
+                "HEAVY_API_RATE_WINDOW_SECONDS",
+                60,
             ),
         )
 
