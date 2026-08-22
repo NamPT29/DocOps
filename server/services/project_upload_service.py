@@ -142,6 +142,10 @@ def create_or_resume_upload_session(
         requested_files=len(required_items),
     )
     db.add(session)
+    # ProjectUploadFile only stores the foreign-key value; no ORM relationship
+    # links it to the pending parent object. Flush the parent first so databases
+    # that enforce foreign keys never insert child rows ahead of the session.
+    db.flush()
     upload_files = []
     for item in required_items:
         upload_file = ProjectUploadFile(

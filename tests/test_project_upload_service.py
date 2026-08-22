@@ -35,6 +35,11 @@ def database(tmp_path, monkeypatch):
         f"sqlite:///{(tmp_path / 'project-upload.sqlite3').as_posix()}",
         connect_args={"check_same_thread": False},
     )
+
+    @event.listens_for(engine, "connect")
+    def enforce_sqlite_foreign_keys(dbapi_connection, _connection_record):
+        dbapi_connection.execute("PRAGMA foreign_keys=ON")
+
     Base.metadata.create_all(bind=engine)
     db = sessionmaker(bind=engine)()
     monkeypatch.setenv("PDF_STORAGE_PATH", str(tmp_path / "uploads"))
@@ -145,7 +150,7 @@ def test_create_session_flush_count_does_not_scale_with_file_count(database):
         event.remove(db, "before_flush", count_flushes)
 
     assert session["requested_files"] == 25
-    assert flush_count == 2
+    assert flush_count == 3
     upload_files = (
         db.query(ProjectUploadFile)
         .filter(ProjectUploadFile.session_id == session["id"])
