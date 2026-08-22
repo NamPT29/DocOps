@@ -32,6 +32,7 @@ def test_development_settings_keep_compatible_defaults():
     assert configured.document_upload_max_bytes == 100 * 1024 * 1024
     assert configured.heavy_api_rate_limit == 240
     assert configured.heavy_api_rate_window_seconds == 60
+    assert configured.dictionary_cache_ttl_seconds == 30
 
 
 @pytest.mark.parametrize(
@@ -66,4 +67,12 @@ def test_numeric_security_limits_must_be_positive():
     environment["DOCUMENT_UPLOAD_MAX_BYTES"] = "0"
 
     with pytest.raises(RuntimeError, match="DOCUMENT_UPLOAD_MAX_BYTES"):
+        Settings.from_env(environment)
+
+
+def test_dictionary_cache_ttl_must_be_positive():
+    environment = production_environment()
+    environment["DICTIONARY_CACHE_TTL_SECONDS"] = "0"
+
+    with pytest.raises(RuntimeError, match="DICTIONARY_CACHE_TTL_SECONDS"):
         Settings.from_env(environment)

@@ -60,6 +60,7 @@ class Settings:
     login_failure_window_seconds: int
     heavy_api_rate_limit: int
     heavy_api_rate_window_seconds: int
+    dictionary_cache_ttl_seconds: int
 
     @property
     def is_production(self) -> bool:
@@ -143,6 +144,11 @@ class Settings:
                 source,
                 "HEAVY_API_RATE_WINDOW_SECONDS",
                 60,
+            ),
+            dictionary_cache_ttl_seconds=_positive_int(
+                source,
+                "DICTIONARY_CACHE_TTL_SECONDS",
+                30,
             ),
         )
 

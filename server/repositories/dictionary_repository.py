@@ -1,17 +1,29 @@
 from sqlalchemy import event
 from cachetools import TTLCache
+from threading import RLock
 
 from server.models import Dictionary, DictionaryItem
 from server.repositories.base import BaseRepository
+from server.settings import settings
 
 
-_OPTION_MAP_CACHE = TTLCache(maxsize=100, ttl=3600)
+_OPTION_MAP_CACHE = TTLCache(
+    maxsize=100,
+    ttl=settings.dictionary_cache_ttl_seconds,
+)
+_OPTION_MAP_CACHE_LOCK = RLock()
+
+
+def _copy_option_map(options: dict[str, list[str]]) -> dict[str, list[str]]:
+    return {name: list(values) for name, values in options.items()}
 
 def _invalidate_cache(mapper, connection, target):
-    if isinstance(target, Dictionary):
-        _OPTION_MAP_CACHE.pop(target.template_id, None)
-    elif isinstance(target, DictionaryItem):
-        _OPTION_MAP_CACHE.clear()
+    del mapper, connection
+    with _OPTION_MAP_CACHE_LOCK:
+        if isinstance(target, Dictionary):
+            _OPTION_MAP_CACHE.pop(target.template_id, None)
+        elif isinstance(target, DictionaryItem):
+            _OPTION_MAP_CACHE.clear()
 
 event.listen(Dictionary, 'after_insert', _invalidate_cache)
 event.listen(Dictionary, 'after_update', _invalidate_cache)
@@ -63,8 +75,10 @@ class DictionaryRepository(BaseRepository[Dictionary]):
         self.session.delete(item)
 
     def option_map_for_template(self, template_id: int) -> dict[str, list[str]]:
-        if template_id in _OPTION_MAP_CACHE:
-            return _OPTION_MAP_CACHE[template_id]
+        with _OPTION_MAP_CACHE_LOCK:
+            cached = _OPTION_MAP_CACHE.get(template_id)
+            if cached is not None:
+                return _copy_option_map(cached)
 
         rows = self.session.query(Dictionary, DictionaryItem).outerjoin(
             DictionaryItem,
@@ -82,5 +96,6 @@ class DictionaryRepository(BaseRepository[Dictionary]):
                 f"{item.code} - {item.value}" if item.code else item.value
             )
             
-        _OPTION_MAP_CACHE[template_id] = options
-        return options
+        with _OPTION_MAP_CACHE_LOCK:
+            _OPTION_MAP_CACHE[template_id] = _copy_option_map(options)
+        return _copy_option_map(options)
