@@ -2,15 +2,16 @@ import os
 import logging
 import logging.handlers
 from pathlib import Path
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse, JSONResponse, Response
+from fastapi.responses import FileResponse, Response
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
 
 # Environment-backed settings must be available before database/auth modules import.
 load_dotenv()
 from server.settings import settings
+from server.api_errors import API_ERROR_RESPONSES, register_exception_handlers
 from server.security_headers import SecurityHeadersMiddleware
 
 # ---------------------------------------------------------------------------
@@ -84,25 +85,8 @@ def seed_default_template():
 
 seed_default_template()
 
-app = FastAPI(title="Số hóa All in One")
-
-# ---------------------------------------------------------------------------
-# Global exception handler — catches any unhandled error in API endpoints
-# ---------------------------------------------------------------------------
-@app.exception_handler(Exception)
-async def _global_exception_handler(request: Request, exc: Exception):
-    if isinstance(exc, HTTPException):
-        raise exc
-    logger.error(
-        "Unhandled exception: %s %s",
-        request.method,
-        request.url.path,
-        exc_info=exc,
-    )
-    return JSONResponse(
-        status_code=500,
-        content={"status": "error", "message": "Lỗi máy chủ nội bộ"},
-    )
+app = FastAPI(title="Số hóa All in One", responses=API_ERROR_RESPONSES)
+register_exception_handlers(app)
 
 cors_origins = list(settings.cors_origins)
 app.add_middleware(
