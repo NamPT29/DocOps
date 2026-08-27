@@ -21,8 +21,12 @@ def resolve_host_data_root(
     if configured:
         return Path(configured)
 
+    # The packaged host is installed per-user and runs without elevation, so its
+    # writable state belongs in LOCALAPPDATA. PROGRAMDATA remains a fallback for
+    # service-style deployments and can always be selected explicitly through
+    # SCAN_TO_EXCEL_DATA_DIR.
     base_directory = str(
-        source.get("PROGRAMDATA") or source.get("LOCALAPPDATA") or ""
+        source.get("LOCALAPPDATA") or source.get("PROGRAMDATA") or ""
     ).strip()
     if not base_directory:
         raise RuntimeError(

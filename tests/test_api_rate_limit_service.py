@@ -8,7 +8,7 @@ from sqlalchemy.orm import sessionmaker
 from server.database import Base
 from server.models import ApiRateLimitBucket
 from server.routers import submissions
-from server.services.api_rate_limit_service import DatabaseRateLimiter
+from server.services.api_rate_limit_service import DatabaseRateLimiter, InMemoryRateLimiter
 
 
 def test_database_rate_limiter_shares_counters_between_workers():
@@ -53,6 +53,18 @@ def test_database_rate_limiter_keeps_scopes_independent():
     assert limiter.consume("upload", "user:9") == 30
 
     engine.dispose()
+
+
+def test_in_memory_rate_limiter_avoids_database_and_resets_each_window():
+    now = [100.0]
+    limiter = InMemoryRateLimiter(2, 10, clock=lambda: now[0])
+
+    assert limiter.consume("project-upload", "user:7") == 0
+    assert limiter.consume("project-upload", "user:7") == 0
+    assert limiter.consume("project-upload", "user:7") == 10
+
+    now[0] = 111.0
+    assert limiter.consume("project-upload", "user:7") == 0
 
 
 def test_submission_export_consumes_heavy_rate_limit_before_work(monkeypatch):

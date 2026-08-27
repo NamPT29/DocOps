@@ -1,4 +1,5 @@
 from server.services.review_workflow_service import ReviewWorkflowService
+import logging
 import os
 import json
 import uuid
@@ -47,6 +48,7 @@ from server.services.export_job_service import (
     start_export_job,
 )
 from server.services.api_rate_limit_service import enforce_heavy_api_rate_limit
+from server.services.submission_quality_service import SubmissionQualityService
 from server.utils.folder_utils import (
     NO_FOLDER_SENTINEL,
     normalize_folder_path,
@@ -54,6 +56,7 @@ from server.utils.folder_utils import (
 from fastapi import HTTPException
 
 router = APIRouter(prefix="/api", tags=["submissions"])
+logger = logging.getLogger(__name__)
 PDF_STORAGE_PATH = str(settings.pdf_storage_path)
 DOCUMENT_UPLOAD_MAX_BYTES = settings.document_upload_max_bytes
 COMPLETED_WITHOUT_FOLDER = NO_FOLDER_SENTINEL
@@ -74,15 +77,14 @@ class SubmitRequest(BaseModel):
     data: dict
     status: Optional[Literal["draft", "pending_review"]] = None
     sync_cover: Optional[bool] = False
+    copy_source_submission_id: Optional[int] = None
 
 class ErrorSectionsRequest(BaseModel):
     wrong_sections: list[str]
-    wrong_fields: Optional[list[str]] = None
 
 
 class ReviewContentRequest(BaseModel):
     data: dict
-    wrong_fields: Optional[list[str]] = None
 
 
 
@@ -104,6 +106,14 @@ def api_submit(req: SubmitRequest, current_user: dict = Depends(get_input_user),
         repository = SubmissionRepository(db)
         data_dict, document = SubmissionService.enrich_pdf_reference(
             req.data, db, current_user["id"], pending_only=True
+        )
+        SubmissionService.validate_copy_submission(
+            source_submission_id=req.copy_source_submission_id,
+            target_data=data_dict,
+            target_document=document,
+            template_id=req.template_id,
+            current_user=current_user,
+            db=db,
         )
         sub = Submission(
             data_json=json.dumps(data_dict, ensure_ascii=False),
@@ -468,13 +478,18 @@ def api_get_next_review_submission(
 @router.get("/submissions/{sub_id}")
 def api_get_submission(sub_id: int, current_user: dict = Depends(get_current_user), db: Session = Depends(get_db)):
     try:
-        sub = SubmissionRepository(db).get(sub_id)
+        repository = SubmissionRepository(db)
+        sub = repository.get(sub_id)
         if not sub:
             raise HTTPException(status_code=404, detail="Không tìm thấy hồ sơ.")
         can_review = ReviewWorkflowService.can_review_submission(sub, current_user, db)
+        is_active_input = (
+            current_user["role"] != "admin"
+            and repository.is_active_input_assignee(sub, current_user["id"])
+        )
         if (
             current_user["role"] != "admin"
-            and sub.created_by_user_id != current_user["id"]
+            and not is_active_input
             and not can_review
         ):
             raise HTTPException(status_code=403, detail="Không có quyền truy cập hồ sơ này.")
@@ -484,18 +499,32 @@ def api_get_submission(sub_id: int, current_user: dict = Depends(get_current_use
             sub.created_by_user_id,
             allow_unregistered=True,
         )
-        return {
+        quality = (
+            SubmissionQualityService.detail_for_input_user(
+                sub,
+                current_user["id"],
+                db,
+                mark_seen=True,
+            )
+            if is_active_input
+            else None
+        )
+        response = {
             "status": "ok",
             "data": data_dict,
             "template_id": sub.template_id,
             "is_checked": sub.is_checked,
             "submission_status": sub.status,
             "can_review": can_review,
+            "quality": quality,
             # Every user who is authorized to open this submission needs the
             # complete source folder for comparison. `can_review` remains the
             # separate authority for approving or rejecting the submission.
             "folder_files": SubmissionService.folder_files_for_document(document, db),
         }
+        if quality is not None:
+            db.commit()
+        return response
     except Exception:
         raise
 
@@ -631,8 +660,7 @@ def api_update_review_content(
         for key, value in req.data.items():
             if not key.startswith("_"):
                 stored_data[key] = value
-        if req.wrong_fields is not None:
-            stored_data["_wrong_fields"] = SubmissionService.normalize_wrong_fields(req.wrong_fields)
+        stored_data.pop("_wrong_fields", None)
         # Legacy records may already be in `rejected`. Once the assigned
         # reviewer corrects them, keep them in the review queue instead of
         # sending them back to the input user.
@@ -644,7 +672,6 @@ def api_update_review_content(
         return {
             "status": "ok",
             "submission_status": submission.status,
-            "wrong_fields": stored_data.get("_wrong_fields", []),
         }
     except HTTPException:
         db.rollback()
@@ -653,20 +680,66 @@ def api_update_review_content(
         db.rollback()
         raise
 
+def _confirm_review_content(submission, data, current_user, db):
+    ReviewWorkflowService.require_assigned_reviewer(submission, current_user, db)
+    if submission.status != "pending_review":
+        raise HTTPException(status_code=409, detail="Hồ sơ không ở trạng thái chờ duyệt")
+
+    stored_data = json.loads(submission.data_json)
+    for key, value in data.items():
+        if not key.startswith("_"):
+            stored_data[key] = value
+    stored_data.pop("_wrong_fields", None)
+    SubmissionQualityService.assess_confirmed_review(
+        submission,
+        stored_data,
+        current_user["id"],
+        db,
+    )
+    submission.data_json = json.dumps(stored_data, ensure_ascii=False)
+    submission.is_checked = True
+    submission.status = "pending_input_confirmation"
+
+
+@router.put("/submissions/{sub_id}/confirm-review")
+def api_confirm_submission_review(
+    sub_id: int,
+    req: ReviewContentRequest,
+    current_user: dict = Depends(get_reviewer_user),
+    db: Session = Depends(get_db),
+):
+    try:
+        submission = SubmissionRepository(db).get(sub_id)
+        if not submission:
+            raise HTTPException(status_code=404, detail="Không tìm thấy hồ sơ.")
+        _confirm_review_content(submission, req.data, current_user, db)
+        db.commit()
+        return {
+            "status": "ok",
+            "submission_status": submission.status,
+            "is_checked": submission.is_checked,
+        }
+    except HTTPException:
+        db.rollback()
+        raise
+    except Exception:
+        db.rollback()
+        raise
+
+
 @router.put("/submissions/{sub_id}/toggle_check")
 def api_toggle_check(sub_id: int, current_user: dict = Depends(get_reviewer_user), db: Session = Depends(get_db)):
     try:
-        sub = SubmissionRepository(db).get(sub_id)
-        if not sub:
+        submission = SubmissionRepository(db).get(sub_id)
+        if not submission:
             raise HTTPException(status_code=404, detail="Không tìm thấy hồ sơ.")
-        ReviewWorkflowService.require_assigned_reviewer(sub, current_user, db)
-        if sub.status != "pending_review":
-            raise HTTPException(status_code=409, detail="Hồ sơ không ở trạng thái chờ duyệt")
-        sub.is_checked = True
-        sub.status = "approved"
-        
+        _confirm_review_content(submission, {}, current_user, db)
         db.commit()
-        return {"status": "ok", "is_checked": sub.is_checked, "new_status": sub.status}
+        return {
+            "status": "ok",
+            "is_checked": submission.is_checked,
+            "new_status": submission.status,
+        }
     except HTTPException:
         db.rollback()
         raise
@@ -690,7 +763,7 @@ def api_reopen_submission_review(
     submission = SubmissionRepository(db).get(sub_id)
     if not submission:
         raise HTTPException(status_code=404, detail="Không tìm thấy hồ sơ")
-    if submission.status != "approved":
+    if submission.status not in {"approved", "completed"}:
         raise HTTPException(
             status_code=409,
             detail="Chỉ hồ sơ đã duyệt mới có thể chuyển về chờ duyệt",
@@ -705,6 +778,37 @@ def api_reopen_submission_review(
         "is_checked": submission.is_checked,
     }
 
+
+@router.put("/submissions/{sub_id}/input-confirmation")
+def api_confirm_input_correction(
+    sub_id: int,
+    req: ReviewContentRequest,
+    current_user: dict = Depends(get_input_user),
+    db: Session = Depends(get_db),
+):
+    try:
+        submission = SubmissionRepository(db).get(sub_id)
+        if not submission:
+            raise HTTPException(status_code=404, detail="Không tìm thấy hồ sơ.")
+        SubmissionQualityService.apply_input_correction(
+            submission,
+            req.data,
+            current_user["id"],
+            db,
+        )
+        db.commit()
+        return {
+            "status": "ok",
+            "submission_status": submission.status,
+            "is_checked": submission.is_checked,
+        }
+    except HTTPException:
+        db.rollback()
+        raise
+    except Exception:
+        db.rollback()
+        raise
+
 @router.put("/submissions/{sub_id}/errors")
 def api_update_errors(sub_id: int, req: ErrorSectionsRequest, current_user: dict = Depends(get_reviewer_user), db: Session = Depends(get_db)):
     try:
@@ -717,8 +821,7 @@ def api_update_errors(sub_id: int, req: ErrorSectionsRequest, current_user: dict
             
         data_dict = json.loads(sub.data_json)
         data_dict["_wrong_sections"] = req.wrong_sections
-        if req.wrong_fields is not None:
-            data_dict["_wrong_fields"] = SubmissionService.normalize_wrong_fields(req.wrong_fields)
+        data_dict.pop("_wrong_fields", None)
         sub.data_json = json.dumps(data_dict, ensure_ascii=False)
         # Error markers are review metadata. They never return the report to
         # the input user; the reviewer corrects the marked fields directly.
@@ -729,7 +832,6 @@ def api_update_errors(sub_id: int, req: ErrorSectionsRequest, current_user: dict
         return {
             "status": "ok",
             "submission_status": sub.status,
-            "wrong_fields": data_dict.get("_wrong_fields", []),
         }
     except HTTPException:
         db.rollback()
@@ -783,14 +885,13 @@ def api_bulk_submission_action(
 
 @router.post("/submissions/{sub_id}/copy")
 def api_copy_submission(sub_id: int, current_user: dict = Depends(get_input_user), db: Session = Depends(get_db)):
-    try:
-        new_id = SubmissionService.copy_submission(db, sub_id, current_user)
-        return {"status": "ok", "new_id": new_id}
-    except HTTPException:
-        raise
-    except Exception:
-        db.rollback()
-        raise
+    raise HTTPException(
+        status_code=409,
+        detail={
+            "code": "copy_requires_form",
+            "message": "Hãy nhân bản trong biểu mẫu để chọn PDF đích và sửa dữ liệu.",
+        },
+    )
 
 @router.get("/export")
 async def api_export(
@@ -804,6 +905,7 @@ async def api_export(
     db: Session = Depends(get_db),
 ):
     try:
+        enforce_heavy_api_rate_limit("submission-export", current_user["id"], cost=30)
         if include_pending_review:
             raise HTTPException(
                 status_code=409,
@@ -838,7 +940,7 @@ async def api_export(
             include_pending_review=include_pending_review,
         )
         if not submissions:
-            export_scope = "chờ duyệt hoặc đã duyệt" if include_pending_review else "đã duyệt"
+            export_scope = "chờ duyệt hoặc hoàn thành" if include_pending_review else "hoàn thành"
             raise HTTPException(
                 status_code=404,
                 detail=f"Không có hồ sơ {export_scope} để xuất báo cáo cho biểu mẫu này.",
@@ -926,7 +1028,8 @@ def api_download_export_job(
     try:
         output_path = export_job_output_path(job_id, job.get("extension"))
     except ValueError as exc:
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
+        logger.exception("Invalid export output path", extra={"job_id": job_id})
+        raise HTTPException(status_code=500, detail="Không thể xác định file xuất") from exc
     if not output_path.is_file():
         raise HTTPException(status_code=404, detail="File xuất không còn tồn tại")
     background_tasks.add_task(cleanup_export_job, job_id)

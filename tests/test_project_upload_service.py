@@ -22,9 +22,11 @@ from server.models import (
     User,
 )
 from server.routers.project_uploads import router
+from server.repositories.project_upload_repository import ProjectUploadRepository
 from server.services.project_upload_service import (
     create_or_resume_upload_session,
     finalize_upload_session,
+    get_upload_session,
     write_upload_chunk,
 )
 
@@ -214,6 +216,158 @@ def test_chunk_upload_supports_resume_and_idempotent_retry(database):
     )
     assert completed["state"] == "uploaded"
     assert completed["next_offset"] == len(content)
+
+
+def test_chunk_upload_does_not_lock_or_count_the_shared_session(database, monkeypatch):
+    db, _ = database
+    admin, project = seed_project(db, report_mode="pdf")
+    content = b"%PDF-independent-file-lock"
+    session = create_or_resume_upload_session(
+        db,
+        project_id=project.id,
+        created_by_user_id=admin.id,
+        client_session_key="independent-file-lock",
+        raw_items=[raw_item("001/report.pdf", content)],
+    )
+
+    def unexpected_shared_session_operation(*_args, **_kwargs):
+        raise AssertionError("chunk upload must not lock or count the shared session")
+
+    monkeypatch.setattr(
+        ProjectUploadRepository,
+        "lock_session",
+        unexpected_shared_session_operation,
+    )
+    monkeypatch.setattr(
+        ProjectUploadRepository,
+        "count_session_files_by_status",
+        unexpected_shared_session_operation,
+    )
+
+    result = write_upload_chunk(
+        db,
+        session_id=session["id"],
+        file_id=session["files"][0]["file_id"],
+        offset=0,
+        chunk=content,
+    )
+
+    assert result["state"] == "uploaded"
+
+
+def test_upload_status_derives_progress_without_writing_session_counters(database):
+    db, _ = database
+    admin, project = seed_project(db, report_mode="pdf")
+    first = b"%PDF-first-progress"
+    second = b"%PDF-second-progress"
+    session = create_or_resume_upload_session(
+        db,
+        project_id=project.id,
+        created_by_user_id=admin.id,
+        client_session_key="derived-progress",
+        raw_items=[
+            raw_item("001/first.pdf", first),
+            raw_item("001/second.pdf", second),
+        ],
+    )
+
+    write_upload_chunk(
+        db,
+        session_id=session["id"],
+        file_id=session["files"][0]["file_id"],
+        offset=0,
+        chunk=first,
+    )
+    persisted = db.get(ProjectUploadSession, session["id"])
+    status = get_upload_session(db, session_id=session["id"])
+
+    assert persisted.status == "created"
+    assert persisted.completed_files == 0
+    assert status["state"] == "uploading"
+    assert status["completed_files"] == 1
+    assert status["failed_files"] == 0
+
+
+def test_file_fsync_policy_skips_nonfinal_chunk(database, monkeypatch):
+    db, _ = database
+    admin, project = seed_project(db, report_mode="pdf")
+    content = b"%PDF-fsync-at-file-completion"
+    session = create_or_resume_upload_session(
+        db,
+        project_id=project.id,
+        created_by_user_id=admin.id,
+        client_session_key="file-fsync-policy",
+        raw_items=[raw_item("001/report.pdf", content)],
+    )
+    fsync_calls = []
+    monkeypatch.setenv("PROJECT_UPLOAD_FSYNC_POLICY", "file")
+    monkeypatch.setattr(
+        "server.services.project_upload_service.os.fsync",
+        lambda file_descriptor: fsync_calls.append(file_descriptor),
+    )
+    first = content[:10]
+
+    write_upload_chunk(
+        db,
+        session_id=session["id"],
+        file_id=session["files"][0]["file_id"],
+        offset=0,
+        chunk=first,
+    )
+    assert fsync_calls == []
+
+    write_upload_chunk(
+        db,
+        session_id=session["id"],
+        file_id=session["files"][0]["file_id"],
+        offset=len(first),
+        chunk=content[len(first) :],
+    )
+    assert len(fsync_calls) == 1
+
+
+def test_chunk_upload_records_backend_timing_milestones(database):
+    db, _ = database
+    admin, project = seed_project(db, report_mode="pdf")
+    content = b"%PDF-timing"
+    session = create_or_resume_upload_session(
+        db,
+        project_id=project.id,
+        created_by_user_id=admin.id,
+        client_session_key="timing-session",
+        raw_items=[raw_item("001/timing.pdf", content)],
+    )
+    timing_marks = {}
+
+    result = write_upload_chunk(
+        db,
+        session_id=session["id"],
+        file_id=session["files"][0]["file_id"],
+        offset=0,
+        chunk=content,
+        timing_marks=timing_marks,
+    )
+
+    assert result["state"] == "uploaded"
+    milestone_names = [
+        "backend_started",
+        "file_lock_started",
+        "file_lock_acquired",
+        "file_write_started",
+        "file_written",
+        "flush_completed",
+        "fsync_started",
+        "fsync_completed",
+        "sha256_started",
+        "sha256_completed",
+        "database_update_started",
+        "database_commit_started",
+        "database_committed",
+    ]
+    assert all(name in timing_marks for name in milestone_names)
+    assert [timing_marks[name] for name in milestone_names] == sorted(
+        timing_marks[name] for name in milestone_names
+    )
 
 
 def test_hash_mismatch_resets_file_without_finalizing(database):

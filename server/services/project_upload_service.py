@@ -1,6 +1,7 @@
 import hashlib
 import os
 import secrets
+import time
 import uuid
 from pathlib import Path
 
@@ -24,7 +25,7 @@ from server.services.project_manifest_service import (
 )
 
 
-DEFAULT_CHUNK_BYTES = 8 * 1024 * 1024
+DEFAULT_CHUNK_BYTES = 1 * 1024 * 1024
 MAX_CHUNK_BYTES = 16 * 1024 * 1024
 
 
@@ -44,6 +45,11 @@ def _configured_concurrency():
     return max(1, min(value, 8))
 
 
+def _configured_fsync_policy():
+    value = os.getenv("PROJECT_UPLOAD_FSYNC_POLICY", "file").strip().lower()
+    return value if value in {"chunk", "file"} else "file"
+
+
 def _storage_root():
     return Path(os.getenv("PDF_STORAGE_PATH", "uploads")).resolve()
 
@@ -57,15 +63,24 @@ def _staging_path(session, upload_file):
 
 def serialize_upload_session(db, session):
     files = ProjectUploadRepository(db).list_session_files(session.id)
+    completed_files = sum(item.status == "uploaded" for item in files)
+    failed_files = sum(item.status == "failed" for item in files)
+    state = session.status
+    if state not in {"completed", "cancelled"}:
+        state = (
+            "uploading"
+            if any(item.status != "pending" or item.next_offset > 0 for item in files)
+            else "created"
+        )
     return {
         "id": session.id,
         "project_id": session.project_id,
-        "state": session.status,
+        "state": state,
         "manifest_digest": session.manifest_digest,
         "total_files": session.total_files,
         "requested_files": session.requested_files,
-        "completed_files": session.completed_files,
-        "failed_files": session.failed_files,
+        "completed_files": completed_files,
+        "failed_files": failed_files,
         "chunk_size_bytes": _configured_chunk_bytes(),
         "concurrency": _configured_concurrency(),
         "files": [
@@ -190,7 +205,21 @@ def _hash_file(path):
     return digest.hexdigest()
 
 
-def write_upload_chunk(db, *, session_id, file_id, offset, chunk):
+def _mark_upload_timing(timing_marks, name):
+    if timing_marks is not None:
+        timing_marks[name] = time.perf_counter()
+
+
+def write_upload_chunk(
+    db,
+    *,
+    session_id,
+    file_id,
+    offset,
+    chunk,
+    timing_marks=None,
+):
+    _mark_upload_timing(timing_marks, "backend_started")
     if not isinstance(offset, int) or isinstance(offset, bool) or offset < 0:
         raise HTTPException(status_code=400, detail="Offset không hợp lệ")
     if not chunk:
@@ -199,8 +228,10 @@ def write_upload_chunk(db, *, session_id, file_id, offset, chunk):
         raise HTTPException(status_code=413, detail="Chunk vượt quá giới hạn")
 
     repository = ProjectUploadRepository(db)
-    session = repository.lock_session(session_id)
+    _mark_upload_timing(timing_marks, "file_lock_started")
     upload_file = repository.lock_session_file(session_id, file_id)
+    _mark_upload_timing(timing_marks, "file_lock_acquired")
+    session = repository.get_session(session_id)
     if not session or not upload_file:
         raise HTTPException(status_code=404, detail="Không tìm thấy file trong phiên tải")
     if session.status in {"completed", "cancelled"}:
@@ -215,7 +246,9 @@ def write_upload_chunk(db, *, session_id, file_id, offset, chunk):
         actual_size = upload_file.next_offset
     if actual_size < upload_file.next_offset:
         upload_file.next_offset = actual_size
+        _mark_upload_timing(timing_marks, "database_commit_started")
         db.commit()
+        _mark_upload_timing(timing_marks, "database_committed")
         raise HTTPException(
             status_code=409,
             detail={"message": "File tạm bị thiếu dữ liệu", "next_offset": actual_size},
@@ -254,39 +287,40 @@ def write_upload_chunk(db, *, session_id, file_id, offset, chunk):
     mode = "r+b" if staging_path.exists() else "xb"
     with staging_path.open(mode) as output:
         output.seek(offset)
+        _mark_upload_timing(timing_marks, "file_write_started")
         output.write(chunk)
+        _mark_upload_timing(timing_marks, "file_written")
         output.flush()
-        os.fsync(output.fileno())
+        _mark_upload_timing(timing_marks, "flush_completed")
+        is_final_chunk = offset + len(chunk) == upload_file.expected_size
+        if _configured_fsync_policy() == "chunk" or is_final_chunk:
+            _mark_upload_timing(timing_marks, "fsync_started")
+            os.fsync(output.fileno())
+            _mark_upload_timing(timing_marks, "fsync_completed")
 
     upload_file.next_offset = offset + len(chunk)
     upload_file.status = "uploading"
     upload_file.error_message = None
-    session.status = "uploading"
     if upload_file.next_offset == upload_file.expected_size:
+        _mark_upload_timing(timing_marks, "sha256_started")
         actual_sha256 = _hash_file(staging_path)
+        _mark_upload_timing(timing_marks, "sha256_completed")
         if actual_sha256 != upload_file.expected_sha256:
             upload_file.status = "failed"
             upload_file.error_message = "SHA-256 không khớp"
             upload_file.next_offset = 0
-            session.failed_files = repository.count_session_files_by_status(
-                session.id,
-                "failed",
-            )
+            _mark_upload_timing(timing_marks, "database_commit_started")
             db.commit()
+            _mark_upload_timing(timing_marks, "database_committed")
             staging_path.unlink(missing_ok=True)
             raise HTTPException(status_code=422, detail="SHA-256 của file không khớp")
         upload_file.status = "uploaded"
 
+    _mark_upload_timing(timing_marks, "database_update_started")
     db.flush()
-    session.completed_files = repository.count_session_files_by_status(
-        session.id,
-        "uploaded",
-    )
-    session.failed_files = repository.count_session_files_by_status(
-        session.id,
-        "failed",
-    )
+    _mark_upload_timing(timing_marks, "database_commit_started")
     db.commit()
+    _mark_upload_timing(timing_marks, "database_committed")
     return {
         "status": "ok",
         "file_id": upload_file.id,

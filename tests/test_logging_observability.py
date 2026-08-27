@@ -30,6 +30,29 @@ def test_multiworker_logging_uses_process_specific_files(monkeypatch, tmp_path):
         close_managed_logging_handlers()
 
 
+def test_structured_event_is_written_and_redacted(tmp_path):
+    paths = configure_logging(tmp_path, force=True)
+    try:
+        logging.getLogger("server.upload_timing").info(
+            "Project upload chunk timing",
+            extra={
+                "event_data": {
+                    "name": "project_upload_chunk_timing",
+                    "total_ms": 12.5,
+                    "detail": "authorization=Bearer private-token",
+                }
+            },
+        )
+        _flush_handlers()
+
+        event = json.loads(paths.app.read_text(encoding="utf-8"))
+        assert event["event"]["name"] == "project_upload_chunk_timing"
+        assert event["event"]["total_ms"] == 12.5
+        assert "private-token" not in paths.app.read_text(encoding="utf-8")
+    finally:
+        close_managed_logging_handlers()
+
+
 def test_logging_separates_app_error_and_audit_files_and_redacts_secrets(tmp_path):
     paths = configure_logging(tmp_path, force=True)
     try:

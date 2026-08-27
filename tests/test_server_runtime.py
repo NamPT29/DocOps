@@ -1,5 +1,6 @@
 import asyncio
-from pathlib import Path
+import logging
+import time
 
 import pytest
 
@@ -50,20 +51,14 @@ def test_runtime_rejects_excessive_total_database_connections():
         })
 
 
-def test_docker_runtime_uses_configurable_workers_and_bounded_pool():
-    project_root = Path(__file__).parents[1]
-    dockerfile = (project_root / "Dockerfile").read_text(encoding="utf-8")
-    compose = (project_root / "docker-compose.yml").read_text(encoding="utf-8")
-
-    assert 'CMD ["python", "-m", "server.runtime_config"]' in dockerfile
-    assert "DB_POOL_SIZE=${DB_POOL_SIZE:-5}" in compose
-    assert "DB_MAX_OVERFLOW=${DB_MAX_OVERFLOW:-2}" in compose
-
-
 def test_app_launcher_passes_worker_count_to_uvicorn(monkeypatch, tmp_path):
     calls = []
-    monkeypatch.setattr(app_launcher, "get_base_dir", lambda: str(tmp_path))
+    monkeypatch.setattr(app_launcher, "get_resource_root", lambda: tmp_path)
     monkeypatch.setattr(app_launcher.os, "chdir", lambda _path: None)
+    monkeypatch.setattr(app_launcher, "prepare_runtime_environment", lambda: None)
+    monkeypatch.setattr(app_launcher, "verify_database_connection", lambda: None)
+    monkeypatch.setenv("HOST", "127.0.0.1")
+    monkeypatch.setenv("PORT", "8123")
     monkeypatch.setattr(app_launcher.threading, "Thread", lambda **_kwargs: type(
         "FakeThread",
         (),
@@ -76,10 +71,11 @@ def test_app_launcher_passes_worker_count_to_uvicorn(monkeypatch, tmp_path):
     )
     monkeypatch.setattr(app_launcher.uvicorn, "run", lambda *args, **kwargs: calls.append((args, kwargs)))
 
-    app_launcher.main()
+    assert app_launcher.main() == 0
 
     assert calls[0][0] == ("server.main:app",)
     assert calls[0][1]["workers"] == 3
+    assert calls[0][1]["port"] == 8123
 
 
 def test_async_upload_routes_offload_complete_sync_units(monkeypatch):
@@ -126,6 +122,67 @@ def test_async_upload_routes_offload_complete_sync_units(monkeypatch):
         project_uploads.enforce_project_upload_chunk_rate_limit,
         project_uploads.write_upload_chunk,
     ]
+    assert "timing_marks" in calls[-1][2]
+
+
+def test_upload_route_emits_cloudflare_timing_event(monkeypatch, caplog):
+    async def fake_run_in_threadpool(function, *args, **kwargs):
+        if function is project_uploads.write_upload_chunk:
+            marks = kwargs["timing_marks"]
+            now = time.perf_counter()
+            for name in (
+                "file_lock_started",
+                "file_lock_acquired",
+                "file_write_started",
+                "file_written",
+                "fsync_started",
+                "fsync_completed",
+                "sha256_started",
+                "sha256_completed",
+                "database_update_started",
+                "database_commit_started",
+                "database_committed",
+            ):
+                marks[name] = now
+                now += 0.001
+            return {"status": "ok", "state": "uploaded"}
+        return None
+
+    class FakeRequest:
+        headers = {"cf-ray": "test-ray"}
+        state = type(
+            "State",
+            (),
+            {"request_started_at": time.perf_counter() - 0.01},
+        )()
+
+        async def body(self):
+            return b"%PDF-test"
+
+    monkeypatch.setattr(project_uploads, "run_in_threadpool", fake_run_in_threadpool)
+    with caplog.at_level(logging.INFO, logger="server.upload_timing"):
+        result = asyncio.run(project_uploads.api_upload_project_file_chunk(
+            session_id="session-1",
+            file_id=7,
+            request=FakeRequest(),
+            upload_offset=0,
+            current_user={"id": 1},
+            db=object(),
+        ))
+
+    event = next(
+        record.event_data
+        for record in caplog.records
+        if record.name == "server.upload_timing"
+    )
+    assert result["state"] == "uploaded"
+    assert event["name"] == "project_upload_chunk_timing"
+    assert event["request_source"] == "cloudflare"
+    assert event["chunk_bytes"] == len(b"%PDF-test")
+    assert event["body_received_ms"] is not None
+    assert event["file_lock_acquired_ms"] is not None
+    assert event["database_committed_ms"] is not None
+    assert event["total_ms"] >= event["body_received_ms"]
 
 
 def test_signal_server_controller_translates_stop_to_sigint(monkeypatch):

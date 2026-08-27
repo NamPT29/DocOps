@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import math
+import threading
 import time
 from collections.abc import Callable
 from datetime import datetime, timezone
@@ -110,11 +111,72 @@ class DatabaseRateLimiter:
             db.commit()
 
 
+class InMemoryRateLimiter:
+    """A process-local fixed-window limiter for high-frequency operations."""
+
+    def __init__(
+        self,
+        max_requests: int,
+        window_seconds: int,
+        *,
+        clock: Callable[[], float] = time.time,
+    ) -> None:
+        if max_requests <= 0 or window_seconds <= 0:
+            raise ValueError("Giới hạn API phải là số nguyên dương.")
+        self.max_requests = max_requests
+        self.window_seconds = window_seconds
+        self._clock = clock
+        self._lock = threading.Lock()
+        self._buckets: dict[tuple[str, str, int], int] = {}
+
+    def _window_values(
+        self,
+        scope: str,
+        key: str,
+    ) -> tuple[tuple[str, str, int], float, int]:
+        now = float(self._clock())
+        window_number = int(now) // self.window_seconds
+        expires_timestamp = (window_number + 1) * self.window_seconds
+        return (scope, key, window_number), now, expires_timestamp
+
+    def consume(self, scope: str, key: str, *, cost: int = 1) -> int:
+        if cost <= 0:
+            raise ValueError("Chi phí giới hạn API phải là số nguyên dương.")
+
+        bucket_key, now, expires_timestamp = self._window_values(scope, key)
+        current_window = bucket_key[2]
+        with self._lock:
+            self._buckets = {
+                existing_key: count
+                for existing_key, count in self._buckets.items()
+                if existing_key[2] >= current_window
+            }
+            request_count = self._buckets.get(bucket_key, 0) + cost
+            self._buckets[bucket_key] = request_count
+
+        if request_count <= self.max_requests:
+            return 0
+        return max(1, math.ceil(expires_timestamp - now))
+
+    def retry_after(self, scope: str, key: str) -> int:
+        bucket_key, now, expires_timestamp = self._window_values(scope, key)
+        with self._lock:
+            request_count = self._buckets.get(bucket_key, 0)
+        if request_count < self.max_requests:
+            return 0
+        return max(1, math.ceil(expires_timestamp - now))
+
+    def reset(self, scope: str, key: str) -> None:
+        bucket_key, _now, _expires_timestamp = self._window_values(scope, key)
+        with self._lock:
+            self._buckets.pop(bucket_key, None)
+
+
 heavy_api_rate_limiter = DatabaseRateLimiter(
     settings.heavy_api_rate_limit,
     settings.heavy_api_rate_window_seconds,
 )
-project_upload_chunk_rate_limiter = DatabaseRateLimiter(
+project_upload_chunk_rate_limiter = InMemoryRateLimiter(
     settings.project_upload_chunk_rate_limit,
     settings.heavy_api_rate_window_seconds,
 )

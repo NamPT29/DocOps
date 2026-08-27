@@ -1,24 +1,37 @@
+#define MyAppName "Scan To Excel Host"
+#define MyAppVersion "1.1.0"
+#define MyAppExeName "ScanToExcelApp.exe"
+
 [Setup]
-AppName=Scan To Excel
-AppVersion=1.0
-DefaultDirName={localappdata}\ScanToExcel
-DefaultGroupName=Scan To Excel
+AppId={{C50614C6-A1B8-4FD1-AAC8-9A16560F03B2}
+AppName={#MyAppName}
+AppVersion={#MyAppVersion}
+DefaultDirName={localappdata}\Programs\ScanToExcelHost
+DefaultGroupName={#MyAppName}
 PrivilegesRequired=lowest
-UninstallDisplayIcon={app}\ScanToExcelApp.exe
+UninstallDisplayIcon={app}\{#MyAppExeName}
 Compression=lzma2
 SolidCompression=yes
-OutputDir=D:\version
-OutputBaseFilename=Setup_ScanToExcel_v1.0
+OutputDir=installer-output
+OutputBaseFilename=Setup_ScanToExcelHost_{#MyAppVersion}
+ArchitecturesAllowed=x64compatible
+ArchitecturesInstallIn64BitMode=x64compatible
+CloseApplications=yes
+WizardStyle=modern
 
 [Files]
 Source: "dist\ScanToExcelApp\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
-Name: "{group}\Scan To Excel"; Filename: "{app}\ScanToExcelApp.exe"
-Name: "{autodesktop}\Scan To Excel"; Filename: "{app}\ScanToExcelApp.exe"; Tasks: desktopicon
+Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; WorkingDir: "{app}"
+Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; WorkingDir: "{app}"; Tasks: desktopicon
 
 [Tasks]
-Name: "desktopicon"; Description: "Tao bieu tuong tren Desktop"; GroupDescription: "Additional icons:"; Flags: unchecked
+Name: "desktopicon"; Description: "Tao bieu tuong tren Desktop"; GroupDescription: "Bieu tuong bo sung:"; Flags: unchecked
 
 [Run]
-Filename: "{app}\ScanToExcelApp.exe"; Description: "Khoi chay Scan To Excel ngay"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\{#MyAppExeName}"; Description: "Khoi chay {#MyAppName}"; Flags: nowait postinstall skipifsilent
+
+[UninstallDelete]
+; Deliberately keep %LOCALAPPDATA%\ScanToExcelHost. It contains host.env and
+; business data and must survive upgrades or application uninstall/reinstall.

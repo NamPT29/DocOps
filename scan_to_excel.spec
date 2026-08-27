@@ -1,5 +1,7 @@
 # -*- mode: python ; coding: utf-8 -*-
 
+# Application-only package. External services, configuration and mutable
+# business data are intentionally outside this build.
 block_cipher = None
 
 a = Analysis(
@@ -8,8 +10,6 @@ a = Analysis(
     binaries=[],
     datas=[
         ('frontend', 'frontend'),
-        ('templates', 'templates'),
-        ('database_engine', 'database_engine')
     ],
     hiddenimports=[
         'uvicorn.logging',
@@ -22,16 +22,43 @@ a = Analysis(
         'uvicorn.protocols.websockets.auto',
         'uvicorn.lifespan',
         'uvicorn.lifespan.on',
-        'db_manager',
+        # Uvicorn imports this target from the string "server.main:app".
+        'server.main',
         'wizard',
-        'auto_updater',
         'psycopg',
-        'psycopg.pq'
+        'psycopg.pq',
     ],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=[],
+    # pandas advertises many optional integrations that are installed on the
+    # build workstation but are not used by the local Excel workflow. Excluding
+    # them keeps workstation state from inflating the release by gigabytes.
+    excludes=[
+        'pandas.tests',
+        'pytest',
+        '_pytest',
+        'scipy',
+        'torch',
+        'torchvision',
+        'tensorflow',
+        'transformers',
+        'fsspec',
+        'matplotlib',
+        'IPython',
+        'notebook',
+        'jupyter',
+        'sklearn',
+        'numba',
+        'sympy',
+        'pyarrow',
+        'win32com',
+        'pythoncom',
+        'pywintypes',
+        'MySQLdb',
+        'psycopg2',
+        'pysqlite2',
+    ],
     win_no_prefer_redirects=False,
     win_private_assemblies=False,
     cipher=block_cipher,
@@ -48,14 +75,14 @@ exe = EXE(
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
-    upx=True,
-    console=True, # Đặt True để dễ debug lỗi, khi ổn định sẽ đổi thành False để giấu cửa sổ đen
+    upx=False,
+    console=True,
     disable_windowed_traceback=False,
     argv_emulation=False,
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon='NONE' # Có thể thêm đường dẫn file .ico sau
+    icon=None,
 )
 coll = COLLECT(
     exe,
@@ -63,7 +90,7 @@ coll = COLLECT(
     a.zipfiles,
     a.datas,
     strip=False,
-    upx=True,
+    upx=False,
     upx_exclude=[],
     name='ScanToExcelApp',
 )

@@ -79,6 +79,7 @@ pg_pw.txt
 
 # Generated deployment/runtime artifacts
 exports/
+installer-output/
 .gitnexus/
 .codex/model-routing-history.jsonl
 

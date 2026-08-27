@@ -8,6 +8,6 @@ http://sohoadang.aivn.net.vn {
     
     # Hỗ trợ tải file lớn (vd: 100MB)
     request_body {
-        max_size 100MB
+        max_size 1024MB
     }
 }

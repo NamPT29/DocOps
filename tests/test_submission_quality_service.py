@@ -423,6 +423,36 @@ def test_input_user_can_confirm_completed_without_changing_reviewer_data(quality
     assert submission.status == "completed"
 
 
+def test_input_confirmation_endpoint_completes_review_cycle(quality_case):
+    db, submission, baseline, input_user, reviewer = quality_case
+    reviewed = {**baseline, "col_0": "reviewer value"}
+    SubmissionQualityService.assess_confirmed_review(
+        submission,
+        reviewed,
+        reviewer.id,
+        db,
+    )
+    submission.data_json = json.dumps(reviewed)
+    submission.status = "pending_input_confirmation"
+    db.commit()
+
+    result = submissions.api_confirm_input_correction(
+        submission.id,
+        submissions.ReviewContentRequest(data={"col_0": baseline["col_0"]}),
+        current_user={"id": input_user.id, "role": "user"},
+        db=db,
+    )
+
+    db.refresh(submission)
+    assert result == {
+        "status": "ok",
+        "submission_status": "completed",
+        "is_checked": True,
+    }
+    assert submission.status == "completed"
+    assert json.loads(submission.data_json)["col_0"] == baseline["col_0"]
+
+
 def test_reopened_submission_can_be_confirmed_once_in_each_review_cycle(quality_case):
     db, submission, baseline, input_user, reviewer = quality_case
     first_review = {**baseline, "col_0": "first review"}

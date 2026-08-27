@@ -1,4 +1,7 @@
-from fastapi import APIRouter, Depends, Header, Request
+import logging
+import time
+
+from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from starlette.concurrency import run_in_threadpool
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
@@ -18,6 +21,108 @@ from server.services.api_rate_limit_service import (
 
 
 router = APIRouter(tags=["project-uploads"])
+upload_timing_logger = logging.getLogger("server.upload_timing")
+upload_timing_logger.setLevel(logging.INFO)
+upload_timing_logger.info(
+    "Project upload timing enabled",
+    extra={"event_data": {"name": "project_upload_timing_ready"}},
+)
+
+
+def _upload_request_source(request: Request) -> str:
+    headers = getattr(request, "headers", {})
+    if headers.get("cf-ray") or headers.get("cf-connecting-ip"):
+        return "cloudflare"
+    if (
+        headers.get("via")
+        or headers.get("x-forwarded-for")
+        or headers.get("x-forwarded-proto")
+    ):
+        return "proxy"
+    return "direct"
+
+
+def _elapsed_ms(marks: dict[str, float], name: str) -> float | None:
+    value = marks.get(name)
+    started = marks.get("request_started")
+    if value is None or started is None:
+        return None
+    return round((value - started) * 1000, 2)
+
+
+def _duration_ms(
+    marks: dict[str, float],
+    started_name: str,
+    completed_name: str,
+) -> float | None:
+    started = marks.get(started_name)
+    completed = marks.get(completed_name)
+    if started is None or completed is None:
+        return None
+    return round((completed - started) * 1000, 2)
+
+
+def _upload_timing_event(
+    *,
+    marks: dict[str, float],
+    request_source: str,
+    session_id: str,
+    file_id: int,
+    offset: int,
+    chunk_bytes: int,
+    outcome: str,
+    state: str | None,
+    error_type: str,
+) -> dict:
+    return {
+        "name": "project_upload_chunk_timing",
+        "request_source": request_source,
+        "session_id": session_id,
+        "file_id": file_id,
+        "offset": offset,
+        "chunk_bytes": chunk_bytes,
+        "outcome": outcome,
+        "state": state,
+        "error_type": error_type,
+        "request_started_ms": 0.0,
+        "body_received_ms": _elapsed_ms(marks, "body_received"),
+        "file_lock_acquired_ms": _elapsed_ms(marks, "file_lock_acquired"),
+        "file_written_ms": _elapsed_ms(marks, "file_written"),
+        "fsync_completed_ms": _elapsed_ms(marks, "fsync_completed"),
+        "sha256_completed_ms": _elapsed_ms(marks, "sha256_completed"),
+        "database_committed_ms": _elapsed_ms(marks, "database_committed"),
+        "request_to_handler_ms": _duration_ms(
+            marks, "request_started", "handler_started"
+        ),
+        "rate_limit_ms": _duration_ms(
+            marks, "rate_limit_started", "rate_limit_completed"
+        ),
+        "body_read_ms": _duration_ms(
+            marks, "body_receive_started", "body_received"
+        ),
+        "lock_wait_ms": _duration_ms(
+            marks, "file_lock_started", "file_lock_acquired"
+        ),
+        "file_write_ms": _duration_ms(
+            marks, "file_write_started", "file_written"
+        ),
+        "file_flush_ms": _duration_ms(
+            marks, "file_written", "flush_completed"
+        ),
+        "fsync_ms": _duration_ms(
+            marks, "fsync_started", "fsync_completed"
+        ),
+        "sha256_ms": _duration_ms(
+            marks, "sha256_started", "sha256_completed"
+        ),
+        "database_update_ms": _duration_ms(
+            marks, "database_update_started", "database_commit_started"
+        ),
+        "database_commit_ms": _duration_ms(
+            marks, "database_commit_started", "database_committed"
+        ),
+        "total_ms": _duration_ms(marks, "request_started", "request_completed"),
+    }
 
 
 class ProjectManifestItemRequest(BaseModel):
@@ -78,19 +183,73 @@ async def api_upload_project_file_chunk(
     current_user: dict = Depends(get_admin_user),
     db: Session = Depends(get_db),
 ):
-    await run_in_threadpool(
-        enforce_project_upload_chunk_rate_limit,
-        current_user["id"],
-    )
-    chunk = await request.body()
-    return await run_in_threadpool(
-        write_upload_chunk,
-        db,
-        session_id=session_id,
-        file_id=file_id,
-        offset=upload_offset,
-        chunk=chunk,
-    )
+    handler_started = time.perf_counter()
+    request_state = getattr(request, "state", None)
+    marks = {
+        "request_started": getattr(
+            request_state,
+            "request_started_at",
+            handler_started,
+        ),
+        "handler_started": handler_started,
+    }
+    chunk = b""
+    outcome = "aborted"
+    result_state = None
+    error_type = "-"
+    status_code = 500
+    try:
+        marks["rate_limit_started"] = time.perf_counter()
+        await run_in_threadpool(
+            enforce_project_upload_chunk_rate_limit,
+            current_user["id"],
+        )
+        marks["rate_limit_completed"] = time.perf_counter()
+        marks["body_receive_started"] = time.perf_counter()
+        chunk = await request.body()
+        marks["body_received"] = time.perf_counter()
+        result = await run_in_threadpool(
+            write_upload_chunk,
+            db,
+            session_id=session_id,
+            file_id=file_id,
+            offset=upload_offset,
+            chunk=chunk,
+            timing_marks=marks,
+        )
+        outcome = "ok"
+        result_state = result.get("state")
+        status_code = 200
+        return result
+    except HTTPException as exc:
+        outcome = "http_error"
+        error_type = type(exc).__name__
+        status_code = exc.status_code
+        raise
+    except Exception as exc:
+        outcome = "error"
+        error_type = type(exc).__name__
+        raise
+    finally:
+        marks["request_completed"] = time.perf_counter()
+        upload_timing_logger.info(
+            "Project upload chunk timing",
+            extra={
+                "status_code": status_code,
+                "error_type": error_type,
+                "event_data": _upload_timing_event(
+                    marks=marks,
+                    request_source=_upload_request_source(request),
+                    session_id=session_id,
+                    file_id=file_id,
+                    offset=upload_offset,
+                    chunk_bytes=len(chunk),
+                    outcome=outcome,
+                    state=result_state,
+                    error_type=error_type,
+                ),
+            },
+        )
 
 
 @router.post("/api/project-upload-sessions/{session_id}/finalize")

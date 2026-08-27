@@ -64,6 +64,22 @@ class RedactingFormatter(logging.Formatter):
                 for name, default in _DEFAULT_CONTEXT.items()
             },
         }
+        event_data = getattr(record, "event_data", None)
+        if isinstance(event_data, dict):
+            payload["event"] = {
+                str(name): (
+                    _BEARER_PATTERN.sub(
+                        "Bearer [REDACTED]",
+                        _SENSITIVE_ASSIGNMENT_PATTERN.sub(
+                            lambda match: f"{match.group(1)}[REDACTED]",
+                            value,
+                        ),
+                    )
+                    if isinstance(value, str)
+                    else value
+                )
+                for name, value in event_data.items()
+            }
         return json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
 
 
@@ -231,6 +247,7 @@ class RequestLoggingMiddleware:
             await self.app(scope, receive, send)
             return
 
+        started = time.perf_counter()
         request_id = _request_id(scope)
         method = str(scope.get("method") or "HTTP").upper()
         context: dict[str, Any] = {
@@ -246,8 +263,8 @@ class RequestLoggingMiddleware:
         if isinstance(state, dict):
             state["request_id"] = request_id
             state["request_log_context"] = context
+            state["request_started_at"] = started
         context_token = _request_context.set(context)
-        started = time.perf_counter()
 
         async def logged_send(message: dict[str, Any]) -> None:
             if message.get("type") == "http.response.start":

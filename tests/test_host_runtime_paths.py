@@ -17,7 +17,16 @@ def test_explicit_host_data_root_takes_priority():
     assert configured == Path("D:/scan-data")
 
 
-def test_host_data_root_defaults_to_program_data():
+def test_host_data_root_defaults_to_local_app_data():
+    configured = resolve_host_data_root({
+        "LOCALAPPDATA": "C:/Users/test/AppData/Local",
+        "PROGRAMDATA": "C:/ProgramData",
+    })
+
+    assert configured == Path("C:/Users/test/AppData/Local/ScanToExcelHost")
+
+
+def test_host_data_root_falls_back_to_program_data():
     configured = resolve_host_data_root({"PROGRAMDATA": "C:/ProgramData"})
 
     assert configured == Path("C:/ProgramData/ScanToExcelHost")
