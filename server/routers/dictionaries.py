@@ -5,6 +5,7 @@ from server.database import get_db
 from server.models import Dictionary, DictionaryItem
 from server.repositories import DictionaryRepository
 from server.routers.auth import get_admin_user
+from server.services.template_cache_service import template_artifact_cache
 import re
 from typing import Literal
 
@@ -96,6 +97,7 @@ def create_dictionary(template_id: int, data: dict, current_user: dict = Depends
     repository.add(new_dict)
     db.commit()
     db.refresh(new_dict)
+    template_artifact_cache.invalidate(template_id)
     return {"status": "ok", "id": new_dict.id}
 
 
@@ -150,6 +152,9 @@ def bulk_import_dictionary_items(
         db.rollback()
         raise HTTPException(status_code=500, detail="Không thể lưu dữ liệu từ điển")
 
+    if added or updated:
+        template_artifact_cache.invalidate(template_id)
+
     return {
         "status": "ok",
         "data": {
@@ -167,14 +172,43 @@ def bulk_import_dictionary_items(
 router = APIRouter(prefix="/api/dictionaries", tags=["dictionaries"])
 
 @router.get("/{dict_id}/items")
-def get_dictionary_items(dict_id: int, db: Session = Depends(get_db)):
+def get_dictionary_items(
+    dict_id: int,
+    page: int = 1,
+    page_size: int = 100,
+    db: Session = Depends(get_db),
+):
+    if page < 1:
+        raise HTTPException(status_code=400, detail="Số trang phải lớn hơn hoặc bằng 1")
+    if page_size < 1 or page_size > 100:
+        raise HTTPException(
+            status_code=400,
+            detail="Số giá trị từ điển mỗi trang phải từ 1 đến 100",
+        )
+
     repository = DictionaryRepository(db)
     dictionary = repository.get_dictionary(dict_id)
     if not dictionary:
         raise HTTPException(status_code=404, detail="Dictionary not found")
-    items = repository.list_items(dict_id)
+    items, total, total_pages, current_page = repository.paginate_items(
+        dict_id,
+        page=page,
+        page_size=page_size,
+    )
     result = [{"id": item.id, "code": item.code, "value": item.value} for item in items]
-    return {"status": "ok", "data": result}
+    first_item = (current_page - 1) * page_size + 1 if total else 0
+    return {
+        "status": "ok",
+        "data": result,
+        "pagination": {
+            "page": current_page,
+            "page_size": page_size,
+            "total": total,
+            "total_pages": total_pages,
+            "from": first_item,
+            "to": first_item + len(result) - 1 if result else 0,
+        },
+    }
 
 @router.post("/{dict_id}/items")
 def create_dictionary_item(dict_id: int, data: dict, current_user: dict = Depends(get_admin_user), db: Session = Depends(get_db)):
@@ -190,6 +224,7 @@ def create_dictionary_item(dict_id: int, data: dict, current_user: dict = Depend
     repository.add_item(new_item)
     db.commit()
     db.refresh(new_item)
+    template_artifact_cache.invalidate(dictionary.template_id)
     return {"status": "ok", "id": new_item.id}
 
 @router.delete("/{dict_id}")
@@ -198,8 +233,10 @@ def delete_dictionary(dict_id: int, current_user: dict = Depends(get_admin_user)
     dictionary = repository.get_dictionary(dict_id)
     if not dictionary:
         raise HTTPException(status_code=404, detail="Dictionary not found")
+    template_id = dictionary.template_id
     repository.delete(dictionary)
     db.commit()
+    template_artifact_cache.invalidate(template_id)
     return {"status": "ok"}
 
 @router.delete("/items/{item_id}")
@@ -208,6 +245,10 @@ def delete_dictionary_item(item_id: int, current_user: dict = Depends(get_admin_
     item = repository.get_item(item_id)
     if not item:
         raise HTTPException(status_code=404, detail="Item not found")
+    dictionary = repository.get_dictionary(item.dictionary_id)
+    template_id = dictionary.template_id if dictionary else None
     repository.delete_item(item)
     db.commit()
+    if template_id is not None:
+        template_artifact_cache.invalidate(template_id)
     return {"status": "ok"}

@@ -91,7 +91,7 @@ class ReviewContentRequest(BaseModel):
 
 class BulkSubmissionActionRequest(BaseModel):
     submission_ids: list[int]
-    action: Literal["delete"]
+    action: Literal["delete", "submit_for_review"]
 
 @router.post("/submit")
 def api_submit(req: SubmitRequest, current_user: dict = Depends(get_input_user), db: Session = Depends(get_db)):
@@ -938,6 +938,10 @@ async def api_upload_pdf(
     current_user: dict = Depends(get_input_user),
     db: Session = Depends(get_db),
 ):
+    return await run_in_threadpool(_upload_pdf_sync, file, current_user, db)
+
+
+def _upload_pdf_sync(file: UploadFile, current_user: dict, db: Session):
     filepath = None
     try:
         os.makedirs(PDF_STORAGE_PATH, exist_ok=True)

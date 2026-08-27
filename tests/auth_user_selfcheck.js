@@ -8,6 +8,8 @@ const authSource = fs.readFileSync('frontend/auth.js', 'utf8');
 const fields = {
     newUsername: { value: 'new-user' },
     newPassword: { value: '123' },
+    newFullName: { value: '' },
+    newPhoneNumber: { value: '' },
 };
 const sandbox = {
     console,

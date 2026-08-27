@@ -1,5 +1,7 @@
 from collections import Counter
 
+from sqlalchemy import func
+
 from server.models import (
     AssignedDocument,
     AssignedDocumentFolder,
@@ -16,6 +18,7 @@ from server.models import (
     ProjectUploadSession,
     Submission,
     SubmissionReviewAssignment,
+    SubmissionReviewHistory,
     SubmissionViewPresence,
 )
 
@@ -81,6 +84,36 @@ class ProjectAdminRepository:
         )
         return input_counts, reviewer_counts
 
+    def active_pdf_counts_by_case(self, project_id):
+        rows = self.session.query(
+            ProjectDocumentAsset.case_id,
+            func.count(ProjectDocumentAsset.id),
+        ).filter(
+            ProjectDocumentAsset.project_id == project_id,
+            ProjectDocumentAsset.status == "active",
+        ).group_by(
+            ProjectDocumentAsset.case_id,
+        ).all()
+        return {case_id: int(pdf_count or 0) for case_id, pdf_count in rows}
+
+    def submission_counts_by_case(self, project_id):
+        rows = self.session.query(
+            ProjectDocumentAsset.case_id,
+            func.count(Submission.id),
+        ).join(
+            Submission,
+            Submission.assigned_document_id
+            == ProjectDocumentAsset.assigned_document_id,
+        ).filter(
+            ProjectDocumentAsset.project_id == project_id,
+        ).group_by(
+            ProjectDocumentAsset.case_id,
+        ).all()
+        return {
+            case_id: int(submission_count or 0)
+            for case_id, submission_count in rows
+        }
+
     def submissions_for_case(self, case_id):
         return self.session.query(Submission).join(
             ProjectDocumentAsset,
@@ -90,13 +123,29 @@ class ProjectAdminRepository:
         ).order_by(Submission.id).all()
 
     def transfer_case_submission_owner(self, case_id, to_user_id):
+        # Submission.created_by_user_id is historical attribution. The current
+        # owner is ProjectCase.assigned_input_user_id and must not rewrite it.
         submissions = self.submissions_for_case(case_id)
-        for submission in submissions:
-            submission.created_by_user_id = to_user_id
         return len(submissions)
 
     def sync_case_submission_reviewer(self, case_id, reviewer_user_id):
         submissions = self.submissions_for_case(case_id)
+        submission_ids = [submission.id for submission in submissions]
+        reviewed_submission_ids = {
+            submission_id
+            for submission_id, in self.session.query(
+                SubmissionReviewHistory.submission_id,
+            ).filter(
+                SubmissionReviewHistory.event_type == "review_confirmed",
+                SubmissionReviewHistory.submission_id.in_(submission_ids),
+            ).distinct().all()
+        } if submission_ids else set()
+        submissions = [
+            submission
+            for submission in submissions
+            if submission.status in {"draft", "pending_review"}
+            and submission.id not in reviewed_submission_ids
+        ]
         changed = 0
         for submission in submissions:
             assignment = self.session.query(SubmissionReviewAssignment).filter(

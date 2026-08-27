@@ -8,47 +8,7 @@
     <link href="vendor/bootstrap/css/bootstrap.min.css" rel="stylesheet">
     <!-- FontAwesome for Icons -->
     <link rel="stylesheet" href="vendor/fontawesome/css/all.min.css">
-    <style>
-        #submissionsTableBody tr.table-success > * {
-            --bs-table-bg-state: #b7e4c7;
-            background-color: #b7e4c7 !important;
-            box-shadow: inset 4px 0 0 #198754;
-        }
-    </style>
-    <style>
-        body { background-color: #f8f9fa; }
-        .navbar { background-color: #0d6efd; color: white; }
-        .form-section { background: white; border-radius: 8px; padding: 20px; margin-bottom: 20px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
-        .form-section-title { color: #0d6efd; border-bottom: 2px solid #0d6efd; padding-bottom: 10px; margin-bottom: 20px; font-weight: bold; }
-        .autocomplete-items {
-            position: absolute;
-            border: 1px solid #d4d4d4;
-            border-bottom: none;
-            border-top: none;
-            z-index: 99;
-            top: 100%;
-            left: 0;
-            right: 0;
-            max-height: 200px;
-            overflow-y: auto;
-            background-color: white;
-            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
-        }
-        .autocomplete-items div {
-            padding: 10px;
-            cursor: pointer;
-            border-bottom: 1px solid #d4d4d4;
-        }
-        .autocomplete-items div:hover {
-            background-color: #e9e9e9;
-        }
-        .autocomplete-active {
-            background-color: #0d6efd !important;
-            color: #ffffff;
-        }
-        .position-relative { position: relative; }
-        #loading { text-align: center; margin-top: 50px; font-size: 1.2rem; }
-    </style>
+    <link rel="stylesheet" href="temp-page.css?v=1">
     <link rel="stylesheet" href="windows-ui.css?v=1">
 </head>
 <body class="app-shell">
@@ -56,14 +16,14 @@
         <div class="container-fluid">
             <span class="navbar-brand mb-0 h1"><i class="fab fa-windows"></i> Số hóa All in One</span>
             <div class="d-flex">
-                <div class="ms-3 text-white d-flex align-items-center" id="userInfoDisplay" style="display:none;">
+                <div class="ms-3 text-white d-flex align-items-center temp-hidden" id="userInfoDisplay">
                     <span class="me-3 fs-6">
                         <i class="fas fa-user-circle"></i> <span id="userNameText" class="fw-bold"></span>
                         <span id="userRoleBadge" class="badge bg-secondary ms-1"></span>
                     </span>
-                    <button class="btn btn-sm btn-outline-light position-relative" data-bs-toggle="modal" data-bs-target="#notificationModal" onclick="loadNotifications()" title="Thông báo"><i class="fas fa-bell"></i><span id="notificationBadge" class="position-absolute top-0 start-100 translate-middle badge rounded-pill bg-warning text-dark d-none"></span></button>
+                    <button class="btn btn-sm btn-outline-light position-relative" data-bs-toggle="modal" data-bs-target="#notificationModal" data-temp-click="load-notifications" title="Thông báo"><i class="fas fa-bell"></i><span id="notificationBadge" class="position-absolute top-0 start-100 translate-middle badge rounded-pill bg-warning text-dark d-none"></span></button>
                     <a href="admin.html#data" id="backToAdminBtn" class="btn btn-outline-light btn-sm me-2 d-none"><i class="fas fa-arrow-left"></i> Về trang Quản trị</a>
-                    <button class="btn btn-sm btn-outline-light ms-2" onclick="doLogout()">Thoát</button>
+                    <button class="btn btn-sm btn-outline-light ms-2" data-temp-click="logout">Thoát</button>
                 </div>
             </div>
         </div>
@@ -78,10 +38,10 @@
                 <button class="nav-link active fw-bold text-primary" id="form-tab" data-bs-toggle="tab" data-bs-target="#form-pane" type="button" role="tab">Nhập Hồ sơ</button>
             </li>
             <li class="nav-item" role="presentation" id="dataTabItem">
-                <button class="nav-link fw-bold" id="data-tab" data-bs-toggle="tab" data-bs-target="#data-pane" type="button" role="tab" onclick="fetchSubmissions()">Hồ sơ đã nhập</button>
+                <button class="nav-link fw-bold" id="data-tab" data-bs-toggle="tab" data-bs-target="#data-pane" type="button" role="tab" data-temp-click="fetch-submissions">Hồ sơ đã nhập</button>
             </li>
             <li class="nav-item d-none" role="presentation" id="reviewTabItem">
-                <button class="nav-link fw-bold text-danger" id="employee-review-tab" data-bs-toggle="tab" data-bs-target="#employee-review-pane" type="button" role="tab" onclick="fetchReviewSubmissions()">Hồ sơ cần kiểm tra</button>
+                <button class="nav-link fw-bold text-danger" id="employee-review-tab" data-bs-toggle="tab" data-bs-target="#employee-review-pane" type="button" role="tab" data-temp-click="fetch-review-submissions">Hồ sơ cần kiểm tra</button>
             </li>
         </ul>
 
@@ -92,12 +52,12 @@
                 <div class="row mt-3">
                     <!-- LEFT COLUMN: PDF VIEWER & LIST -->
                     <div class="col-lg-8">
-                        <div class="sticky-top" style="z-index: 1;">
+                        <div class="sticky-top temp-z-1">
                             <div class="row">
                                 <!-- File List Sidebar -->
                                 <div class="col-md-3" id="fileSidebar">
                                     <div class="mb-3 d-flex flex-column gap-2">
-                                        <button class="btn btn-success fw-bold w-100" onclick="fetchMyQueue()" id="btnFetchQueue">
+                                        <button class="btn btn-success fw-bold w-100" data-temp-click="fetch-my-queue" id="btnFetchQueue">
                                             <i class="fas fa-download"></i> Tải tài liệu được giao
                                         </button>
                                         <label for="pdfUploadInput" class="form-label btn btn-outline-primary w-100 mb-0">
@@ -106,12 +66,12 @@
                                         <input class="form-control d-none" type="file" id="pdfUploadInput" accept=".pdf,.png,.jpg,.jpeg,.webp" multiple>
                                     </div>
                                     <div class="border rounded bg-light mb-2 p-1 d-flex align-items-center" id="queueExplorerBreadcrumb">
-                                        <button type="button" class="btn btn-sm btn-link text-decoration-none p-1 fw-semibold" onclick="openQueueFolder(null)" title="Về danh sách folder">
+                                        <button type="button" class="btn btn-sm btn-link text-decoration-none p-1 fw-semibold" data-temp-click="open-queue-root" title="Về danh sách folder">
                                             <i class="fas fa-home"></i> Tài liệu
                                         </button>
                                         <span id="queueExplorerCurrentFolder" class="small text-muted text-truncate"></span>
                                     </div>
-                                    <div style="height: 75vh; overflow-y: auto;">
+                                    <div class="temp-scroll-75">
                                         <div class="list-group" id="fileQueueList">
                                             <!-- Files will be dynamically inserted here -->
                                         </div>
@@ -120,9 +80,9 @@
                                 
                                 <!-- PDF Viewer -->
                                 <div class="col-md-9" id="pdfViewerCol">
-                                    <div class="border rounded bg-light d-flex align-items-center justify-content-center" id="pdfViewerContainer" style="height: 85vh; overflow: hidden;">
+                                    <div class="border rounded bg-light d-flex align-items-center justify-content-center temp-pdf-viewer" id="pdfViewerContainer">
                                         <p class="text-muted text-center" id="pdfPlaceholder">Chưa có tài liệu nào được tải lên.<br>Vui lòng chọn tệp PDF hoặc hình ảnh ở cột bên trái.</p>
-                                        <iframe id="pdfIframe" style="width: 100%; height: 100%; display: none;" frameborder="0" referrerpolicy="no-referrer"></iframe>
+                                        <iframe id="pdfIframe" class="temp-pdf-frame" frameborder="0" referrerpolicy="no-referrer"></iframe>
                                     </div>
                                 </div>
                             </div>
@@ -131,22 +91,22 @@
                     
                     <!-- RIGHT COLUMN: DATA FORM -->
                     <div class="col-lg-4">
-                        <div style="height: 85vh; overflow-y: auto; overflow-x: hidden; padding-right: 15px; padding-left: 5px;">
-                            <div class="mb-3" id="templateSelectContainer" style="display:none;">
+                        <div class="temp-form-scroll">
+                            <div class="mb-3 temp-hidden" id="templateSelectContainer">
                                 <label for="templateSelect" class="form-label fw-bold text-primary"><i class="fas fa-file-alt"></i> Chọn Biểu mẫu cần nhập</label>
-                                <select id="templateSelect" class="form-select border-primary" onchange="onTemplateSelected()">
+                                <select id="templateSelect" class="form-select border-primary" data-temp-change="select-template">
                                     <option value="">-- Đang tải danh sách biểu mẫu... --</option>
                                 </select>
                             </div>
                             
-                            <form id="dataForm" style="display: none;">
+                            <form id="dataForm" class="temp-hidden">
                                 <div class="d-flex justify-content-between align-items-center mb-3 p-2 bg-light border rounded">
                                     <h5 class="text-primary mb-0"><i class="fas fa-edit"></i> Dữ liệu hồ sơ</h5>
                                     <div class="d-flex gap-1 flex-wrap justify-content-end">
                                         <span id="folderLinkBadge" class="btn btn-outline-secondary btn-sm disabled" title="Folder/hồ sơ chứa PDF đang mở">
                                             <i class="fas fa-folder"></i> <span id="folderLinkText">Chưa có folder</span>
                                         </span>
-                                        <button type="button" id="pdfLinkBtn" class="btn btn-outline-secondary btn-sm" onclick="togglePdfLink()" title="Liên kết với PDF đang hiển thị">
+                                        <button type="button" id="pdfLinkBtn" class="btn btn-outline-secondary btn-sm" data-temp-click="toggle-pdf-link" title="Liên kết với PDF đang hiển thị">
                                             <i class="fas fa-link"></i> <span id="pdfLinkText">Không liên kết PDF</span>
                                         </button>
                                     </div>
@@ -154,26 +114,26 @@
                                 <div id="form-container"></div>
                                 <div id="adminCheckArea" class="mt-4 p-3 bg-white border border-primary rounded d-none shadow-sm">
                                     <div class="form-check form-switch fs-5 d-flex align-items-center">
-                                        <input class="form-check-input me-3 mt-0" type="checkbox" id="adminFormCheckToggle" onchange="toggleFormCheck()" style="cursor: pointer; transform: scale(1.3);">
-                                        <label class="form-check-label text-primary fw-bold" for="adminFormCheckToggle" style="cursor: pointer;">Xác nhận Đã Kiểm tra & Duyệt hồ sơ</label>
+                                        <input class="form-check-input me-3 mt-0 temp-review-toggle" type="checkbox" id="adminFormCheckToggle" data-temp-change="toggle-form-check">
+                                        <label class="form-check-label text-primary fw-bold temp-pointer" for="adminFormCheckToggle">Xác nhận Đã Kiểm tra & Duyệt hồ sơ</label>
                                     </div>
                                     <small class="text-muted ms-5">Chỉ người được phân kiểm tra hồ sơ này mới có thể duyệt hoặc đánh dấu lỗi.</small>
                                 </div>
                                 <div class="d-grid gap-2 mb-5 mt-4">
                                     <div class="row g-2" id="actionButtonsRow">
                                         <div class="col-6">
-                                            <button type="button" class="btn btn-secondary w-100" id="draftBtn" onclick="submitData('draft')"><i class="fas fa-save"></i> Lưu nháp</button>
+                                            <button type="button" class="btn btn-secondary w-100" id="draftBtn" data-temp-click="submit-draft"><i class="fas fa-save"></i> Lưu nháp</button>
                                         </div>
                                         <div class="col-6">
-                                            <button type="button" class="btn btn-primary w-100" id="submitBtn" onclick="submitData('pending_review')"><i class="fas fa-paper-plane"></i> Nộp duyệt</button>
+                                            <button type="button" class="btn btn-primary w-100" id="submitBtn" data-temp-click="submit-pending-review"><i class="fas fa-paper-plane"></i> Nộp duyệt</button>
                                         </div>
                                     </div>
-                                    <div class="alert alert-info mt-2 mb-0" id="readonlyNotice" style="display: none;">
+                                    <div class="alert alert-info mt-2 mb-0 temp-hidden" id="readonlyNotice">
                                         <i class="fas fa-lock"></i> Hồ sơ đang chờ duyệt / đã duyệt. (Chỉ Xem)
                                     </div>
-                                    <button type="button" class="btn btn-warning btn-sm mt-2" id="clearFormBtn" onclick="resetFormData()">Bìa mới (Xóa toàn bộ)</button>
-                                    <button type="button" class="btn btn-outline-danger btn-sm mt-2 d-none" id="cancelEditBtn" onclick="cancelEdit()">Quay lại danh sách</button>
-                                    <button type="button" class="btn btn-success mt-3 d-none" id="reviewNextButton" onclick="goToNextReviewSubmission()"><i class="fas fa-arrow-right"></i> Hồ sơ tiếp theo</button>
+                                    <button type="button" class="btn btn-warning btn-sm mt-2" id="clearFormBtn" data-temp-click="reset-form">Bìa mới (Xóa toàn bộ)</button>
+                                    <button type="button" class="btn btn-outline-danger btn-sm mt-2 d-none" id="cancelEditBtn" data-temp-click="cancel-edit">Quay lại danh sách</button>
+                                    <button type="button" class="btn btn-success mt-3 d-none" id="reviewNextButton" data-temp-click="next-review"><i class="fas fa-arrow-right"></i> Hồ sơ tiếp theo</button>
                                 </div>
                             </form>
                         </div>
@@ -185,14 +145,14 @@
             <div class="tab-pane fade" id="data-pane" role="tabpanel">
                 <div class="form-section">
                     <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
-                        <h4 class="form-section-title mb-0" style="border-bottom: none;"><i class="fas fa-database"></i> Hồ sơ bạn đã nhập</h4>
+                        <h4 class="form-section-title mb-0 temp-title-no-border"><i class="fas fa-database"></i> Hồ sơ bạn đã nhập</h4>
                         <div class="d-flex align-items-center flex-wrap gap-2">
-                            <button type="button" class="btn btn-outline-primary btn-sm" id="selectAllSubmissionsBtn" onclick="selectAllSubmissionsOnPage()" aria-pressed="false">Chọn tất cả</button>
-                            <button type="button" class="btn btn-outline-secondary btn-sm" id="clearSubmissionSelectionBtn" onclick="clearSubmissionSelection()" disabled>Bỏ chọn tất cả</button>
+                            <button type="button" class="btn btn-outline-primary btn-sm" id="selectAllSubmissionsBtn" data-temp-click="select-all-submissions" aria-pressed="false">Chọn tất cả</button>
+                            <button type="button" class="btn btn-outline-secondary btn-sm" id="clearSubmissionSelectionBtn" data-temp-click="clear-submission-selection" disabled>Bỏ chọn tất cả</button>
                             <span class="badge bg-light text-dark border" id="selectedSubmissionsCount">Đã chọn: 0</span>
-                            <button type="button" class="btn btn-success btn-sm" id="bulkSubmitSubmissionsBtn" onclick="bulkSubmitSelectedSubmissions()" disabled><i class="fas fa-paper-plane"></i> Nộp duyệt</button>
-                            <button type="button" class="btn btn-danger btn-sm" id="bulkDeleteSubmissionsBtn" onclick="bulkDeleteSelectedSubmissions()" disabled><i class="fas fa-trash"></i> Xóa</button>
-                            <select id="filterTemplateId" class="form-select me-2" onchange="fetchSubmissions()" style="display:none;">
+                            <button type="button" class="btn btn-success btn-sm" id="bulkSubmitSubmissionsBtn" data-temp-click="bulk-submit-submissions" disabled><i class="fas fa-paper-plane"></i> Nộp duyệt</button>
+                            <button type="button" class="btn btn-danger btn-sm" id="bulkDeleteSubmissionsBtn" data-temp-click="bulk-delete-submissions" disabled><i class="fas fa-trash"></i> Xóa</button>
+                            <select id="filterTemplateId" class="form-select me-2 temp-hidden" data-temp-change="fetch-submissions">
                                 <!-- Hidden since users likely don't need to filter by template if they are assigned one, but app.js uses it -->
                                 <option value="">-- Tất cả Biểu mẫu --</option>
                             </select>
@@ -226,14 +186,14 @@
             <div class="tab-pane fade" id="employee-review-pane" role="tabpanel">
                 <div class="form-section">
                     <div class="d-flex justify-content-between align-items-center mb-3">
-                        <h4 class="form-section-title mb-0 text-danger" style="border-bottom: none;"><i class="fas fa-user-check"></i> Hồ sơ được phân kiểm tra</h4>
-                        <button class="btn btn-secondary text-nowrap" onclick="fetchReviewSubmissions()"><i class="fas fa-sync"></i> Tải lại</button>
+                        <h4 class="form-section-title mb-0 text-danger temp-title-no-border"><i class="fas fa-user-check"></i> Hồ sơ được phân kiểm tra</h4>
+                        <button class="btn btn-secondary text-nowrap" data-temp-click="fetch-review-submissions"><i class="fas fa-sync"></i> Tải lại</button>
                     </div>
                     <div class="row g-3">
                         <div class="col-lg-4">
                             <div class="border rounded overflow-hidden">
                                 <div class="bg-light border-bottom px-3 py-2 fw-bold"><i class="fas fa-folder-tree"></i> Folder được phân kiểm tra</div>
-                                <div id="reviewFolderTree" class="list-group list-group-flush" style="max-height: 62vh; overflow-y: auto;">
+                                <div id="reviewFolderTree" class="list-group list-group-flush temp-scroll-62vh">
                                     <div class="text-center text-muted p-3">Đang tải folder...</div>
                                 </div>
                             </div>
@@ -260,27 +220,13 @@
         <div class="modal-dialog modal-dialog-scrollable"><div class="modal-content">
             <div class="modal-header"><h5 class="modal-title" id="notificationModalLabel"><i class="fas fa-bell"></i> Thông báo</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
             <div class="modal-body p-0"><div id="notificationList" class="list-group list-group-flush"></div></div>
-            <div class="modal-footer"><button type="button" class="btn btn-outline-secondary btn-sm" onclick="markAllNotificationsRead()">Đánh dấu đã đọc tất cả</button></div>
+            <div class="modal-footer"><button type="button" class="btn btn-outline-secondary btn-sm" data-temp-click="mark-notifications-read">Đánh dấu đã đọc tất cả</button></div>
         </div></div>
     </div>
 
     <!-- Bootstrap JS Bundle -->
     <script src="vendor/bootstrap/js/bootstrap.bundle.min.js"></script>
-    <script>
-        // Immediate Auth Check to prevent flickering
-        const token = localStorage.getItem('token');
-        const userStr = localStorage.getItem('user');
-        if (!token || !userStr) {
-            window.location.href = '/login.html';
-        } else {
-            const user = JSON.parse(userStr);
-            const urlParams = new URLSearchParams(window.location.search);
-            const hasCheckId = urlParams.has('check_id');
-            if (user.role === 'admin' && !hasCheckId) {
-                window.location.href = '/admin.html';
-            }
-        }
-    </script>
+    <script src="temp-index.js?v=1"></script>
     <script src="auth.js?v=7.10"></script>
     <script src="js/pdf_link_state.js?v=1.00"></script>
     <script src="js/pdf_handler.js?v=7.81"></script>
@@ -298,12 +244,6 @@
     <title>Quản trị - Số hóa All in One</title>
     <link href="vendor/bootstrap/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="vendor/fontawesome/css/all.min.css">
-    <style>
-        body { background-color: #f8f9fa; }
-        .navbar { background-color: #dc3545; color: white; }
-        .form-section { background: white; border-radius: 8px; padding: 20px; margin-bottom: 20px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
-        .form-section-title { color: #dc3545; border-bottom: 2px solid #dc3545; padding-bottom: 10px; margin-bottom: 20px; font-weight: bold; }
-    </style>
     <link rel="stylesheet" href="windows-ui.css?v=1">
 </head>
 <body class="app-shell">
@@ -313,7 +253,7 @@
             <div class="d-flex align-items-center">
                 <div class="text-white d-flex align-items-center">
                     <i class="fas fa-user-shield me-1"></i> <span id="userNameText">Admin</span>
-                    <button class="btn btn-sm btn-dark ms-2" onclick="doLogout()">Thoát</button>
+                    <button class="btn btn-sm btn-dark ms-2" data-temp-click="logout">Thoát</button>
                 </div>
             </div>
         </div>
@@ -322,25 +262,25 @@
     <div class="container-fluid mt-4 px-4">
         <ul class="nav nav-tabs mb-4" id="adminTabs" role="tablist">
             <li class="nav-item" role="presentation">
-                <button class="nav-link active fw-bold text-success" id="dashboard-tab" data-bs-toggle="tab" data-bs-target="#dashboard-pane" type="button" role="tab" onclick="fetchDashboardStats()">Dashboard</button>
+                <button class="nav-link active fw-bold text-success" id="dashboard-tab" data-bs-toggle="tab" data-bs-target="#dashboard-pane" type="button" role="tab" data-temp-click="fetch-dashboard">Dashboard</button>
             </li>
             <li class="nav-item" role="presentation">
-                <button class="nav-link fw-bold text-danger" id="kpi-tab" data-bs-toggle="tab" data-bs-target="#kpi-pane" type="button" role="tab" onclick="fetchAdminData()">Quản lý Tài khoản</button>
+                <button class="nav-link fw-bold text-danger" id="kpi-tab" data-bs-toggle="tab" data-bs-target="#kpi-pane" type="button" role="tab" data-temp-click="fetch-admin-data">Quản lý Tài khoản</button>
             </li>
             <li class="nav-item" role="presentation">
-                <button class="nav-link fw-bold text-primary" id="inventory-tab" data-bs-toggle="tab" data-bs-target="#inventory-pane" type="button" role="tab" onclick="fetchDocumentStats()">Kho Tài liệu</button>
+                <button class="nav-link fw-bold text-primary" id="inventory-tab" data-bs-toggle="tab" data-bs-target="#inventory-pane" type="button" role="tab" data-temp-click="fetch-document-stats">Kho Tài liệu</button>
             </li>
             <li class="nav-item" role="presentation">
-                <button class="nav-link fw-bold text-primary" id="assignment-tab" data-bs-toggle="tab" data-bs-target="#assignment-pane" type="button" role="tab" onclick="fetchDocumentStats(); fetchReviewerReassignmentData(); loadServerSourceFolders()">Phân công</button>
+                <button class="nav-link fw-bold text-primary" id="assignment-tab" data-bs-toggle="tab" data-bs-target="#assignment-pane" type="button" role="tab" data-temp-click="initialize-assignment">Phân công</button>
             </li>
             <li class="nav-item" role="presentation">
-                <button class="nav-link fw-bold" id="templates-tab" data-bs-toggle="tab" data-bs-target="#templates-pane" type="button" role="tab" onclick="fetchAdminTemplates()">Quản lý Biểu mẫu (Templates)</button>
+                <button class="nav-link fw-bold" id="templates-tab" data-bs-toggle="tab" data-bs-target="#templates-pane" type="button" role="tab" data-temp-click="fetch-admin-templates">Quản lý Biểu mẫu (Templates)</button>
             </li>
             <li class="nav-item" role="presentation">
-                <button class="nav-link fw-bold text-danger" id="review-tab" data-bs-toggle="tab" data-bs-target="#review-pane" type="button" role="tab" onclick="fetchReviewSubmissions()">Kiểm duyệt Hồ sơ</button>
+                <button class="nav-link fw-bold text-danger" id="review-tab" data-bs-toggle="tab" data-bs-target="#review-pane" type="button" role="tab" data-temp-click="fetch-review-submissions">Kiểm duyệt Hồ sơ</button>
             </li>
             <li class="nav-item" role="presentation">
-                <button class="nav-link fw-bold text-success" id="data-tab" data-bs-toggle="tab" data-bs-target="#data-pane" type="button" role="tab" onclick="fetchCompletedSubmissions()">Hồ sơ Hoàn chỉnh</button>
+                <button class="nav-link fw-bold text-success" id="data-tab" data-bs-toggle="tab" data-bs-target="#data-pane" type="button" role="tab" data-temp-click="fetch-completed-submissions">Hồ sơ Hoàn chỉnh</button>
             </li>
         </ul>
 
@@ -352,7 +292,7 @@
                         <div class="row g-3 align-items-end">
                             <div class="col-sm-6 col-lg-3">
                                 <label for="dashboardPeriodFilter" class="form-label fw-semibold">Thống kê theo</label>
-                                <select id="dashboardPeriodFilter" class="form-select" onchange="fetchDashboardStats()">
+                                <select id="dashboardPeriodFilter" class="form-select" data-temp-change="fetch-dashboard">
                                     <option value="day">Ngày</option>
                                     <option value="week">Tuần</option>
                                     <option value="month">Tháng</option>
@@ -361,17 +301,17 @@
                             </div>
                             <div class="col-sm-6 col-lg-3" id="dashboardReferenceDateGroup">
                                 <label for="dashboardReferenceDate" class="form-label fw-semibold">Ngày tham chiếu</label>
-                                <input type="date" id="dashboardReferenceDate" class="form-control" onchange="fetchDashboardStats()">
+                                <input type="date" id="dashboardReferenceDate" class="form-control" data-temp-change="fetch-dashboard">
                             </div>
                             <div class="col-sm-12 col-lg-6 d-none" id="dashboardDateRangeFields">
                                 <div class="row g-2">
                                     <div class="col-12">
                                         <label for="dashboardStartDate" class="form-label fw-semibold">Từ:</label>
-                                        <input type="datetime-local" id="dashboardStartDate" class="form-control" lang="en-US" step="60" onchange="fetchDashboardStats()">
+                                        <input type="datetime-local" id="dashboardStartDate" class="form-control" lang="en-US" step="60" data-temp-change="fetch-dashboard">
                                     </div>
                                     <div class="col-12">
                                         <label for="dashboardEndDate" class="form-label fw-semibold">Đến:</label>
-                                        <input type="datetime-local" id="dashboardEndDate" class="form-control" lang="en-US" step="60" onchange="fetchDashboardStats()">
+                                        <input type="datetime-local" id="dashboardEndDate" class="form-control" lang="en-US" step="60" data-temp-change="fetch-dashboard">
                                     </div>
                                 </div>
                             </div>
@@ -383,41 +323,41 @@
                 </div>
                 <div class="row g-3">
                     <div class="col-md-4">
-                        <div class="card text-white bg-primary shadow-sm" style="border: none;">
+                        <div class="card text-white bg-primary shadow-sm temp-dashboard-card">
                             <div class="card-body">
                                 <div class="d-flex justify-content-between align-items-center">
                                     <div>
-                                        <h5 class="card-title text-uppercase mb-1" style="font-size: 0.85rem; font-weight: 600; opacity: 0.8;">Tổng số Hồ sơ</h5>
+                                        <h5 class="card-title text-uppercase mb-1 temp-dashboard-title">Tổng số Hồ sơ</h5>
                                         <h2 class="display-5 fw-bold mb-0" id="dashTotalDocs">0</h2>
                                     </div>
-                                    <i class="fas fa-file-alt fa-3x" style="opacity: 0.3;"></i>
+                                    <i class="fas fa-file-alt fa-3x temp-dashboard-icon"></i>
                                 </div>
                             </div>
                         </div>
                     </div>
                     <div class="col-md-4">
-                        <div class="card text-white bg-success shadow-sm" style="border: none;">
+                        <div class="card text-white bg-success shadow-sm temp-dashboard-card">
                             <div class="card-body">
                                 <div class="d-flex justify-content-between align-items-center">
                                     <div>
-                                        <h5 class="card-title text-uppercase mb-1" id="dashPeriodTitle" style="font-size: 0.85rem; font-weight: 600; opacity: 0.8;">Hồ sơ nhập trong ngày</h5>
+                                        <h5 class="card-title text-uppercase mb-1 temp-dashboard-title" id="dashPeriodTitle">Hồ sơ nhập trong ngày</h5>
                                         <h2 class="display-5 fw-bold mb-0" id="dashPeriodDocs" aria-live="polite">0</h2>
-                                        <div class="small mt-1" id="dashPeriodRange" style="opacity: 0.85;"></div>
+                                        <div class="small mt-1 temp-dashboard-range" id="dashPeriodRange"></div>
                                     </div>
-                                    <i class="fas fa-chart-line fa-3x" style="opacity: 0.3;"></i>
+                                    <i class="fas fa-chart-line fa-3x temp-dashboard-icon"></i>
                                 </div>
                             </div>
                         </div>
                     </div>
                     <div class="col-md-4">
-                        <div class="card text-white bg-warning shadow-sm" style="border: none;">
+                        <div class="card text-white bg-warning shadow-sm temp-dashboard-card">
                             <div class="card-body">
                                 <div class="d-flex justify-content-between align-items-center">
                                     <div>
-                                        <h5 class="card-title text-uppercase mb-1" style="font-size: 0.85rem; font-weight: 600; opacity: 0.8;">Chờ duyệt / Đã duyệt</h5>
+                                        <h5 class="card-title text-uppercase mb-1 temp-dashboard-title">Chờ duyệt / Đã duyệt</h5>
                                         <h2 class="display-5 fw-bold mb-0"><span id="dashPendingReview">0</span> / <span id="dashApproved">0</span></h2>
                                     </div>
-                                    <i class="fas fa-clipboard-check fa-3x" style="opacity: 0.3;"></i>
+                                    <i class="fas fa-clipboard-check fa-3x temp-dashboard-icon"></i>
                                 </div>
                             </div>
                         </div>
@@ -464,7 +404,7 @@
                                 <input type="text" id="newUsername" class="form-control mb-2" placeholder="Tên đăng nhập">
                                 <input type="password" id="newPassword" class="form-control mb-2" placeholder="Mật khẩu (ít nhất 8 ký tự)" minlength="8" maxlength="128" autocomplete="new-password">
                                 <div class="form-text mb-2">Tài khoản mới chưa có vai trò cố định. Quyền nhập và kiểm tra phát sinh khi admin phân tài liệu tại tab <strong>Phân công</strong>.</div>
-                                <button type="button" class="btn btn-primary w-100" onclick="createUser()">Tạo tài khoản</button>
+                                <button type="button" class="btn btn-primary w-100" data-temp-click="create-user">Tạo tài khoản</button>
                             </div>
                         </div>
                     </div>
@@ -529,13 +469,13 @@
                                 <div id="serverSourceRoot" class="form-text text-break mb-1">Đang đọc cấu hình thư mục nguồn...</div>
                                 <div class="input-group input-group-sm mb-2">
                                     <input type="text" id="serverSourcePath" class="form-control" readonly value="">
-                                    <button type="button" class="btn btn-outline-secondary" onclick="goToParentServerFolder()" title="Lên thư mục cha"><i class="fas fa-level-up-alt"></i></button>
-                                    <button type="button" class="btn btn-outline-secondary" onclick="loadServerSourceFolders('')" title="Về thư mục gốc"><i class="fas fa-home"></i></button>
+                                    <button type="button" class="btn btn-outline-secondary" data-temp-click="parent-server-folder" title="Lên thư mục cha"><i class="fas fa-level-up-alt"></i></button>
+                                    <button type="button" class="btn btn-outline-secondary" data-temp-click="server-folder-root" title="Về thư mục gốc"><i class="fas fa-home"></i></button>
                                 </div>
-                                <select id="serverFolderList" class="form-select form-select-sm" size="6" ondblclick="openSelectedServerFolder()"></select>
+                                <select id="serverFolderList" class="form-select form-select-sm" size="6" data-temp-dblclick="open-server-folder"></select>
                                 <div class="d-flex gap-2 mt-2">
-                                    <button type="button" class="btn btn-sm btn-outline-primary" onclick="openSelectedServerFolder()"><i class="fas fa-folder-open"></i> Mở folder</button>
-                                    <button type="button" class="btn btn-sm btn-primary" onclick="scanSelectedServerFolder()"><i class="fas fa-search"></i> Quét tài liệu</button>
+                                    <button type="button" class="btn btn-sm btn-outline-primary" data-temp-click="open-server-folder"><i class="fas fa-folder-open"></i> Mở folder</button>
+                                    <button type="button" class="btn btn-sm btn-primary" data-temp-click="scan-server-folder"><i class="fas fa-search"></i> Quét tài liệu</button>
                                 </div>
                             </div>
 
@@ -545,7 +485,7 @@
                                     <option value="">Quét thư mục trước</option>
                                 </select>
                                 <div id="serverFolderScanSummary" class="text-muted small mt-2">Chưa quét thư mục.</div>
-                                <div id="serverFolderPreview" class="small border rounded bg-light p-2 mt-2" style="display: none; max-height: 180px; overflow-y: auto;"></div>
+                                <div id="serverFolderPreview" class="small border rounded bg-light p-2 mt-2 temp-hidden temp-scroll-180"></div>
                             </div>
 
                             <div class="mb-3">
@@ -555,19 +495,19 @@
 
                             <div class="mb-3">
                                 <label class="fw-bold text-primary mb-2"><i class="fas fa-keyboard"></i> 2. Chọn người nhập</label>
-                                <div id="assignInputUserCheckboxes" class="border p-2 rounded" style="max-height: 150px; overflow-y: auto; background-color: #f8f9fa;">
+                                <div id="assignInputUserCheckboxes" class="border p-2 rounded temp-scroll-150">
                                     <span class="text-muted">Đang tải danh sách nhân viên...</span>
                                 </div>
                             </div>
 
                             <div class="mb-4">
                                 <label class="fw-bold text-primary mb-2"><i class="fas fa-user-check"></i> 3. Chọn người kiểm tra</label>
-                                <div id="assignReviewerCheckboxes" class="border p-2 rounded" style="max-height: 150px; overflow-y: auto; background-color: #f8f9fa;">
+                                <div id="assignReviewerCheckboxes" class="border p-2 rounded temp-scroll-150">
                                     <span class="text-muted">Đang tải danh sách nhân viên và admin...</span>
                                 </div>
                             </div>
                             
-                            <button class="btn btn-success w-100 fw-bold py-2" onclick="uploadAndAssign()" id="btnUploadAssign">
+                            <button class="btn btn-success w-100 fw-bold py-2" data-temp-click="upload-and-assign" id="btnUploadAssign">
                                 <i class="fas fa-share-square"></i> Phân công
                             </button>
                             <div class="form-text mt-2">Nhân viên chỉ nhận quyền nhập hoặc kiểm tra đối với tài liệu được phân trong lượt này. Tài liệu đang chờ sẽ được chia lại khi phân công lại, không tạo bản sao.</div>
@@ -580,21 +520,21 @@
                             <div class="mb-3">
                                 <label class="form-label fw-semibold">Folder cần chia lại</label>
                                 <div id="reassignReviewerSummary" class="form-text"></div>
-                                <button type="button" class="btn btn-sm btn-outline-secondary mt-2 mb-1" id="toggleAllReviewerFoldersBtn" onclick="toggleAllReviewerFolders()">
+                                <button type="button" class="btn btn-sm btn-outline-secondary mt-2 mb-1" id="toggleAllReviewerFoldersBtn" data-temp-click="toggle-reviewer-folders">
                                     <i class="fas fa-check-double"></i> Chọn toàn bộ folder
                                 </button>
-                                <div id="reviewerFolderReassignmentPreview" class="small border rounded bg-light p-2" style="max-height: 180px; overflow-y: auto;">Đang tải folder...</div>
+                                <div id="reviewerFolderReassignmentPreview" class="small border rounded bg-light p-2 temp-scroll-180">Đang tải folder...</div>
                             </div>
                             <div class="mb-3">
                                 <label class="form-label fw-semibold">Chọn người kiểm tra nhận folder</label>
-                                <div id="reassignReviewerCheckboxes" class="border p-2 rounded bg-light" style="max-height: 180px; overflow-y: auto;">
+                                <div id="reassignReviewerCheckboxes" class="border p-2 rounded bg-light temp-scroll-180">
                                     <span class="text-muted">Đang tải người kiểm tra...</span>
                                 </div>
                             </div>
-                            <button type="button" class="btn btn-primary" onclick="reassignDocumentReviewer()" id="btnReassignDocumentReviewer">
+                            <button type="button" class="btn btn-primary" data-temp-click="reassign-reviewer" id="btnReassignDocumentReviewer">
                                 <i class="fas fa-random"></i> Tự chia lại theo folder
                             </button>
-                            <button type="button" class="btn btn-outline-secondary ms-2" onclick="fetchReviewerReassignmentData()">
+                            <button type="button" class="btn btn-outline-secondary ms-2" data-temp-click="fetch-reviewer-reassignment">
                                 <i class="fas fa-sync"></i> Tải lại
                             </button>
                             <div id="reassignReviewerStatus" class="mt-3"></div>
@@ -632,7 +572,7 @@
                         <div class="col-md-6">
                             <div class="input-group">
                                 <input type="file" id="newTemplateFile" class="form-control" accept=".xlsx,.xlsm">
-                                <button class="btn btn-primary" onclick="uploadTemplate()">Tải mẫu lên</button>
+                                <button class="btn btn-primary" data-temp-click="upload-template">Tải mẫu lên</button>
                             </div>
                         </div>
                     </div>
@@ -657,19 +597,19 @@
             <div class="tab-pane fade" id="review-pane" role="tabpanel">
                 <div class="form-section">
                     <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
-                        <h4 class="form-section-title mb-0 text-danger" style="border-bottom: none;"><i class="fas fa-search"></i> Kiểm duyệt Hồ sơ</h4>
+                        <h4 class="form-section-title mb-0 text-danger temp-title-no-border"><i class="fas fa-search"></i> Kiểm duyệt Hồ sơ</h4>
                         <div class="d-flex align-items-center">
-                            <select id="filterReviewTemplateId" class="form-select me-2" onchange="fetchReviewSubmissions()">
+                            <select id="filterReviewTemplateId" class="form-select me-2" data-temp-change="fetch-review-submissions">
                                 <option value="">-- Tất cả Biểu mẫu --</option>
                             </select>
-                            <button class="btn btn-secondary text-nowrap" onclick="fetchReviewSubmissions()"><i class="fas fa-sync"></i> Tải lại</button>
+                            <button class="btn btn-secondary text-nowrap" data-temp-click="fetch-review-submissions"><i class="fas fa-sync"></i> Tải lại</button>
                         </div>
                     </div>
                     <div class="row g-3">
                         <div class="col-lg-4">
                             <div class="border rounded overflow-hidden">
                                 <div class="bg-light border-bottom px-3 py-2 fw-bold"><i class="fas fa-folder-tree"></i> Tất cả folder cần kiểm tra</div>
-                                <div id="reviewFolderTree" class="list-group list-group-flush" style="max-height: 62vh; overflow-y: auto;">
+                                <div id="reviewFolderTree" class="list-group list-group-flush temp-scroll-62vh">
                                     <div class="text-center text-muted p-3">Đang tải folder...</div>
                                 </div>
                             </div>
@@ -696,23 +636,23 @@
             <div class="tab-pane fade" id="data-pane" role="tabpanel">
                 <div class="form-section">
                     <div class="d-flex justify-content-between align-items-center mb-3">
-                        <h4 class="form-section-title mb-0 text-success" style="border-bottom: none;"><i class="fas fa-check-circle"></i> Kho hồ sơ hoàn chỉnh</h4>
+                        <h4 class="form-section-title mb-0 text-success temp-title-no-border"><i class="fas fa-check-circle"></i> Kho hồ sơ hoàn chỉnh</h4>
                         <div class="d-flex align-items-center">
                             <label class="me-2 fw-bold text-nowrap">Từ:</label>
-                            <input type="datetime-local" id="filterStartDate" class="form-control me-2" onchange="fetchCompletedSubmissions()" title="Từ ngày giờ">
+                            <input type="datetime-local" id="filterStartDate" class="form-control me-2" data-temp-change="fetch-completed-submissions" title="Từ ngày giờ">
                             <label class="me-2 fw-bold text-nowrap">Đến:</label>
-                            <input type="datetime-local" id="filterEndDate" class="form-control me-3" onchange="fetchCompletedSubmissions()" title="Đến ngày giờ">
-                            <select id="filterTemplateId" class="form-select me-2" onchange="fetchCompletedSubmissions()">
+                            <input type="datetime-local" id="filterEndDate" class="form-control me-3" data-temp-change="fetch-completed-submissions" title="Đến ngày giờ">
+                            <select id="filterTemplateId" class="form-select me-2" data-temp-change="fetch-completed-submissions">
                                 <option value="">-- Tất cả Biểu mẫu --</option>
                             </select>
-                            <button class="btn btn-success text-nowrap" onclick="exportExcelByTemplate()"><i class="fas fa-file-export"></i> Xuất Excel</button>
+                            <button class="btn btn-success text-nowrap" data-temp-click="export-template-excel"><i class="fas fa-file-export"></i> Xuất Excel</button>
                         </div>
                     </div>
                     <div class="row g-3">
                         <div class="col-lg-4">
                             <div class="border rounded overflow-hidden">
                                 <div class="bg-light border-bottom px-3 py-2 fw-bold"><i class="fas fa-folder-tree"></i> Folder hồ sơ hoàn chỉnh</div>
-                                <div id="completedFolderTree" class="list-group list-group-flush" style="max-height: 62vh; overflow-y: auto;">
+                                <div id="completedFolderTree" class="list-group list-group-flush temp-scroll-62vh">
                                     <div class="text-center text-muted p-3">Đang tải folder...</div>
                                 </div>
                             </div>
@@ -778,7 +718,7 @@
                     <button class="nav-link active fw-bold" id="tab-basic" data-bs-toggle="tab" data-bs-target="#pane-basic" type="button" role="tab">Cột Đặc biệt</button>
                 </li>
                 <li class="nav-item" role="presentation">
-                    <button class="nav-link fw-bold text-success" id="tab-dict-manage" data-bs-toggle="tab" data-bs-target="#pane-dict-manage" type="button" role="tab" onclick="fetchTemplateDictionaries()">Kho Từ điển</button>
+                    <button class="nav-link fw-bold text-success" id="tab-dict-manage" data-bs-toggle="tab" data-bs-target="#pane-dict-manage" type="button" role="tab" data-temp-click="fetch-template-dictionaries">Kho Từ điển</button>
                 </li>
                 <li class="nav-item" role="presentation">
                     <button class="nav-link fw-bold" id="tab-dict" data-bs-toggle="tab" data-bs-target="#pane-dict" type="button" role="tab">Gán Cột Từ điển</button>
@@ -797,9 +737,9 @@
                     <div class="card shadow-sm mb-3">
                         <div class="card-header bg-secondary text-white fw-bold"><i class="fas fa-sliders-h"></i> Bảng Cấu hình Thuộc tính Cột</div>
                         <div class="card-body p-0">
-                            <div class="table-responsive" style="max-height: 500px; overflow-y: auto;">
+                            <div class="table-responsive temp-scroll-500">
                                 <table class="table table-hover table-bordered mb-0 align-middle">
-                                    <thead class="table-light position-sticky top-0 shadow-sm" style="z-index: 1;">
+                                    <thead class="table-light position-sticky top-0 shadow-sm temp-z-1">
                                         <tr>
                                             <th>Tên Cột</th>
                                             <th class="text-center" title="Ẩn cột trên form"><i class="fas fa-eye-slash text-danger"></i> Ẩn ô</th>
@@ -851,7 +791,7 @@
                                 <div class="card-body">
                                     <div class="input-group mb-3">
                                         <input type="text" id="newDictionaryName" class="form-control form-control-sm" placeholder="Tên (VD: DM_DanToc)">
-                                        <button class="btn btn-sm btn-primary" onclick="createDictionary()"><i class="fas fa-plus"></i> Thêm mới</button>
+                                        <button class="btn btn-sm btn-primary" data-temp-click="create-dictionary"><i class="fas fa-plus"></i> Thêm mới</button>
                                     </div>
                                     <div class="list-group list-group-sm" id="dictionaryListGroup">
                                         <div class="text-center p-2 text-muted">Đang tải...</div>
@@ -866,7 +806,7 @@
                                     <div class="small fw-normal mt-1">Kho riêng của biểu mẫu: <span id="dictionaryTemplateName"></span></div>
                                 </div>
                                 <div class="card-body">
-                                    <div id="dictionaryItemForm" style="display: none;">
+                                    <div id="dictionaryItemForm" class="temp-hidden">
                                         <div class="row g-1 mb-3">
                                             <div class="col-3">
                                                 <input type="text" id="newDictItemCode" class="form-control form-control-sm" placeholder="Mã (Code)">
@@ -875,7 +815,7 @@
                                                 <input type="text" id="newDictItemValue" class="form-control form-control-sm" placeholder="Giá trị (Value)">
                                             </div>
                                             <div class="col-2">
-                                                <button class="btn btn-sm btn-success w-100" onclick="createDictionaryItem()">Thêm</button>
+                                                <button class="btn btn-sm btn-success w-100" data-temp-click="create-dictionary-item">Thêm</button>
                                             </div>
                                         </div>
 
@@ -893,32 +833,32 @@
                                                     </select>
                                                 </div>
                                                 <div class="col-md-7 text-end">
-                                                    <button type="button" class="btn btn-sm btn-outline-primary" onclick="previewBulkDictionaryItems()">
+                                                    <button type="button" class="btn btn-sm btn-outline-primary" data-temp-click="preview-dictionary-import">
                                                         <i class="fas fa-search"></i> Xem trước
                                                     </button>
-                                                    <button type="button" id="bulkDictionaryImportButton" class="btn btn-sm btn-primary" onclick="importBulkDictionaryItems()" disabled>
+                                                    <button type="button" id="bulkDictionaryImportButton" class="btn btn-sm btn-primary" data-temp-click="import-dictionary-items" disabled>
                                                         <i class="fas fa-file-import"></i> Thêm hàng loạt
                                                     </button>
                                                 </div>
                                             </div>
                                             <div id="bulkDictionaryStatus" class="small text-muted mt-2">Dán dữ liệu rồi nhấn Xem trước.</div>
-                                            <div class="table-responsive mt-2" style="max-height: 180px; overflow-y: auto;">
+                                            <div class="table-responsive mt-2 temp-scroll-180">
                                                 <table class="table table-sm table-bordered mb-0 bg-white">
                                                     <thead class="table-light sticky-top">
-                                                        <tr><th style="width: 60px;">Dòng</th><th style="width: 130px;">ID</th><th>Value</th></tr>
+                                                        <tr><th class="temp-width-60">Dòng</th><th class="temp-width-130">ID</th><th>Value</th></tr>
                                                     </thead>
                                                     <tbody id="bulkDictionaryPreviewBody"></tbody>
                                                 </table>
                                             </div>
                                         </div>
                                     </div>
-                                    <div style="max-height: 400px; overflow-y: auto;">
+                                    <div class="temp-scroll-400">
                                         <table class="table table-sm table-bordered table-hover bg-white">
                                             <thead class="table-light sticky-top">
                                                 <tr>
                                                     <th>Mã</th>
                                                     <th>Giá trị</th>
-                                                    <th style="width: 50px;">Xóa</th>
+                                                    <th class="temp-width-50">Xóa</th>
                                                 </tr>
                                             </thead>
                                             <tbody id="dictionaryItemsTableBody">
@@ -956,7 +896,7 @@
                                     </select>
                                 </div>
                                 <div class="col-md-2">
-                                    <button class="btn btn-sm btn-success w-100" onclick="addRuleDict()"><i class="fas fa-plus"></i> Thêm luật</button>
+                                    <button class="btn btn-sm btn-success w-100" data-temp-click="add-rule-dictionary"><i class="fas fa-plus"></i> Thêm luật</button>
                                 </div>
                             </div>
                             <table class="table table-sm table-bordered mt-3 bg-white">
@@ -965,7 +905,7 @@
                                         <th>Cột Đích (Excel)</th>
                                         <th>Nguồn Từ điển</th>
                                         <th>Trích xuất</th>
-                                        <th style="width: 80px">Xóa</th>
+                                        <th class="temp-width-80">Xóa</th>
                                     </tr>
                                 </thead>
                                 <tbody id="dictRulesBody">
@@ -990,7 +930,7 @@
                                         <select id="syncSourceCol" class="form-select col-dropdown"><option value="">-- Chọn --</option></select>
                                         <span class="input-group-text">Đích</span>
                                         <select id="syncTargetCol" class="form-select col-dropdown"><option value="">-- Chọn --</option></select>
-                                        <button class="btn btn-primary" onclick="addRuleSync()"><i class="fas fa-plus"></i></button>
+                                        <button class="btn btn-primary" data-temp-click="add-rule-sync"><i class="fas fa-plus"></i></button>
                                     </div>
                                     <ul class="list-group list-group-sm" id="syncRulesList"></ul>
                                 </div>
@@ -1007,7 +947,7 @@
                                         <div class="col-12"><select id="concatSource1" class="form-select form-select-sm col-dropdown mb-1"><option value="">-- Nguồn 1 --</option></select></div>
                                         <div class="col-12"><select id="concatSource2" class="form-select form-select-sm col-dropdown mb-1"><option value="">-- Nguồn 2 --</option></select></div>
                                         <div class="col-9"><select id="concatTarget" class="form-select form-select-sm col-dropdown"><option value="">-- Đích --</option></select></div>
-                                        <div class="col-3"><button class="btn btn-sm btn-warning w-100" onclick="addRuleConcat()"><i class="fas fa-plus"></i></button></div>
+                                        <div class="col-3"><button class="btn btn-sm btn-warning w-100" data-temp-click="add-rule-concat"><i class="fas fa-plus"></i></button></div>
                                     </div>
                                     <ul class="list-group list-group-sm" id="concatRulesList"></ul>
                                 </div>
@@ -1022,19 +962,19 @@
                         <i class="fas fa-exclamation-triangle"></i> Dành cho nhà phát triển (Sửa trực tiếp mã JSON)
                     </div>
                     <div class="mb-3 d-flex justify-content-between">
-                        <button class="btn btn-warning" onclick="generateDefaultConfig()"><i class="fas fa-magic"></i> Sinh Cấu hình Mặc định (Mẫu 1)</button>
-                        <button class="btn btn-secondary" onclick="formatConfigJson()"><i class="fas fa-align-left"></i> Format JSON</button>
+                        <button class="btn btn-warning" data-temp-click="generate-default-config"><i class="fas fa-magic"></i> Sinh Cấu hình Mặc định (Mẫu 1)</button>
+                        <button class="btn btn-secondary" data-temp-click="format-config"><i class="fas fa-align-left"></i> Format JSON</button>
                     </div>
                     <div class="form-group">
-                        <textarea id="configJsonInput" class="form-control font-monospace" rows="15" style="background-color: #2b2b2b; color: #a9b7c6;"></textarea>
+                        <textarea id="configJsonInput" class="form-control font-monospace temp-json-editor" rows="15"></textarea>
                     </div>
-                    <div id="configJsonError" class="text-danger mt-2 fw-bold" style="display: none;"></div>
+                    <div id="configJsonError" class="text-danger mt-2 fw-bold temp-hidden"></div>
                 </div>
             </div>
           </div>
           <div class="modal-footer">
             <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Hủy</button>
-            <button type="button" class="btn btn-success" onclick="saveTemplateConfig()"><i class="fas fa-save"></i> Lưu cấu hình</button>
+            <button type="button" class="btn btn-success" data-temp-click="save-template-config"><i class="fas fa-save"></i> Lưu cấu hình</button>
           </div>
         </div>
       </div>
@@ -1058,11 +998,11 @@
                 <label class="form-label fw-bold">Mật khẩu mới</label>
                 <input type="password" id="changePasswordNew" class="form-control" placeholder="Nhập ít nhất 8 ký tự">
             </div>
-            <div id="changePasswordError" class="text-danger small mt-2 fw-bold" style="display: none;"></div>
+            <div id="changePasswordError" class="text-danger small mt-2 fw-bold temp-hidden"></div>
           </div>
           <div class="modal-footer">
             <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Hủy</button>
-            <button type="button" class="btn btn-warning" onclick="submitChangePassword()"><i class="fas fa-save"></i> Cập nhật</button>
+            <button type="button" class="btn btn-warning" data-temp-click="change-password"><i class="fas fa-save"></i> Cập nhật</button>
           </div>
         </div>
       </div>
@@ -1078,47 +1018,7 @@
     <script src="js/admin_panel.js?v=9.81"></script>
     <script src="js/template_config.js?v=7.5"></script>
     <script src="app.js?v=6.33"></script>
-    <script>
-        document.addEventListener("DOMContentLoaded", () => {
-            const token = localStorage.getItem('token');
-            const userStr = localStorage.getItem('user');
-            if (!token || !userStr) {
-                window.location.href = '/login.html';
-                return;
-            }
-            const user = JSON.parse(userStr);
-            if (user.role !== 'admin') {
-                window.location.href = '/index.html';
-                return;
-            }
-            
-            currentToken = token;
-            currentUser = user;
-            document.getElementById('userNameText').innerText = user.username;
-            
-            // Auto open tab and folder from the page that opened the record editor.
-            const urlParams = new URLSearchParams(window.location.search);
-            if (window.location.hash === '#review') {
-                const returnFolder = urlParams.get('return_folder');
-                if (returnFolder) activeReviewFolderPath = returnFolder;
-                const reviewTab = document.getElementById('review-tab');
-                if (reviewTab) {
-                    const tab = new bootstrap.Tab(reviewTab);
-                    tab.show();
-                    fetchReviewSubmissions();
-                }
-            } else if (window.location.hash === '#data') {
-                const dataTab = document.getElementById('data-tab');
-                if (dataTab) {
-                    const tab = new bootstrap.Tab(dataTab);
-                    tab.show();
-                    fetchCompletedSubmissions();
-                }
-            } else {
-                fetchDashboardStats();
-            }
-        });
-    </script>
+    <script src="temp-admin.js?v=1"></script>
 </body>
 </html>
 <!DOCTYPE html>
@@ -1129,10 +1029,6 @@
     <title>Đăng nhập - Số hóa All in One</title>
     <link href="vendor/bootstrap/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="vendor/fontawesome/css/all.min.css">
-    <style>
-        body { background-color: #f0f2f5; height: 100vh; display: flex; align-items: center; justify-content: center; }
-        .login-card { width: 400px; max-width: 90%; border-radius: 10px; border: none; box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
-    </style>
     <link rel="stylesheet" href="windows-ui.css?v=1">
 </head>
 <body class="login-shell">
@@ -1144,49 +1040,13 @@
         </div>
         <div class="mb-4">
             <label class="form-label text-muted fw-bold">Mật khẩu</label>
-            <input type="password" id="loginPassword" class="form-control form-control-lg" placeholder="Nhập mật khẩu" onkeyup="if(event.key === 'Enter') doLogin()">
+            <input type="password" id="loginPassword" class="form-control form-control-lg" placeholder="Nhập mật khẩu" data-temp-keyup="login-on-enter">
         </div>
-        <button class="btn btn-primary btn-lg w-100" onclick="doLogin()">Đăng nhập</button>
-        <p id="loginError" class="text-danger mt-3 text-center" style="display:none;"></p>
+        <button class="btn btn-primary btn-lg w-100" data-temp-click="login">Đăng nhập</button>
+        <p id="loginError" class="text-danger mt-3 text-center temp-hidden"></p>
     </div>
 
-    <script>
-        async function doLogin() {
-            const user = document.getElementById('loginUsername').value.trim();
-            const pass = document.getElementById('loginPassword').value.trim();
-            if (!user || !pass) return;
-            
-            try {
-                const res = await fetch('/api/login', {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({username: user, password: pass})
-                });
-                const data = await res.json();
-                
-                if (data.status === 'ok') {
-                    localStorage.setItem('token', data.token);
-                    localStorage.setItem('user', JSON.stringify(data.user));
-                    
-                    if (data.user.role === 'admin') {
-                        window.location.href = '/admin.html';
-                    } else {
-                        window.location.href = '/index.html';
-                    }
-                } else {
-                    document.getElementById('loginError').innerText = data.message;
-                    document.getElementById('loginError').style.display = 'block';
-                }
-            } catch (e) {
-                document.getElementById('loginError').innerText = "Lỗi kết nối máy chủ";
-                document.getElementById('loginError').style.display = 'block';
-            }
-        }
-        
-        // Luôn cho phép đăng nhập lại để người dùng có thể đổi tài khoản.
-        document.addEventListener('DOMContentLoaded', () => {
-            document.getElementById('loginUsername').focus();
-        });
-    </script>
+    <script src="temp-login.js?v=1"></script>
+    <script src="temp-actions.js?v=1"></script>
 </body>
 </html>

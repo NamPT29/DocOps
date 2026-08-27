@@ -70,6 +70,16 @@ class ProjectWorkspaceRepository:
     def get_document(self, document_id):
         return self.session.get(AssignedDocument, document_id)
 
+    def documents_by_ids(self, document_ids):
+        if not document_ids:
+            return {}
+        return {
+            document.id: document
+            for document in self.session.query(AssignedDocument).filter(
+                AssignedDocument.id.in_(document_ids),
+            ).all()
+        }
+
     def submission_statuses_by_document(self, document_ids):
         result = {document_id: [] for document_id in document_ids}
         if not document_ids:
@@ -102,7 +112,7 @@ class ProjectWorkspaceRepository:
         ).all()
         for report_unit_id, status in rows:
             result[report_unit_id]["submission_count"] += 1
-            if status == "approved":
+            if status == "completed":
                 result[report_unit_id]["approved_count"] += 1
         return result
 
@@ -115,6 +125,16 @@ class ProjectWorkspaceRepository:
             AssignedDocumentPath.document_id == document_id,
         ).first()
 
+    def document_paths_by_ids(self, document_ids):
+        if not document_ids:
+            return {}
+        return {
+            path.document_id: path
+            for path in self.session.query(AssignedDocumentPath).filter(
+                AssignedDocumentPath.document_id.in_(document_ids),
+            ).all()
+        }
+
     def add_document_path(self, path):
         self.session.add(path)
         return path
@@ -124,6 +144,16 @@ class ProjectWorkspaceRepository:
             AssignedDocumentFolder.document_id == document_id,
         ).first()
 
+    def document_folders_by_ids(self, document_ids):
+        if not document_ids:
+            return {}
+        return {
+            folder.document_id: folder
+            for folder in self.session.query(AssignedDocumentFolder).filter(
+                AssignedDocumentFolder.document_id.in_(document_ids),
+            ).all()
+        }
+
     def add_document_folder(self, folder):
         self.session.add(folder)
         return folder
@@ -132,6 +162,18 @@ class ProjectWorkspaceRepository:
         return self.session.query(AssignedDocumentReviewAssignment).filter(
             AssignedDocumentReviewAssignment.document_id == document_id,
         ).first()
+
+    def document_review_assignments_by_ids(self, document_ids):
+        if not document_ids:
+            return {}
+        return {
+            assignment.document_id: assignment
+            for assignment in self.session.query(
+                AssignedDocumentReviewAssignment,
+            ).filter(
+                AssignedDocumentReviewAssignment.document_id.in_(document_ids),
+            ).all()
+        }
 
     def add_document_review_assignment(self, assignment):
         self.session.add(assignment)

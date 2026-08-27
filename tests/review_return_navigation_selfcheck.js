@@ -5,6 +5,7 @@ const vm = require('node:vm');
 const adminPanelSource = fs.readFileSync('frontend/js/admin_panel.js', 'utf8');
 const appSource = fs.readFileSync('frontend/app.js', 'utf8');
 const adminHtml = fs.readFileSync('frontend/admin.html', 'utf8');
+const adminPageSource = fs.readFileSync('frontend/admin-page.js', 'utf8');
 
 const reviewTableBody = {
     innerHTML: '',
@@ -95,8 +96,8 @@ assert.equal(
 );
 assert(backToAdminBtn.innerHTML.includes('Về kiểm duyệt hồ sơ dự án'));
 
-assert(adminHtml.includes("window.location.hash === '#projects'"));
-assert(adminHtml.includes('restoreProjectManagementNavigation()'));
+assert(adminPageSource.includes("window.location.hash === '#projects'"));
+assert(adminPageSource.includes('restoreProjectManagementNavigation()'));
 assert(!adminHtml.includes('id="review-tab"'));
 
 console.log('Review return navigation self-check: OK');

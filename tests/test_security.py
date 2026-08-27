@@ -6,6 +6,7 @@ from fastapi import HTTPException
 from pydantic import ValidationError
 
 from server.routers import auth, submissions
+from server.services.login_rate_limit_service import LoginRateLimiter
 
 
 class StaticQuery:
@@ -42,10 +43,11 @@ class StaticDb:
         self.rolled_back = True
 
 
-def test_password_hash_and_legacy_login_migration():
+def test_password_hash_and_legacy_login_migration(monkeypatch):
     user = SimpleNamespace(id=7, username='legacy', password='old-password', role='user')
     db = StaticDb(user)
     request = SimpleNamespace(client=SimpleNamespace(host='127.0.0.1'))
+    monkeypatch.setattr(auth, "login_rate_limiter", LoginRateLimiter(5, 60))
 
     result = auth.api_login(
         auth.LoginRequest(username='legacy', password='old-password'),
@@ -80,7 +82,7 @@ def test_token_role_is_reloaded_from_database():
 
 def test_user_cannot_submit_an_admin_only_status():
     with pytest.raises(ValidationError):
-        submissions.SubmitRequest(data={}, status='approved')
+        submissions.SubmitRequest(data={}, status='completed')
 
 
 def test_submission_defaults_to_draft():

@@ -152,12 +152,12 @@ function populateColDropdowns() {
             return `
                 <tr>
                     <td class="fw-bold text-nowrap">${escapeHTML(f.label)}</td>
-                    <td class="text-center"><input class="form-check-input unified-chk-hidden" style="transform: scale(1.3); cursor: pointer;" type="checkbox" value="${col}" id="chk_hidden_${col}"></td>
-                    <td class="text-center"><input class="form-check-input unified-chk-ro" style="transform: scale(1.3); cursor: pointer;" type="checkbox" value="${col}" id="chk_ro_${col}"></td>
-                    <td class="text-center"><input class="form-check-input unified-chk-date" style="transform: scale(1.3); cursor: pointer;" type="checkbox" value="${col}" id="chk_date_${col}"></td>
-                    <td class="text-center"><input class="form-check-input unified-chk-year" style="transform: scale(1.3); cursor: pointer;" type="checkbox" value="${col}" id="chk_year_${col}"></td>
-                    <td class="text-center"><input class="form-check-input unified-chk-cover" style="transform: scale(1.3); cursor: pointer;" type="checkbox" value="${col}" id="chk_cover_${col}"></td>
-                    <td class="text-center"><input class="form-check-input unified-chk-required" style="transform: scale(1.3); cursor: pointer;" type="checkbox" value="${col}" id="chk_required_${col}"></td>
+                    <td class="text-center"><input class="form-check-input unified-chk-hidden generated-checkbox-emphasis" type="checkbox" value="${col}" id="chk_hidden_${col}"></td>
+                    <td class="text-center"><input class="form-check-input unified-chk-ro generated-checkbox-emphasis" type="checkbox" value="${col}" id="chk_ro_${col}"></td>
+                    <td class="text-center"><input class="form-check-input unified-chk-date generated-checkbox-emphasis" type="checkbox" value="${col}" id="chk_date_${col}"></td>
+                    <td class="text-center"><input class="form-check-input unified-chk-year generated-checkbox-emphasis" type="checkbox" value="${col}" id="chk_year_${col}"></td>
+                    <td class="text-center"><input class="form-check-input unified-chk-cover generated-checkbox-emphasis" type="checkbox" value="${col}" id="chk_cover_${col}"></td>
+                    <td class="text-center"><input class="form-check-input unified-chk-required generated-checkbox-emphasis" type="checkbox" value="${col}" id="chk_required_${col}"></td>
                     <td><input type="text" class="form-control form-control-sm placeholder-rule-text" data-col="${col}" placeholder="Nhập gợi ý..." maxlength="255"></td>
                 </tr>
             `;
@@ -328,7 +328,7 @@ function renderVisualUiFromJSON() {
                     <td>${escapeHTML(getFieldName(r.col))}</td>
                     <td><span class="badge bg-success">${escapeHTML(r.dictionary)}</span></td>
                     <td>${r.extract_mode === 'left' ? 'Bên trái' : r.extract_mode === 'right' ? 'Bên phải' : 'Cả hai'}</td>
-                    <td><button class="btn btn-sm btn-danger py-0" onclick="removeRule('dropdown_rules', ${idx})"><i class="fas fa-times"></i></button></td>
+                    <td><button class="btn btn-sm btn-danger py-0" data-template-action="remove-rule" data-rule-type="dropdown_rules" data-rule-index="${idx}"><i class="fas fa-times"></i></button></td>
                 </tr>
             `;
         });
@@ -344,7 +344,7 @@ function renderVisualUiFromJSON() {
             syncBody.innerHTML += `
                 <li class="list-group-item d-flex justify-content-between align-items-center py-1">
                     <span>${escapeHTML(getFieldName(r.source))} <i class="fas fa-arrow-right text-muted mx-2"></i> ${escapeHTML(getFieldName(r.target))}</span>
-                    <button class="btn btn-sm btn-outline-danger py-0 px-2" onclick="removeRule('sync_cols', ${idx})"><i class="fas fa-times"></i></button>
+                    <button class="btn btn-sm btn-outline-danger py-0 px-2" data-template-action="remove-rule" data-rule-type="sync_cols" data-rule-index="${idx}"><i class="fas fa-times"></i></button>
                 </li>
             `;
         });
@@ -358,7 +358,7 @@ function renderVisualUiFromJSON() {
             concatBody.innerHTML += `
                 <li class="list-group-item d-flex justify-content-between align-items-center py-1">
                     <span>${escapeHTML(getFieldName(r.source_1))} <b class="text-warning">+</b> ${escapeHTML(getFieldName(r.source_2))} <i class="fas fa-arrow-right text-muted mx-2"></i> <b>${escapeHTML(getFieldName(r.target))}</b></span>
-                    <button class="btn btn-sm btn-outline-danger py-0 px-2" onclick="removeRule('concat_rules', ${idx})"><i class="fas fa-times"></i></button>
+                    <button class="btn btn-sm btn-outline-danger py-0 px-2" data-template-action="remove-rule" data-rule-type="concat_rules" data-rule-index="${idx}"><i class="fas fa-times"></i></button>
                 </li>
             `;
         });
@@ -615,23 +615,38 @@ async function deleteDictionary(id, e) {
 
 async function fetchDictionaryItems() {
     if (!currentDictId) return;
-    const data = await apiCall(`/api/dictionaries/${currentDictId}/items`);
+    const requestedDictionaryId = currentDictId;
+    const pageSize = 100;
+    const data = await apiCall(
+        `/api/dictionaries/${requestedDictionaryId}/items?page=1&page_size=${pageSize}`
+    );
     if (data) {
+        const items = Array.isArray(data.data) ? [...data.data] : [];
+        const totalPages = Math.max(1, Number(data.pagination?.total_pages) || 1);
+        for (let page = 2; page <= totalPages; page += 1) {
+            const nextPage = await apiCall(
+                `/api/dictionaries/${requestedDictionaryId}/items?page=${page}&page_size=${pageSize}`
+            );
+            if (!nextPage) return;
+            items.push(...(Array.isArray(nextPage.data) ? nextPage.data : []));
+        }
+        if (currentDictId !== requestedDictionaryId) return;
+
         const tbody = document.getElementById('dictionaryItemsTableBody');
         if (!tbody) return;
         tbody.innerHTML = '';
-        if (data.data.length === 0) {
+        if (items.length === 0) {
             tbody.innerHTML = '<tr><td colspan="3" class="text-center text-muted">Chưa có giá trị nào</td></tr>';
             return;
         }
-        data.data.forEach(item => {
+        items.forEach(item => {
             const safeId = Number(item.id);
             tbody.innerHTML += `
                 <tr>
                     <td>${escapeHTML(item.code || '')}</td>
                     <td>${escapeHTML(item.value)}</td>
                     <td>
-                        <button class="btn btn-sm btn-outline-danger" onclick="deleteDictionaryItem(${safeId})"><i class="fas fa-trash"></i></button>
+                        <button class="btn btn-sm btn-outline-danger" data-template-action="delete-dictionary-item" data-item-id="${safeId}"><i class="fas fa-trash"></i></button>
                     </td>
                 </tr>
             `;
@@ -821,4 +836,16 @@ async function deleteDictionaryItem(id) {
     if (data) {
         fetchDictionaryItems();
     }
+}
+
+if (typeof document.addEventListener === 'function') {
+    document.addEventListener('click', event => {
+        const trigger = event.target?.closest?.('[data-template-action]');
+        if (!trigger) return;
+        if (trigger.dataset.templateAction === 'remove-rule') {
+            removeRule(trigger.dataset.ruleType, Number(trigger.dataset.ruleIndex));
+        } else if (trigger.dataset.templateAction === 'delete-dictionary-item') {
+            deleteDictionaryItem(Number(trigger.dataset.itemId));
+        }
+    });
 }

@@ -4,7 +4,11 @@ from datetime import datetime, timedelta
 from sqlalchemy.orm import Session
 from fastapi import HTTPException
 
-from server.models import Submission, AssignedDocument, SubmissionReviewAssignment
+from server.models import (
+    AssignedDocument,
+    Submission,
+    SubmissionReviewAssignment,
+)
 from server.repositories import (
     DocumentRepository,
     LookupRepository,
@@ -63,6 +67,95 @@ class ReviewWorkflowService:
             )
             review_repository.add(assignment)
         return assignment
+
+    @staticmethod
+    def assign_submission_reviewers(
+        submissions: list[Submission],
+        db: Session,
+        *,
+        required: bool = True,
+    ) -> dict[int, SubmissionReviewAssignment | None]:
+        """Batch equivalent of ``assign_submission_reviewer``.
+
+        This is intentionally used only by bulk submission so single-report
+        behavior and its public contract remain unchanged.
+        """
+        if not submissions:
+            return {}
+        submission_ids = [submission.id for submission in submissions]
+        review_repository = ReviewRepository(db)
+        assignments = review_repository.submission_assignments_by_ids(submission_ids)
+        document_ids = {
+            submission.assigned_document_id
+            for submission in submissions
+            if submission.assigned_document_id is not None
+        }
+        reviewers_by_document = {
+            assignment.document_id: assignment.reviewer_user_id
+            for assignment in review_repository.document_assignments_by_ids(
+                document_ids,
+            ).values()
+        }
+
+        folder_paths = {
+            submission.folder_path
+            for submission in submissions
+            if submission.folder_path and submission.folder_path != "__ROOT__"
+        }
+        reviewers_by_folder = review_repository.folder_reviewers_by_paths(folder_paths)
+
+        candidate_by_submission: dict[int, int | None] = {}
+        candidate_was_assigned: set[int] = set()
+        user_ids: set[int] = set()
+        for submission in submissions:
+            reviewer_id = reviewers_by_document.get(submission.assigned_document_id)
+            if reviewer_id is None and submission.folder_path:
+                reviewer_id = reviewers_by_folder.get(submission.folder_path)
+            if reviewer_id is not None:
+                candidate_was_assigned.add(submission.id)
+                user_ids.add(reviewer_id)
+            else:
+                existing = assignments.get(submission.id)
+                if existing and existing.reviewer_user_id is not None:
+                    user_ids.add(existing.reviewer_user_id)
+            candidate_by_submission[submission.id] = reviewer_id
+        valid_user_ids = LookupRepository(db).existing_user_ids(user_ids)
+
+        result: dict[int, SubmissionReviewAssignment | None] = {}
+        for submission in submissions:
+            assignment = assignments.get(submission.id)
+            reviewer_id = candidate_by_submission[submission.id]
+            if submission.id in candidate_was_assigned:
+                if reviewer_id not in valid_user_ids:
+                    reviewer_id = None
+            elif (
+                assignment
+                and assignment.reviewer_user_id != submission.created_by_user_id
+                and assignment.reviewer_user_id in valid_user_ids
+            ):
+                result[submission.id] = assignment
+                continue
+
+            if reviewer_id is None or reviewer_id == submission.created_by_user_id:
+                if required:
+                    raise HTTPException(
+                        status_code=409,
+                        detail="Tài liệu chưa được phân người kiểm tra phù hợp",
+                    )
+                result[submission.id] = None
+                continue
+            if assignment:
+                assignment.reviewer_user_id = reviewer_id
+                assignment.assigned_at = datetime.now()
+            else:
+                assignment = SubmissionReviewAssignment(
+                    submission_id=submission.id,
+                    reviewer_user_id=reviewer_id,
+                )
+                db.add(assignment)
+                assignments[submission.id] = assignment
+            result[submission.id] = assignment
+        return result
 
     @staticmethod
     def backfill_pending_review_assignments(db: Session) -> None:
@@ -180,11 +273,7 @@ class ReviewWorkflowService:
             "folder_name": folder_path.rstrip("/").rsplit("/", 1)[-1] if folder_path else "",
             "is_checked": submission.is_checked,
             "status": submission.status,
-            "has_errors": (
-                submission.status == "rejected"
-                or bool(data_dict.get("_wrong_sections", []))
-                or bool(data_dict.get("_wrong_fields", []))
-            ),
+            "has_errors": bool(data_dict.get("_wrong_sections", [])),
             "creator_name": user_map.get(submission.created_by_user_id, "Unknown"),
         }
 

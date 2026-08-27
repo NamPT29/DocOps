@@ -11,10 +11,103 @@ from server.services.project_service import _validate_project_members
 from server.services.project_workspace_service import sync_project_assets_to_documents
 
 
-def _least_loaded(eligible_user_ids, counts):
-    if not eligible_user_ids:
-        return None
-    return min(eligible_user_ids, key=lambda user_id: (counts[user_id], user_id))
+def _case_work_units(case_row, pdf_counts):
+    return max(1, int(pdf_counts.get(case_row.id, 0)))
+
+
+def _weighted_assignment_plan(
+    cases,
+    *,
+    user_ids,
+    pdf_counts,
+    assignment_attribute,
+    excluded_user_ids=None,
+    preserve_valid_assignments,
+    movable_case_ids=None,
+):
+    member_ids = sorted(set(user_ids))
+    loads = {user_id: 0 for user_id in member_ids}
+    case_counts = {user_id: 0 for user_id in member_ids}
+    plan = {}
+    pending = []
+
+    for case_row in cases:
+        excluded_user_id = (
+            excluded_user_ids.get(case_row.id)
+            if excluded_user_ids is not None
+            else None
+        )
+        eligible_user_ids = [
+            user_id for user_id in member_ids if user_id != excluded_user_id
+        ]
+        current_user_id = getattr(case_row, assignment_attribute)
+        can_preserve = (
+            preserve_valid_assignments
+            and current_user_id in eligible_user_ids
+            and (
+                movable_case_ids is None
+                or case_row.id not in movable_case_ids
+            )
+        )
+        if can_preserve:
+            plan[case_row.id] = current_user_id
+            loads[current_user_id] += _case_work_units(case_row, pdf_counts)
+            case_counts[current_user_id] += 1
+        else:
+            pending.append(case_row)
+
+    pending.sort(key=lambda case_row: (
+        -_case_work_units(case_row, pdf_counts),
+        str(case_row.case_key or "").casefold(),
+        case_row.id,
+    ))
+    for case_row in pending:
+        excluded_user_id = (
+            excluded_user_ids.get(case_row.id)
+            if excluded_user_ids is not None
+            else None
+        )
+        eligible_user_ids = [
+            user_id for user_id in member_ids if user_id != excluded_user_id
+        ]
+        if not eligible_user_ids:
+            plan[case_row.id] = None
+            continue
+        current_user_id = getattr(case_row, assignment_attribute)
+        selected_user_id = min(
+            eligible_user_ids,
+            key=lambda user_id: (
+                loads[user_id],
+                case_counts[user_id],
+                0 if user_id == current_user_id else 1,
+                user_id,
+            ),
+        )
+        plan[case_row.id] = selected_user_id
+        loads[selected_user_id] += _case_work_units(case_row, pdf_counts)
+        case_counts[selected_user_id] += 1
+
+    return plan
+
+
+def _assignment_distribution(cases, assignment_plan, pdf_counts, user_ids):
+    rows = {
+        user_id: {
+            "user_id": user_id,
+            "case_count": 0,
+            "pdf_count": 0,
+            "work_units": 0,
+        }
+        for user_id in sorted(set(user_ids))
+    }
+    for case_row in cases:
+        user_id = assignment_plan.get(case_row.id)
+        if user_id not in rows:
+            continue
+        rows[user_id]["case_count"] += 1
+        rows[user_id]["pdf_count"] += int(pdf_counts.get(case_row.id, 0))
+        rows[user_id]["work_units"] += _case_work_units(case_row, pdf_counts)
+    return list(rows.values())
 
 
 def update_project_members(
@@ -41,10 +134,33 @@ def update_project_members(
         reviewer_user_ids=reviewer_ids,
     )
     cases = repository.lock_cases(project.id)
-    input_counts, reviewer_counts = repository.assignment_counts(
+    pdf_counts = repository.active_pdf_counts_by_case(project.id)
+    submission_counts = repository.submission_counts_by_case(project.id)
+    # Adding members may redistribute only untouched cases. Cases with a PDF
+    # or any entered report stay put; assignments belonging to a removed member
+    # are invalid and are transferred regardless of this movable set.
+    movable_case_ids = {
+        case_row.id
+        for case_row in cases
+        if int(pdf_counts.get(case_row.id, 0)) == 0
+        and int(submission_counts.get(case_row.id, 0)) == 0
+    }
+    input_plan = _weighted_assignment_plan(
         cases,
-        input_user_ids=input_ids,
-        reviewer_user_ids=reviewer_ids,
+        user_ids=input_ids,
+        pdf_counts=pdf_counts,
+        assignment_attribute="assigned_input_user_id",
+        preserve_valid_assignments=True,
+        movable_case_ids=movable_case_ids,
+    )
+    reviewer_plan = _weighted_assignment_plan(
+        cases,
+        user_ids=reviewer_ids,
+        pdf_counts=pdf_counts,
+        assignment_attribute="assigned_reviewer_user_id",
+        excluded_user_ids=input_plan,
+        preserve_valid_assignments=True,
+        movable_case_ids=movable_case_ids,
     )
     result = {
         "input_cases_transferred": 0,
@@ -56,11 +172,9 @@ def update_project_members(
     try:
         for case_row in cases:
             previous_input_id = case_row.assigned_input_user_id
-            if previous_input_id not in input_ids:
-                next_input_id = _least_loaded(input_ids, input_counts)
+            next_input_id = input_plan.get(case_row.id)
+            if previous_input_id != next_input_id:
                 case_row.assigned_input_user_id = next_input_id
-                if next_input_id is not None:
-                    input_counts[next_input_id] += 1
                 result["submissions_transferred"] += (
                     repository.transfer_case_submission_owner(case_row.id, next_input_id)
                 )
@@ -75,26 +189,11 @@ def update_project_members(
                 )
                 result["input_cases_transferred"] += 1
 
+        for case_row in cases:
             previous_reviewer_id = case_row.assigned_reviewer_user_id
-            reviewer_is_invalid = (
-                previous_reviewer_id not in reviewer_ids
-                or previous_reviewer_id == case_row.assigned_input_user_id
-            )
-            if reviewer_is_invalid:
-                if (
-                    previous_reviewer_id in reviewer_ids
-                    and reviewer_counts[previous_reviewer_id] > 0
-                ):
-                    reviewer_counts[previous_reviewer_id] -= 1
-                eligible_reviewers = [
-                    user_id
-                    for user_id in reviewer_ids
-                    if user_id != case_row.assigned_input_user_id
-                ]
-                next_reviewer_id = _least_loaded(eligible_reviewers, reviewer_counts)
+            next_reviewer_id = reviewer_plan.get(case_row.id)
+            if previous_reviewer_id != next_reviewer_id:
                 case_row.assigned_reviewer_user_id = next_reviewer_id
-                if next_reviewer_id is not None:
-                    reviewer_counts[next_reviewer_id] += 1
                 result["submission_reviews_transferred"] += (
                     repository.sync_case_submission_reviewer(
                         case_row.id,
@@ -124,6 +223,19 @@ def update_project_members(
     result["workspace_counts"] = workspace_counts
     result["input_user_ids"] = input_ids
     result["reviewer_user_ids"] = reviewer_ids
+    result["rebalanced"] = True
+    result["input_distribution"] = _assignment_distribution(
+        cases,
+        input_plan,
+        pdf_counts,
+        input_ids,
+    )
+    result["reviewer_distribution"] = _assignment_distribution(
+        cases,
+        reviewer_plan,
+        pdf_counts,
+        reviewer_ids,
+    )
     return result
 
 

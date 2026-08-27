@@ -13,6 +13,20 @@ from server.repositories.template_repository import TemplateRepository
 from server.repositories.user_repository import UserRepository
 from server.services.excel_service import get_form_schema
 
+PROJECT_STATUSES = ("new", "in_progress", "completed", "overdue")
+PROJECT_STATUS_SET = frozenset(PROJECT_STATUSES)
+_LEGACY_PROJECT_STATUS_MAP = {
+    "configuring": "new",
+    "importing": "in_progress",
+    "ready": "in_progress",
+}
+
+
+def normalize_project_status(status):
+    """Return a public lifecycle value, including for legacy database rows."""
+    value = str(status or "").strip().casefold()
+    return _LEGACY_PROJECT_STATUS_MAP.get(value, value if value in PROJECT_STATUS_SET else "new")
+
 
 def _clean_folder_name(root_folder_name):
     value = str(root_folder_name or "").strip().rstrip("/\\")
@@ -142,7 +156,7 @@ def create_project(
         case_level=case_level,
         report_mode=report_mode,
         report_level=report_level,
-        status="ready",
+        status="new",
         created_by_user_id=created_by_user_id,
     )
     try:
@@ -170,7 +184,7 @@ def create_project(
         raise
 
 
-def _serialize_project(project, members, metrics):
+def _serialize_project(project, members, metrics, member_report_stats=None):
     return {
         "id": project.id,
         "name": project.name,
@@ -182,10 +196,11 @@ def _serialize_project(project, members, metrics):
         "case_level": project.case_level,
         "report_mode": project.report_mode,
         "report_level": project.report_level,
-        "status": project.status,
+        "status": normalize_project_status(project.status),
         "input_user_ids": members["input"],
         "reviewer_user_ids": members["reviewer"],
         "metrics": metrics,
+        "member_report_stats": member_report_stats or [],
     }
 
 
@@ -198,11 +213,46 @@ def list_projects(db, *, current_user):
     project_ids = [project.id for project in projects]
     members_by_project = repository.member_ids_by_role(project_ids)
     metrics_by_project = repository.metrics_by_project(project_ids)
+    member_stats_by_project = (
+        repository.member_report_stats_by_project(project_ids)
+        if current_user.get("role") == "admin"
+        else {project_id: [] for project_id in project_ids}
+    )
     return [
         _serialize_project(
             project,
             members_by_project[project.id],
             metrics_by_project[project.id],
+            member_stats_by_project[project.id],
         )
         for project in projects
     ]
+
+
+def update_project_status(db, *, project_id, status):
+    if status not in PROJECT_STATUS_SET:
+        raise HTTPException(status_code=400, detail="Trạng thái dự án không hợp lệ")
+    project = ProjectRepository(db).get(project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Không tìm thấy dự án")
+    if status == "completed":
+        metrics = ProjectRepository(db).metrics_by_project([project.id])[project.id]
+        required_reports = int(metrics["required_reports"] or 0)
+        completed_reports = int(metrics["approved_reports"] or 0)
+        if required_reports == 0 or completed_reports != required_reports:
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "code": "project_reports_not_completed",
+                    "message": (
+                        "Chỉ được hoàn thành dự án khi tất cả báo cáo bắt buộc "
+                        "đã hoàn thành"
+                    ),
+                    "completed_reports": completed_reports,
+                    "required_reports": required_reports,
+                },
+            )
+    project.status = status
+    db.commit()
+    db.refresh(project)
+    return {"id": project.id, "status": project.status}

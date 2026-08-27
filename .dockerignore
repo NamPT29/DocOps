@@ -1,0 +1,37 @@
+# Git
+.git
+.gitignore
+
+# Môi trường ảo & Cache
+venv/
+env/
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Môi trường (Nhạy cảm)
+.env
+.env.*
+*.pem
+*.key
+*.cert
+*.crt
+
+# Dữ liệu cục bộ (Tránh mang dữ liệu dev lên server)
+uploads/
+scratch/
+logs/
+*.sqlite3
+*.db
+docker_data/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+.DS_Store

@@ -13,6 +13,10 @@ from server.services.excel_service import (
     get_ma_xa_mapping,
 )
 from server.services.upload_service import save_validated_upload
+from server.services.template_cache_service import (
+    template_artifact_cache,
+    template_file_version,
+)
 from server.repositories import DictionaryRepository, TemplateRepository
 
 router = APIRouter(prefix="/api/templates", tags=["templates"])
@@ -87,6 +91,7 @@ async def get_template_schema(template_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Template not found")
     
     file_path = os.path.join(TEMPLATES_DIR, template.filename)
+    file_version = template_file_version(file_path)
     
     import json
     config = {}
@@ -96,13 +101,31 @@ async def get_template_schema(template_id: int, db: Session = Depends(get_db)):
         except:
             pass
             
-    # Load dictionaries from DB. Unexpected failures are handled centrally.
-    dicts = DictionaryRepository(db).option_map_for_template(template_id)
+    cached = await run_in_threadpool(
+        template_artifact_cache.get,
+        "schema",
+        template_id,
+        file_version,
+    )
+    if cached is not None:
+        return cached
+
+    # Use a fresh DB read after shared invalidation; another worker's local
+    # dictionary cache may still hold values from before the edit.
+    dicts = DictionaryRepository(db).fresh_option_map_for_template(template_id)
     try:
         schema = await run_in_threadpool(get_form_schema, file_path, dicts, config)
     except ExcelTemplateError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
-    return {"status": "ok", "data": schema, "config": config}
+    response = {"status": "ok", "data": schema, "config": config}
+    await run_in_threadpool(
+        template_artifact_cache.set,
+        "schema",
+        template_id,
+        file_version,
+        response,
+    )
+    return response
 
 @router.get("/{template_id}/maxa_mapping")
 async def get_template_maxa_mapping(template_id: int, db: Session = Depends(get_db)):
@@ -110,7 +133,14 @@ async def get_template_maxa_mapping(template_id: int, db: Session = Depends(get_
     if not template:
         raise HTTPException(status_code=404, detail="Template not found")
     file_path = os.path.join(TEMPLATES_DIR, template.filename)
-    mapping = await run_in_threadpool(get_ma_xa_mapping, file_path)
+    file_version = template_file_version(file_path)
+    mapping = await run_in_threadpool(
+        template_artifact_cache.get_or_compute,
+        "maxa_mapping",
+        template_id,
+        file_version,
+        lambda: get_ma_xa_mapping(file_path),
+    )
     return {"status": "ok", "data": mapping}
 
 @router.get("/{template_id}/don_vi_do_mapping")
@@ -119,7 +149,14 @@ async def get_template_don_vi_do_mapping(template_id: int, db: Session = Depends
     if not template:
         raise HTTPException(status_code=404, detail="Template not found")
     file_path = os.path.join(TEMPLATES_DIR, template.filename)
-    mapping = await run_in_threadpool(get_don_vi_do_mapping, file_path)
+    file_version = template_file_version(file_path)
+    mapping = await run_in_threadpool(
+        template_artifact_cache.get_or_compute,
+        "don_vi_do_mapping",
+        template_id,
+        file_version,
+        lambda: get_don_vi_do_mapping(file_path),
+    )
     return {"status": "ok", "data": mapping}
 
 @router.get("/{template_id}/config")
@@ -147,6 +184,7 @@ def save_template_config(template_id: int, data: dict, current_user: dict = Depe
     import json
     template.config_json = json.dumps(data, ensure_ascii=False)
     db.commit()
+    template_artifact_cache.invalidate(template_id)
     
     return {"status": "ok"}
 

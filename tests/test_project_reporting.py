@@ -131,7 +131,12 @@ def seed_reporting_project(db):
                 upload_id=f"upload-{case_row.id}",
             ),
         ])
-        for status in ("draft", "pending_review", "rejected", "approved"):
+        for status in (
+            "draft",
+            "pending_review",
+            "pending_input_confirmation",
+            "completed",
+        ):
             submission = Submission(
                 data_json=json.dumps({"_pdf_uuid": document.uuid_filename}),
                 template_id=template.id,
@@ -186,7 +191,7 @@ def seed_reporting_project(db):
         template_id=template.id,
         created_by_user_id=input_user.id,
         assigned_document_id=other_document.id,
-        status="approved",
+        status="completed",
     )
     db.add(other_submission)
     db.commit()
@@ -203,7 +208,7 @@ def test_project_views_are_scoped_filtered_and_sorted(reporting_database):
         view="review",
     )["folders"]
     assert [folder["folder_path"] for folder in review_folders] == ["Alpha/01", "zeta/02"]
-    assert [folder["submission_count"] for folder in review_folders] == [2, 2]
+    assert [folder["submission_count"] for folder in review_folders] == [1, 1]
 
     review_page = get_project_submissions(
         db,
@@ -213,11 +218,10 @@ def test_project_views_are_scoped_filtered_and_sorted(reporting_database):
         page=1,
         page_size=20,
     )
-    assert {item["status"] for item in review_page["data"]} == {"pending_review", "rejected"}
+    assert {item["status"] for item in review_page["data"]} == {"pending_review"}
     assert {item["folder_path"] for item in review_page["data"]} == {"Alpha/01"}
     assert {item["id"] for item in review_page["data"]} == {
         submissions[("Alpha/01", "pending_review")].id,
-        submissions[("Alpha/01", "rejected")].id,
     }
 
     completed_page = get_project_submissions(
@@ -229,7 +233,7 @@ def test_project_views_are_scoped_filtered_and_sorted(reporting_database):
         page_size=20,
     )
     assert len(completed_page["data"]) == 2
-    assert {item["status"] for item in completed_page["data"]} == {"approved"}
+    assert {item["status"] for item in completed_page["data"]} == {"completed"}
 
 
 def test_project_export_scope_and_snapshot(reporting_database):
@@ -240,9 +244,13 @@ def test_project_export_scope_and_snapshot(reporting_database):
     completed = repository.submissions_for_export(project.id, include_pending_review=False)
     all_exportable = repository.submissions_for_export(project.id, include_pending_review=True)
 
-    assert [submission.status for submission in completed] == ["approved", "approved"]
-    assert {submission.status for submission in all_exportable} == {"pending_review", "approved"}
-    assert len(all_exportable) == 4
+    assert [submission.status for submission in completed] == ["completed", "completed"]
+    assert {submission.status for submission in all_exportable} == {
+        "pending_review",
+        "pending_input_confirmation",
+        "completed",
+    }
+    assert len(all_exportable) == 6
     assert other_submission.id not in {submission.id for submission in all_exportable}
     assert resolve_project_template_path(project).name == "snapshot.xlsx"
 
@@ -251,7 +259,7 @@ def test_project_review_next_stays_in_the_selected_project_and_folder(reporting_
     db, _tmp_path = reporting_database
     project, other_project, submissions, _other_submission = seed_reporting_project(db)
     admin = db.query(User).filter(User.role == "admin").one()
-    current = submissions[("Alpha/01", "rejected")]
+    current = submissions[("Alpha/01", "pending_input_confirmation")]
 
     result = api_get_next_review_submission(
         current_id=current.id,

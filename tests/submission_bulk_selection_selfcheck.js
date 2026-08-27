@@ -63,16 +63,20 @@ assert.equal(first.row.classList.contains('table-success'), true);
 assert.equal(second.row.classList.contains('table-success'), true);
 assert.equal(elements.selectAllSubmissionsBtn.classList.contains('btn-primary'), true);
 assert.equal(elements.selectAllSubmissionsBtn.attributes['aria-pressed'], 'true');
+assert.equal(elements.bulkSubmitSubmissionsBtn.disabled, false);
 
 sandbox.clearSubmissionSelection();
 assert.equal(first.row.classList.contains('table-success'), false);
 assert.equal(second.row.classList.contains('table-success'), false);
 assert.equal(elements.selectAllSubmissionsBtn.classList.contains('btn-outline-primary'), true);
 assert.equal(elements.selectedSubmissionsCount.textContent, 'Đã chọn: 0');
+assert.equal(elements.bulkSubmitSubmissionsBtn.disabled, true);
 
 console.log('Submission bulk selection self-check: OK');
 
 const employeeHtml = fs.readFileSync('frontend/index.html', 'utf8');
 const adminPanelSource = fs.readFileSync('frontend/js/admin_panel.js', 'utf8');
-assert.equal(employeeHtml.includes('bulkSubmitSubmissionsBtn'), false);
-assert.equal(adminPanelSource.includes('function bulkSubmitSelectedSubmissions'), false);
+assert.equal(employeeHtml.includes('bulkSubmitSubmissionsBtn'), true);
+assert.equal(employeeHtml.includes('data-action="bulkSubmitSelectedSubmissions"'), true);
+assert.equal(adminPanelSource.includes('function bulkSubmitSelectedSubmissions'), true);
+assert.equal(adminPanelSource.includes("runBulkSubmissionAction('submit_for_review')"), true);

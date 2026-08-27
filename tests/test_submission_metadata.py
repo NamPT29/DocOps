@@ -30,7 +30,7 @@ def test_legacy_metadata_migration_preserves_every_submission_value(tmp_path):
         2: '{"col_8":"Hồ sơ đã nhận","custom":{"kept":true}}',
         3: '{"col_8":"PDF cũ","_pdf_filename":"missing.pdf"}',
     }
-    original_statuses = {1: "draft", 2: "pending_review", 3: "approved"}
+    original_statuses = {1: "draft", 2: "pending_review", 3: "completed"}
 
     with engine.begin() as connection:
         connection.execute(text("""
@@ -180,7 +180,7 @@ def test_folder_listing_and_pagination_have_bounded_sql_queries(tmp_path):
                 assigned_document_id=document_id,
                 folder_path=folder,
                 folder_path_key=folder_path_key(folder),
-                status="approved",
+                status="completed",
                 created_at=started_at + timedelta(seconds=index),
             ))
         db.commit()
@@ -193,7 +193,7 @@ def test_folder_listing_and_pagination_have_bounded_sql_queries(tmp_path):
         event.listen(engine, "before_cursor_execute", record_statement)
         page = submissions.api_get_submissions(
             template_id=template_id,
-            status="approved",
+            status="completed",
             folder_path=folder,
             page=2,
             page_size=20,
@@ -219,7 +219,9 @@ def test_folder_listing_and_pagination_have_bounded_sql_queries(tmp_path):
             "to": 40,
         }
         assert len(page["data"]) == 20
-        assert len(page_statements) <= 8
+        # One fixed query loads quality metadata for the whole page; this must
+        # remain bounded rather than growing with the number of submissions.
+        assert len(page_statements) <= 9
         assert any(
             " LIMIT " in statement.upper() and " OFFSET " in statement.upper()
             for statement in page_statements

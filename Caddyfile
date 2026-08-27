@@ -1,0 +1,13 @@
+# Đổi thành tên miền (domain) thật của bạn. 
+# Ví dụ: app.doanhnghiep.com
+# Nếu bạn chưa có tên miền và chỉ muốn chạy bằng IP cục bộ, hãy thay bằng localhost hoặc IP máy chủ kèm cổng (vd: :80)
+
+http://sohoadang.aivn.net.vn {
+    reverse_proxy 127.0.0.1:8000
+
+    
+    # Hỗ trợ tải file lớn (vd: 100MB)
+    request_body {
+        max_size 100MB
+    }
+}

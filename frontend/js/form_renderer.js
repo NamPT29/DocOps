@@ -222,7 +222,7 @@ function _buildCategorySection(category, index, schema, config, draftData) {
     titleLeft.className = 'd-flex align-items-center text-primary fw-bold fs-5';
     titleLeft.style.cursor = 'pointer';
     const safeCategory = escapeHTML(category.category);
-    titleLeft.innerHTML = `<i class="fas fa-chevron-down me-2 transition-icon" style="width: 20px; transition: transform 0.2s;"></i>${safeCategory}`;
+    titleLeft.innerHTML = `<i class="fas fa-chevron-down me-2 transition-icon generated-transition-icon-lg"></i>${safeCategory}`;
     
     const clearCategoryBtn = document.createElement('button');
     clearCategoryBtn.type = 'button';
@@ -300,7 +300,7 @@ function _buildCategorySection(category, index, schema, config, draftData) {
             sepTitle.className = 'text-primary border-bottom pb-2 d-flex align-items-center';
             sepTitle.style.cursor = 'pointer';
             const safeSeparator = escapeHTML(field.separator_above);
-            sepTitle.innerHTML = `<i class="fas fa-chevron-right me-2 text-secondary fs-6 transition-icon" style="width: 15px; transition: transform 0.2s;"></i>${safeSeparator}`;
+            sepTitle.innerHTML = `<i class="fas fa-chevron-right me-2 text-secondary fs-6 transition-icon generated-transition-icon-sm"></i>${safeSeparator}`;
             
             const subRow = document.createElement('div');
             subRow.className = 'row g-3 p-2 mt-1 d-none';
@@ -345,6 +345,29 @@ function updatePdfLinkStateFromForm(linked) {
     if (typeof updatePdfLinkUI === 'function') updatePdfLinkUI();
 }
 
+function normalizePastedFieldText(value) {
+    return String(value ?? '').replace(/\s+/gu, ' ').trim();
+}
+
+function pasteNormalizedFieldText(input, event) {
+    const clipboard = event?.clipboardData || window.clipboardData;
+    if (!clipboard || typeof clipboard.getData !== 'function') return;
+
+    const pastedText = clipboard.getData('text/plain') || clipboard.getData('text');
+    const normalizedText = normalizePastedFieldText(pastedText);
+    const currentValue = String(input.value || '');
+    const start = Number.isInteger(input.selectionStart) ? input.selectionStart : currentValue.length;
+    const end = Number.isInteger(input.selectionEnd) ? input.selectionEnd : start;
+
+    event.preventDefault();
+    if (typeof input.setRangeText === 'function') {
+        input.setRangeText(normalizedText, start, end, 'end');
+    } else {
+        input.value = currentValue.slice(0, start) + normalizedText + currentValue.slice(end);
+    }
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+}
+
 function _buildFieldGroup(field, config, draftData) {
     const col = document.createElement('div');
     col.className = 'col-12';
@@ -368,20 +391,6 @@ function _buildFieldGroup(field, config, draftData) {
     }
     labelRow.appendChild(label);
 
-    const errorCheckWrapper = document.createElement('div');
-    errorCheckWrapper.className = 'form-check review-field-error-check d-none flex-shrink-0';
-    const checkbox = document.createElement('input');
-    checkbox.type = 'checkbox';
-    checkbox.className = 'form-check-input field-error-checkbox';
-    checkbox.id = `error_field_${field.col_index}`;
-    checkbox.dataset.field = field.name;
-    const checkboxLabel = document.createElement('label');
-    checkboxLabel.className = 'form-check-label text-danger fw-semibold ms-1';
-    checkboxLabel.htmlFor = checkbox.id;
-    checkboxLabel.textContent = 'Lỗi sai';
-    errorCheckWrapper.appendChild(checkbox);
-    errorCheckWrapper.appendChild(checkboxLabel);
-    labelRow.appendChild(errorCheckWrapper);
     formGroup.appendChild(labelRow);
     
     const input = document.createElement('textarea');
@@ -404,6 +413,7 @@ function _buildFieldGroup(field, config, draftData) {
     input.addEventListener('input', resizeInput);
     input.addEventListener('change', resizeInput);
     input.addEventListener('focus', resizeInput);
+    input.addEventListener('paste', event => pasteNormalizedFieldText(input, event));
     
     // Make auto-generated fields read-only based on config
     const roCols = config.readonly_cols || [];
@@ -844,6 +854,46 @@ function autocomplete(inp, arr, extractMode = "none") {
             }
         }
     });
+}
+
+function applySubmissionQualityFieldStyles(quality) {
+    const styledGroups = document.querySelectorAll(
+        '#form-container .review-history-changed-field, #form-container .review-history-corrected-field'
+    );
+    styledGroups.forEach(group => {
+        group.classList.remove('review-history-changed-field');
+        group.classList.remove('review-history-corrected-field');
+    });
+
+    const reviewedChanges = Array.isArray(quality?.reviewed_changes)
+        ? quality.reviewed_changes.filter(name => typeof name === 'string')
+        : [];
+    const correctedFields = new Set(
+        Array.isArray(quality?.corrected_fields)
+            ? quality.corrected_fields.filter(name => typeof name === 'string')
+            : []
+    );
+
+    reviewedChanges.forEach(fieldName => {
+        const input = document.getElementById(fieldName);
+        const group = input?.closest?.('.position-relative');
+        if (group) group.classList.add('review-history-changed-field');
+    });
+    correctedFields.forEach(fieldName => {
+        const input = document.getElementById(fieldName);
+        const group = input?.closest?.('.position-relative');
+        if (!group) return;
+        group.classList.remove('review-history-changed-field');
+        group.classList.add('review-history-corrected-field');
+    });
+
+    const legend = document.getElementById('submissionQualityLegend');
+    if (legend) {
+        legend.classList.toggle(
+            'd-none',
+            reviewedChanges.length === 0 && correctedFields.size === 0
+        );
+    }
 }
 
 let currentEditingId = null;

@@ -10,6 +10,7 @@ from server.routers.dictionaries import (
     _parse_bulk_dictionary_items,
     bulk_import_dictionary_items,
     get_dictionaries,
+    get_dictionary_items,
 )
 
 
@@ -133,3 +134,39 @@ def test_bulk_parser_accepts_two_columns_copied_from_excel():
         ('001', 'Kinh'),
         ('002', 'Tày'),
     ]
+
+
+def test_dictionary_items_are_paginated_with_bounded_metadata(dictionary_db):
+    _, dictionary = _create_template_dictionary(dictionary_db, 'Mẫu phân trang')
+    dictionary_db.add_all([
+        DictionaryItem(dictionary_id=dictionary.id, code=f'{index:03}', value=f'Giá trị {index}')
+        for index in range(1, 106)
+    ])
+    dictionary_db.commit()
+
+    first = get_dictionary_items(dictionary.id, page=1, page_size=100, db=dictionary_db)
+    second = get_dictionary_items(dictionary.id, page=2, page_size=100, db=dictionary_db)
+
+    assert len(first['data']) == 100
+    assert first['data'][0]['code'] == '001'
+    assert first['pagination'] == {
+        'page': 1,
+        'page_size': 100,
+        'total': 105,
+        'total_pages': 2,
+        'from': 1,
+        'to': 100,
+    }
+    assert [item['code'] for item in second['data']] == ['101', '102', '103', '104', '105']
+    assert second['pagination']['from'] == 101
+    assert second['pagination']['to'] == 105
+
+
+@pytest.mark.parametrize(('page', 'page_size'), [(0, 20), (1, 0), (1, 101)])
+def test_dictionary_item_pagination_rejects_invalid_bounds(dictionary_db, page, page_size):
+    _, dictionary = _create_template_dictionary(dictionary_db, 'Mẫu giới hạn')
+
+    with pytest.raises(HTTPException) as error:
+        get_dictionary_items(dictionary.id, page=page, page_size=page_size, db=dictionary_db)
+
+    assert error.value.status_code == 400

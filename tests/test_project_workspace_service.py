@@ -154,3 +154,164 @@ def test_workspace_uses_pinned_schema_and_only_assigned_cases(database):
             current_user={"id": other_user.id, "role": "user"},
         )
     assert forbidden.value.status_code == 403
+
+
+def test_workspace_uses_current_linked_pdf_path_and_keeps_other_snapshot_config(database):
+    admin = User(username="workspace-config-admin", password="hash", role="admin")
+    template = Template(
+        name="Current template",
+        filename="current.xlsm",
+        config_json=json.dumps({
+            "required_cols": [],
+            "linked_pdf_path": {
+                "enabled": True,
+                "col": 39,
+                "folder_levels": 2,
+            },
+        }),
+    )
+    database.add_all([admin, template])
+    database.flush()
+    project = Project(
+        name="Pinned project",
+        root_folder_name="pinned",
+        template_id=template.id,
+        template_name_snapshot="Pinned template",
+        template_filename_snapshot="project_snapshots/pinned.xlsm",
+        template_config_json_snapshot=json.dumps({
+            "required_cols": [1],
+            "readonly_cols": [2],
+            "linked_pdf_path": {
+                "enabled": False,
+                "col": 39,
+                "folder_levels": 0,
+            },
+        }),
+        form_schema_json_snapshot="[]",
+        case_level=1,
+        report_mode="pdf",
+        status="ready",
+        created_by_user_id=admin.id,
+    )
+    database.add(project)
+    database.commit()
+
+    payload = get_project_workspace(
+        database,
+        project_id=project.id,
+        current_user={"id": admin.id, "role": "admin"},
+    )
+
+    assert payload["config"] == {
+        "required_cols": [],
+        "readonly_cols": [2],
+        "linked_pdf_path": {
+            "enabled": True,
+            "col": 39,
+            "folder_levels": 2,
+        },
+    }
+
+
+def test_workspace_entered_is_scoped_to_each_asset_document(database):
+    admin = User(username="workspace-entry-admin", password="hash", role="admin")
+    template = Template(name="Entry template", filename="entry.xlsm")
+    database.add_all([admin, template])
+    database.flush()
+    project = Project(
+        name="Entry project",
+        root_folder_name="entry",
+        template_id=template.id,
+        template_name_snapshot="Entry template",
+        template_filename_snapshot="entry.xlsm",
+        template_config_json_snapshot="{}",
+        form_schema_json_snapshot="[]",
+        case_level=1,
+        report_mode="pdf",
+        status="ready",
+        created_by_user_id=admin.id,
+    )
+    database.add(project)
+    database.flush()
+    case = ProjectCase(
+        project_id=project.id,
+        case_key="001",
+        display_name="001",
+        assigned_input_user_id=admin.id,
+    )
+    database.add(case)
+    database.flush()
+    report = ProjectReportUnit(
+        project_id=project.id,
+        case_id=case.id,
+        report_key="001/report.pdf",
+        display_name="report.pdf",
+    )
+    database.add(report)
+    database.flush()
+    submitted_document = AssignedDocument(
+        original_filename="submitted.pdf",
+        uuid_filename="submitted.pdf",
+        assigned_to_user_id=admin.id,
+        template_id=template.id,
+        status="pending",
+    )
+    pending_document = AssignedDocument(
+        original_filename="pending.pdf",
+        uuid_filename="pending.pdf",
+        assigned_to_user_id=admin.id,
+        template_id=template.id,
+        status="pending",
+    )
+    database.add_all([submitted_document, pending_document])
+    database.flush()
+    database.add_all([
+        ProjectDocumentAsset(
+            project_id=project.id,
+            case_id=case.id,
+            report_unit_id=report.id,
+            assigned_document_id=submitted_document.id,
+            relative_path="001/submitted.pdf",
+            normalized_relative_path="001/submitted.pdf",
+            original_filename="submitted.pdf",
+            storage_filename="submitted.pdf",
+            content_sha256="c" * 64,
+            byte_size=10,
+            status="active",
+        ),
+        ProjectDocumentAsset(
+            project_id=project.id,
+            case_id=case.id,
+            report_unit_id=report.id,
+            assigned_document_id=pending_document.id,
+            relative_path="001/pending.pdf",
+            normalized_relative_path="001/pending.pdf",
+            original_filename="pending.pdf",
+            storage_filename="pending.pdf",
+            content_sha256="d" * 64,
+            byte_size=10,
+            status="active",
+        ),
+    ])
+    database.add(Submission(
+        data_json=json.dumps({"_pdf_uuid": submitted_document.uuid_filename}),
+        template_id=template.id,
+        created_by_user_id=admin.id,
+        assigned_document_id=submitted_document.id,
+        status="draft",
+    ))
+    database.commit()
+
+    payload = get_project_workspace(
+        database,
+        project_id=project.id,
+        current_user={"id": admin.id, "role": "admin"},
+    )
+
+    assert [
+        (item["relative_path"], item["entered"])
+        for item in payload["files"]
+    ] == [
+        ("001/pending.pdf", False),
+        ("001/submitted.pdf", True),
+    ]

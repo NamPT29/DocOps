@@ -19,6 +19,7 @@ _DEVELOPMENT_DATABASE_URL = (
     "postgresql+psycopg://postgres:postgres@127.0.0.1:5432/scan_data"
 )
 _PRODUCTION_ENVIRONMENTS = {"prod", "production"}
+_LOG_LEVELS = {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}
 
 
 def _text(environment: Mapping[str, str], name: str) -> str:
@@ -40,10 +41,35 @@ def _positive_int(
     return value
 
 
+def _log_level(environment: Mapping[str, str]) -> str:
+    value = _text(environment, "LOG_LEVEL").upper() or "INFO"
+    if value not in _LOG_LEVELS:
+        raise RuntimeError(
+            "LOG_LEVEL phải là DEBUG, INFO, WARNING, ERROR hoặc CRITICAL."
+        )
+    return value
+
+
+def _boolean(
+    environment: Mapping[str, str],
+    name: str,
+    default: bool = False,
+) -> bool:
+    value = _text(environment, name).lower()
+    if not value:
+        return default
+    if value in {"1", "true", "yes", "on"}:
+        return True
+    if value in {"0", "false", "no", "off"}:
+        return False
+    raise RuntimeError(f"{name} phải là true hoặc false.")
+
+
 @dataclass(frozen=True)
 class Settings:
     app_env: str
     database_url: str
+    redis_url: str | None
     secret_key: str
     secret_key_is_ephemeral: bool
     pdf_storage_path: Path
@@ -60,7 +86,13 @@ class Settings:
     login_failure_window_seconds: int
     heavy_api_rate_limit: int
     heavy_api_rate_window_seconds: int
+    project_upload_chunk_rate_limit: int
     dictionary_cache_ttl_seconds: int
+    log_level: str
+    log_dir: Path
+    log_max_bytes: int
+    log_backup_count: int
+    api_docs_enabled: bool
 
     @property
     def is_production(self) -> bool:
@@ -82,6 +114,12 @@ class Settings:
             if is_production:
                 raise RuntimeError("DATABASE_URL là bắt buộc trong môi trường production.")
             database_url = _DEVELOPMENT_DATABASE_URL
+
+        redis_url = _text(source, "REDIS_URL") or None
+        if redis_url and is_production and not redis_url.startswith("rediss://"):
+            raise RuntimeError(
+                "REDIS_URL production phải dùng rediss:// để mã hóa kết nối Redis."
+            )
 
         secret_key = _text(source, "SECRET_KEY")
         secret_key_is_ephemeral = not secret_key
@@ -114,6 +152,7 @@ class Settings:
         return cls(
             app_env=app_env,
             database_url=database_url,
+            redis_url=redis_url,
             secret_key=secret_key,
             secret_key_is_ephemeral=secret_key_is_ephemeral,
             pdf_storage_path=Path(storage_values["PDF_STORAGE_PATH"] or "uploads"),
@@ -145,11 +184,21 @@ class Settings:
                 "HEAVY_API_RATE_WINDOW_SECONDS",
                 60,
             ),
+            project_upload_chunk_rate_limit=_positive_int(
+                source,
+                "PROJECT_UPLOAD_CHUNK_RATE_LIMIT",
+                2400,
+            ),
             dictionary_cache_ttl_seconds=_positive_int(
                 source,
                 "DICTIONARY_CACHE_TTL_SECONDS",
                 30,
             ),
+            log_level=_log_level(source),
+            log_dir=Path(_text(source, "LOG_DIR") or "logs"),
+            log_max_bytes=_positive_int(source, "LOG_MAX_BYTES", 10 * 1024 * 1024),
+            log_backup_count=_positive_int(source, "LOG_BACKUP_COUNT", 5),
+            api_docs_enabled=_boolean(source, "API_DOCS_ENABLED"),
         )
 
 

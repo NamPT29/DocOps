@@ -10,10 +10,16 @@ from server.database import Base
 from server.models import (
     AssignedDocument,
     AssignedDocumentReviewAssignment,
+    Notification,
+    NotificationRecipient,
+    Project,
+    ProjectCase,
+    ProjectMember,
     ServerFolderImportJob,
     ServerFolderImportReviewer,
     Submission,
     SubmissionReviewAssignment,
+    SubmissionViewPresence,
     Task,
     Template,
     User,
@@ -164,6 +170,108 @@ def test_deleting_user_detaches_references_but_preserves_business_records(db):
         job_id=import_job_id
     ).first() is None
     assert db.get(UserCapability, target_id) is None
+
+
+def test_deleting_user_detaches_transient_project_and_presence_references(db):
+    admin = _add_user(db, "admin-project-owner", role="admin")
+    target = _add_user(db, "transient-project-member")
+    template = Template(name="Biểu mẫu dự án", filename="project-form.xlsx")
+    db.add(template)
+    db.flush()
+    project = Project(
+        name="Dự án giữ lại",
+        root_folder_name="du-an-giu-lai",
+        template_id=template.id,
+        template_name_snapshot=template.name,
+        template_filename_snapshot=template.filename,
+        case_level=1,
+        report_mode="pdf",
+        created_by_user_id=admin.id,
+    )
+    submission = Submission(
+        data_json="{}",
+        template_id=template.id,
+        created_by_user_id=admin.id,
+        status="draft",
+    )
+    notification = Notification(
+        title="Thông báo giữ lại",
+        message="Nội dung giữ lại",
+        created_by_user_id=admin.id,
+    )
+    db.add_all([project, submission, notification])
+    db.flush()
+    project_case = ProjectCase(
+        project_id=project.id,
+        case_key="case-001",
+        display_name="Hồ sơ 001",
+        assigned_input_user_id=target.id,
+        assigned_reviewer_user_id=target.id,
+    )
+    db.add_all(
+        [
+            ProjectMember(project_id=project.id, user_id=target.id, member_role="input"),
+            ProjectMember(project_id=project.id, user_id=target.id, member_role="reviewer"),
+            project_case,
+            NotificationRecipient(notification_id=notification.id, user_id=target.id),
+            SubmissionViewPresence(submission_id=submission.id, viewer_user_id=target.id),
+        ]
+    )
+    db.commit()
+    target_id = target.id
+    project_id = project.id
+    case_id = project_case.id
+
+    result = auth.api_delete_user(
+        target_id,
+        current_user=_current_user(admin),
+        db=db,
+    )
+
+    db.expire_all()
+    assert result == {"status": "ok"}
+    assert db.get(User, target_id) is None
+    assert db.get(Project, project_id) is not None
+    preserved_case = db.get(ProjectCase, case_id)
+    assert preserved_case.assigned_input_user_id is None
+    assert preserved_case.assigned_reviewer_user_id is None
+    assert db.query(ProjectMember).filter_by(user_id=target_id).count() == 0
+    assert db.query(NotificationRecipient).filter_by(user_id=target_id).count() == 0
+    assert db.query(SubmissionViewPresence).filter_by(viewer_user_id=target_id).count() == 0
+
+
+def test_deleting_user_with_historical_project_reference_returns_conflict(db):
+    admin = _add_user(db, "admin-delete-blocker", role="admin")
+    target = _add_user(db, "project-creator")
+    template = Template(name="Biểu mẫu lịch sử", filename="history-form.xlsx")
+    db.add(template)
+    db.flush()
+    project = Project(
+        name="Dự án lịch sử",
+        root_folder_name="du-an-lich-su",
+        template_id=template.id,
+        template_name_snapshot=template.name,
+        template_filename_snapshot=template.filename,
+        case_level=1,
+        report_mode="pdf",
+        created_by_user_id=target.id,
+    )
+    db.add(project)
+    db.commit()
+    target_id = target.id
+    project_id = project.id
+
+    with pytest.raises(HTTPException) as error:
+        auth.api_delete_user(
+            target_id,
+            current_user=_current_user(admin),
+            db=db,
+        )
+
+    assert error.value.status_code == 409
+    assert "dự án đã tạo" in error.value.detail
+    assert db.get(User, target_id) is not None
+    assert db.get(Project, project_id) is not None
 
 
 def test_admin_cannot_delete_own_account(db):

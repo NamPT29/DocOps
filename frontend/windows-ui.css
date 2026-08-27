@@ -419,3 +419,31 @@ body.login-shell {
         animation-duration: 0.01ms !important;
     }
 }
+
+/* CSP-safe presentation for first-party generated markup. */
+.generated-checkbox-emphasis {
+    cursor: pointer;
+    transform: scale(1.3);
+}
+
+.generated-transition-icon-lg,
+.generated-transition-icon-sm {
+    transition: transform 0.2s;
+}
+
+.generated-transition-icon-lg {
+    width: 20px;
+}
+
+.generated-transition-icon-sm {
+    width: 15px;
+}
+
+.generated-submission-path-cell {
+    min-width: 260px;
+    max-width: 520px;
+}
+
+.generated-submission-actions-cell {
+    min-width: 300px;
+}

@@ -97,11 +97,9 @@ async def unhandled_exception_handler(
     exc: Exception,
 ) -> JSONResponse:
     log_context = request_log_context(request.scope, status_code=500)
+    log_context["error_type"] = type(exc).__name__
     logger.error(
-        "Unhandled exception: %s %s",
-        request.method,
-        request.url.path,
-        exc_info=exc,
+        "Unhandled request exception",
         extra=log_context,
     )
     response_headers = {}

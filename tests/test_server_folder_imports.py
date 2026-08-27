@@ -171,7 +171,7 @@ def test_my_queue_keeps_documents_linked_to_any_user_submission(database_factory
         created_by_user_id=other_user.id,
         template_id=template.id,
         assigned_document_id=document.id,
-        status="approved",
+        status="completed",
     ))
     db.commit()
 

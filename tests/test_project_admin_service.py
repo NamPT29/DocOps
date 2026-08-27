@@ -22,6 +22,7 @@ from server.models import (
     ProjectUploadSession,
     Submission,
     SubmissionReviewAssignment,
+    SubmissionReviewHistory,
     SubmissionViewPresence,
     Template,
     User,
@@ -143,7 +144,7 @@ def seed_admin_project(database):
             assigned_document_id=document.id,
             status=status,
         )
-        for status in ("draft", "pending_review", "approved")
+        for status in ("draft", "pending_review", "completed")
     ]
     database.add_all(submissions)
     database.flush()
@@ -174,12 +175,21 @@ def test_member_update_transfers_whole_case_drafts_and_reviews(database):
     assert case_row.assigned_input_user_id == new_input.id
     assert case_row.assigned_reviewer_user_id == new_reviewer.id
     assert result["submissions_transferred"] == 3
-    assert {submission.status for submission in submissions} == {"draft", "pending_review", "approved"}
-    assert all(submission.created_by_user_id == new_input.id for submission in submissions)
-    assert all(
-        db.get(SubmissionReviewAssignment, submission.id).reviewer_user_id == new_reviewer.id
+    assert result["submission_reviews_transferred"] == 2
+    assert {submission.status for submission in submissions} == {"draft", "pending_review", "completed"}
+    assert all(submission.created_by_user_id == old_input.id for submission in submissions)
+    reviewer_by_status = {
+        submission.status: db.get(
+            SubmissionReviewAssignment,
+            submission.id,
+        ).reviewer_user_id
         for submission in submissions
-    )
+    }
+    assert reviewer_by_status == {
+        "draft": new_reviewer.id,
+        "pending_review": new_reviewer.id,
+        "completed": _old_reviewer.id,
+    }
     document = db.get(AssignedDocument, asset.assigned_document_id)
     assert document.assigned_to_user_id == new_input.id
     assert db.get(AssignedDocumentReviewAssignment, document.id).reviewer_user_id == new_reviewer.id
@@ -188,6 +198,164 @@ def test_member_update_transfers_whole_case_drafts_and_reviews(database):
         row.is_active
         for row in db.query(ProjectMember).filter(ProjectMember.user_id == old_input.id)
     )
+
+
+def test_member_update_keeps_reopened_review_with_first_reviewer(database):
+    db, _ = database
+    (
+        admin,
+        _old_input,
+        new_input,
+        old_reviewer,
+        new_reviewer,
+        project,
+        _case_row,
+        _asset,
+        submissions,
+    ) = seed_admin_project(db)
+    reopened = next(row for row in submissions if row.status == "pending_review")
+    db.add(SubmissionReviewHistory(
+        submission_id=reopened.id,
+        event_type="review_confirmed",
+        input_user_id=reopened.created_by_user_id,
+        reviewer_user_id=old_reviewer.id,
+        baseline_data_json="{}",
+        reviewer_data_json="{}",
+        visible_field_count=0,
+        changed_field_count=0,
+    ))
+    db.commit()
+
+    result = update_project_members(
+        db,
+        project_id=project.id,
+        input_user_ids=[new_input.id],
+        reviewer_user_ids=[new_reviewer.id],
+        changed_by_user_id=admin.id,
+    )
+
+    assert result["submission_reviews_transferred"] == 1
+    assert db.get(
+        SubmissionReviewAssignment,
+        reopened.id,
+    ).reviewer_user_id == old_reviewer.id
+
+
+def test_member_update_rebalances_whole_folders_by_active_pdf_count(database):
+    db, _ = database
+    (
+        admin,
+        old_input,
+        new_input,
+        old_reviewer,
+        new_reviewer,
+        project,
+        _seed_case,
+        _seed_asset,
+        _submissions,
+    ) = seed_admin_project(db)
+
+    for case_number, pdf_count in ((2, 8), (3, 7), (4, 2)):
+        case_row = ProjectCase(
+            project_id=project.id,
+            case_key=f"{case_number:03d}",
+            display_name=f"{case_number:03d}",
+            assigned_input_user_id=old_input.id,
+            assigned_reviewer_user_id=old_reviewer.id,
+        )
+        db.add(case_row)
+        db.flush()
+        report = ProjectReportUnit(
+            project_id=project.id,
+            case_id=case_row.id,
+            report_key=f"{case_number:03d}/report",
+            display_name="report",
+        )
+        db.add(report)
+        db.flush()
+        for pdf_number in range(1, pdf_count + 1):
+            relative_path = f"{case_number:03d}/report/{pdf_number}.pdf"
+            db.add(ProjectDocumentAsset(
+                project_id=project.id,
+                case_id=case_row.id,
+                report_unit_id=report.id,
+                relative_path=relative_path,
+                normalized_relative_path=relative_path,
+                original_filename=f"{pdf_number}.pdf",
+                storage_filename=f"rebalance-{case_number}-{pdf_number}.pdf",
+                content_sha256=f"{case_number * 100 + pdf_number:064x}",
+                byte_size=pdf_number,
+                status="active",
+            ))
+    db.commit()
+
+    result = update_project_members(
+        db,
+        project_id=project.id,
+        input_user_ids=[old_input.id, new_input.id],
+        reviewer_user_ids=[old_reviewer.id, new_reviewer.id],
+        changed_by_user_id=admin.id,
+    )
+
+    assert result["rebalanced"] is True
+    assert sorted(row["pdf_count"] for row in result["input_distribution"]) == [0, 18]
+    assert sorted(row["pdf_count"] for row in result["reviewer_distribution"]) == [0, 18]
+    assert result["input_cases_transferred"] == 0
+    assert result["reviewer_cases_transferred"] == 0
+    assert db.query(ProjectAssignmentHistory).count() == 0
+    assert all(
+        case_row.assigned_input_user_id != case_row.assigned_reviewer_user_id
+        for case_row in db.query(ProjectCase).filter_by(project_id=project.id).all()
+    )
+
+
+def test_member_update_splits_two_existing_folders_when_second_user_is_added(database):
+    db, _ = database
+    (
+        admin,
+        hoang,
+        tuoi,
+        first_reviewer,
+        second_reviewer,
+        project,
+        first_case,
+        _seed_asset,
+        _submissions,
+    ) = seed_admin_project(db)
+    second_case = ProjectCase(
+        project_id=project.id,
+        case_key="002",
+        display_name="002",
+        assigned_input_user_id=hoang.id,
+        assigned_reviewer_user_id=first_reviewer.id,
+    )
+    db.add(second_case)
+    db.flush()
+    db.add(ProjectReportUnit(
+        project_id=project.id,
+        case_id=second_case.id,
+        report_key="002/report.pdf",
+        display_name="report.pdf",
+    ))
+    db.commit()
+
+    result = update_project_members(
+        db,
+        project_id=project.id,
+        input_user_ids=[hoang.id, tuoi.id],
+        reviewer_user_ids=[first_reviewer.id, second_reviewer.id],
+        changed_by_user_id=admin.id,
+    )
+
+    db.refresh(first_case)
+    db.refresh(second_case)
+    assert result["rebalanced"] is True
+    assert {first_case.assigned_input_user_id, second_case.assigned_input_user_id} == {
+        hoang.id,
+        tuoi.id,
+    }
+    assert sorted(row["case_count"] for row in result["input_distribution"]) == [1, 1]
+    assert sorted(row["pdf_count"] for row in result["input_distribution"]) == [0, 1]
 
 
 def test_hard_delete_unentered_pdf_keeps_audit_and_removes_file(database):

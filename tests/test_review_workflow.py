@@ -5,7 +5,6 @@ import json
 
 import pytest
 from fastapi import BackgroundTasks, HTTPException
-from pydantic import ValidationError
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
@@ -128,9 +127,9 @@ def test_duplicate_report_filter_uses_shared_source_document(db):
         )
 
     duplicate_review = report(duplicate_document, "pending_review", "dup-review")
-    duplicate_completed = report(duplicate_document, "approved", "dup-completed")
+    duplicate_completed = report(duplicate_document, "completed", "dup-completed")
     unique_review = report(unique_review_document, "pending_review", "unique-review")
-    unique_completed = report(unique_completed_document, "approved", "unique-completed")
+    unique_completed = report(unique_completed_document, "completed", "unique-completed")
     db.add_all([
         duplicate_review,
         duplicate_completed,
@@ -168,7 +167,7 @@ def test_duplicate_report_filter_uses_shared_source_document(db):
     )
     completed_rows = submissions.api_get_submissions(
         template_id=template.id,
-        status="approved",
+        status="completed",
         folder_path=folder,
         duplicate_only=True,
         current_user={"id": 1, "role": "admin"},
@@ -188,7 +187,12 @@ def test_excel_export_includes_only_approved_submissions(db, mocker):
     db.add(template)
     db.flush()
     records = []
-    for status in ("draft", "pending_review", "rejected", "approved"):
+    for status in (
+        "draft",
+        "pending_review",
+        "pending_input_confirmation",
+        "completed",
+    ):
         record = Submission(
             template_id=template.id,
             data_json=f'{{"col_0": "{status}"}}',
@@ -217,7 +221,7 @@ def test_excel_export_includes_only_approved_submissions(db, mocker):
     assert result == {"status": "file-ready"}
     exported_submissions = export_call.await_args.args[2]
     assert [submission.id for submission in exported_submissions] == [records[-1].id]
-    assert {submission.status for submission in exported_submissions} == {"approved"}
+    assert {submission.status for submission in exported_submissions} == {"completed"}
 
 
 def test_legacy_excel_export_all_is_rejected_before_heavy_processing(db, mocker):
@@ -225,7 +229,12 @@ def test_legacy_excel_export_all_is_rejected_before_heavy_processing(db, mocker)
     db.add(template)
     db.flush()
     records = {}
-    for status in ("draft", "pending_review", "rejected", "approved"):
+    for status in (
+        "draft",
+        "pending_review",
+        "pending_input_confirmation",
+        "completed",
+    ):
         record = Submission(
             template_id=template.id,
             data_json=f'{{"col_0": "{status}"}}',
@@ -282,7 +291,7 @@ def test_excel_export_rejects_template_without_approved_submissions(db, mocker):
         ))
 
     assert exc.value.status_code == 404
-    assert exc.value.detail == "Không có hồ sơ đã duyệt để xuất báo cáo cho biểu mẫu này."
+    assert exc.value.detail == "Không có hồ sơ hoàn thành để xuất báo cáo cho biểu mẫu này."
     export_call.assert_not_awaited()
 
 
@@ -316,13 +325,13 @@ def test_completed_folders_filter_approved_submissions_and_excel_by_folder(db, m
         template_id=template.id,
         created_by_user_id=author.id,
         data_json=f'{{"_pdf_uuid": "{first_document.uuid_filename}"}}',
-        status="approved",
+        status="completed",
     )
     second_approved = Submission(
         template_id=template.id,
         created_by_user_id=author.id,
         data_json=f'{{"_pdf_uuid": "{second_document.uuid_filename}"}}',
-        status="approved",
+        status="completed",
     )
     pending = Submission(
         template_id=template.id,
@@ -341,7 +350,7 @@ def test_completed_folders_filter_approved_submissions_and_excel_by_folder(db, m
     rows = {item["folder_path"]: item for item in folders["data"]}
     selected = submissions.api_get_submissions(
         template_id=template.id,
-        status="approved",
+        status="completed",
         folder_path="00000000/004/0011",
         page=1,
         page_size=20,
@@ -392,7 +401,7 @@ def test_completed_folders_keep_approved_legacy_records_without_folder(db):
     legacy = Submission(
         created_by_user_id=author.id,
         data_json='{"col_8": "Hồ sơ cũ"}',
-        status="approved",
+        status="completed",
     )
     db.add(legacy)
     db.commit()
@@ -402,7 +411,7 @@ def test_completed_folders_keep_approved_legacy_records_without_folder(db):
         db=db,
     )
     selected = submissions.api_get_submissions(
-        status="approved",
+        status="completed",
         folder_path=submissions.COMPLETED_WITHOUT_FOLDER,
         current_user={"id": 1, "role": "admin"},
         db=db,
@@ -424,13 +433,13 @@ def test_completed_root_folder_keeps_root_folder_metadata(db):
     approved = Submission(
         created_by_user_id=author.id,
         data_json=f'{{"_pdf_uuid": "{document.uuid_filename}"}}',
-        status="approved",
+        status="completed",
     )
     db.add(approved)
     db.commit()
 
     selected = submissions.api_get_submissions(
-        status="approved",
+        status="completed",
         folder_path="__ROOT__",
         current_user={"id": 1, "role": "admin"},
         db=db,
@@ -512,18 +521,130 @@ def test_copied_submission_uses_current_utc_time(db):
     db.add(original)
     db.commit()
 
-    before_copy = datetime.now(timezone.utc).replace(tzinfo=None)
-    result = submissions.api_copy_submission(
-        original.id,
+    before_count = db.query(Submission).count()
+    with pytest.raises(HTTPException) as exc:
+        submissions.api_copy_submission(
+            original.id,
+            current_user=current_user(author),
+            db=db,
+        )
+
+    assert exc.value.status_code == 409
+    assert exc.value.detail["code"] == "copy_requires_form"
+    assert db.query(Submission).count() == before_count
+
+
+def prepare_copy_submission_scope(db, author, *, target_folder="project/7/case-a"):
+    template = Template(
+        name="Mẫu nhân bản an toàn",
+        filename="safe-copy.xlsx",
+        config_json=json.dumps({
+            "linked_pdf_path": {"enabled": True, "col": 1, "folder_levels": 1},
+        }),
+    )
+    db.add(template)
+    db.flush()
+
+    source_document = assign_document(db, author, filename="copy-source.pdf")
+    target_document = assign_document(db, author, filename="copy-target.pdf")
+    source_document.template_id = template.id
+    source_document.status = "completed"
+    target_document.template_id = template.id
+    db.add_all([
+        AssignedDocumentFolder(document_id=source_document.id, folder_group="project/7/case-a"),
+        AssignedDocumentFolder(document_id=target_document.id, folder_group=target_folder),
+    ])
+    source = Submission(
+        data_json=json.dumps({
+            "col_0": "case-a/copy-source.pdf",
+            "col_1": "Nội dung nguồn",
+            "_pdf_uuid": source_document.uuid_filename,
+            "_folder_path": "project/7/case-a",
+        }, ensure_ascii=False),
+        created_by_user_id=author.id,
+        template_id=template.id,
+        status="draft",
+        assigned_document_id=source_document.id,
+        folder_path="project/7/case-a",
+        folder_path_key=folder_path_key("project/7/case-a"),
+    )
+    db.add(source)
+    db.commit()
+    return template, source, target_document
+
+
+def test_copy_save_rejects_path_only_change_then_accepts_business_change(db):
+    author = add_user(db, "safe-copy-author")
+    template, source, target_document = prepare_copy_submission_scope(db, author)
+    request_data = {
+        "col_0": "case-a/copy-target.pdf",
+        "col_1": "Nội dung nguồn",
+        "_pdf_uuid": target_document.uuid_filename,
+    }
+
+    with pytest.raises(HTTPException) as exc:
+        submissions.api_submit(
+            submissions.SubmitRequest(
+                template_id=template.id,
+                data=request_data,
+                status="draft",
+                copy_source_submission_id=source.id,
+            ),
+            current_user=current_user(author),
+            db=db,
+        )
+
+    assert exc.value.status_code == 409
+    assert exc.value.detail["code"] == "copy_unchanged"
+    assert db.query(Submission).count() == 1
+    db.refresh(target_document)
+    assert target_document.status == "pending"
+
+    changed_data = dict(request_data, col_1="Nội dung đã sửa")
+    result = submissions.api_submit(
+        submissions.SubmitRequest(
+            template_id=template.id,
+            data=changed_data,
+            status="draft",
+            copy_source_submission_id=source.id,
+        ),
         current_user=current_user(author),
         db=db,
     )
-    after_copy = datetime.now(timezone.utc).replace(tzinfo=None)
-    copied = db.query(Submission).filter(Submission.id == result["new_id"]).one()
 
-    assert result["status"] == "ok"
-    assert copied.created_at > original.created_at
-    assert before_copy <= copied.created_at <= after_copy
+    assert result == {"status": "ok"}
+    assert db.query(Submission).count() == 2
+    db.refresh(target_document)
+    assert target_document.status == "completed"
+
+
+def test_copy_save_rejects_pdf_outside_source_project_case(db):
+    author = add_user(db, "copy-scope-author")
+    template, source, target_document = prepare_copy_submission_scope(
+        db,
+        author,
+        target_folder="project/7/case-b",
+    )
+
+    with pytest.raises(HTTPException) as exc:
+        submissions.api_submit(
+            submissions.SubmitRequest(
+                template_id=template.id,
+                data={
+                    "col_0": "case-b/copy-target.pdf",
+                    "col_1": "Nội dung đã sửa",
+                    "_pdf_uuid": target_document.uuid_filename,
+                },
+                status="draft",
+                copy_source_submission_id=source.id,
+            ),
+            current_user=current_user(author),
+            db=db,
+        )
+
+    assert exc.value.status_code == 409
+    assert exc.value.detail["code"] == "copy_scope_mismatch"
+    assert db.query(Submission).count() == 1
 
 
 def test_saving_copied_draft_refreshes_its_current_utc_time(db):
@@ -605,7 +726,10 @@ def test_new_account_has_no_fixed_role_and_inventory_lists_all_employees(db):
     assert me["user"]["roles"] == []
 
 
-@pytest.mark.parametrize("submission_status", ["draft", "pending_review", "rejected", "approved"])
+@pytest.mark.parametrize(
+    "submission_status",
+    ["draft", "pending_review", "pending_input_confirmation", "completed"],
+)
 def test_admin_lists_and_revokes_one_input_folder_while_preserving_other_folders(
     db,
     submission_status,
@@ -721,7 +845,7 @@ def test_admin_revokes_reviewer_work_and_takes_over_active_submissions(db):
     reserved = assign_document(db, employee, reviewer, filename="reserved.pdf")
     active_documents = []
     submissions_by_status = {}
-    for status in ("pending_review", "rejected", "approved"):
+    for status in ("pending_review", "pending_input_confirmation", "completed"):
         document = assign_document(db, employee, reviewer, filename=f"{status}.pdf")
         document.status = "completed"
         submission = Submission(
@@ -752,22 +876,23 @@ def test_admin_revokes_reviewer_work_and_takes_over_active_submissions(db):
     )
 
     db.expire_all()
-    assert reviewer_stats["review_pending"] == 3
+    assert reviewer_stats["review_pending"] == 2
     assert result["review_reservations_revoked"] == 1
-    assert result["reviews_transferred_to_admin"] == 2
+    assert result["reviews_transferred_to_admin"] == 1
     assert db.query(AssignedDocumentReviewAssignment).filter_by(
         document_id=reserved.id
     ).first() is None
-    for status in ("pending_review", "rejected"):
+    for status in ("pending_review",):
         assignment = db.query(SubmissionReviewAssignment).filter_by(
             submission_id=submissions_by_status[status].id
         ).one()
         assert assignment.reviewer_user_id == admin.id
-    approved_assignment = db.query(SubmissionReviewAssignment).filter_by(
-        submission_id=submissions_by_status["approved"].id
-    ).one()
-    assert approved_assignment.reviewer_user_id == reviewer.id
-    for document in active_documents[:2]:
+    for status in ("pending_input_confirmation", "completed"):
+        assignment = db.query(SubmissionReviewAssignment).filter_by(
+            submission_id=submissions_by_status[status].id
+        ).one()
+        assert assignment.reviewer_user_id == reviewer.id
+    for document in active_documents[:1]:
         assert db.query(AssignedDocumentReviewAssignment).filter_by(
             document_id=document.id
         ).one().reviewer_user_id == admin.id
@@ -830,7 +955,7 @@ def test_folder_redistribution_moves_active_submission_and_preserves_content(db)
     submission = Submission(
         data_json=f'{{"_pdf_uuid": "{document.uuid_filename}", "field": "kept", "_wrong_sections": ["A"]}}',
         created_by_user_id=input_user.id,
-        status="rejected",
+        status="pending_review",
     )
     db.add(submission)
     db.flush()
@@ -861,7 +986,7 @@ def test_folder_redistribution_moves_active_submission_and_preserves_content(db)
         document_id=document.id,
     ).one().reviewer_user_id == new_reviewer.id
     assert '"field": "kept"' in db.get(Submission, submission.id).data_json
-    assert db.get(Submission, submission.id).status == "rejected"
+    assert db.get(Submission, submission.id).status == "pending_review"
 
 
 def test_folder_redistribution_rejects_self_review_without_partial_updates(db):
@@ -993,7 +1118,7 @@ def test_admin_reviews_unassigned_reports_and_shows_active_viewer(db):
         current_user=current_user(admin),
         db=db,
     )
-    assert approved['new_status'] == 'approved'
+    assert approved['new_status'] == 'pending_input_confirmation'
 
     claimed = submissions.api_claim_submission_view(
         assigned.id,
@@ -1086,8 +1211,8 @@ def test_author_cannot_review_own_submission_and_assigned_reviewer_can_approve(d
         db=db,
     )
     db.refresh(submission)
-    assert result["new_status"] == "approved"
-    assert submission.status == "approved"
+    assert result["new_status"] == "pending_input_confirmation"
+    assert submission.status == "pending_input_confirmation"
     assert submission.is_checked is True
 
 
@@ -1098,7 +1223,7 @@ def test_only_admin_can_return_approved_submission_to_pending_review(db):
     submission = Submission(
         data_json='{"field": "approved content"}',
         created_by_user_id=author.id,
-        status="approved",
+        status="completed",
         is_checked=True,
     )
     db.add(submission)
@@ -1119,7 +1244,7 @@ def test_only_admin_can_return_approved_submission_to_pending_review(db):
 
     db.refresh(submission)
     assert error.value.status_code == 403
-    assert submission.status == "approved"
+    assert submission.status == "completed"
     assert submission.is_checked is True
 
     result = submissions.api_reopen_submission_review(
@@ -1383,12 +1508,113 @@ def test_bulk_delete_is_atomic_when_selection_contains_submitted_report(db):
     ).count() == 2
 
 
-def test_bulk_submit_request_is_rejected_by_schema():
-    with pytest.raises(ValidationError):
+def test_employee_bulk_submits_reports_and_assigns_their_reviewers(db):
+    author = add_user(db, "bulk-submit-author")
+    reviewer = add_user(db, "bulk-submit-reviewer")
+    first_document = assign_document(db, author, reviewer, filename="bulk-1.pdf")
+    second_document = assign_document(db, author, reviewer, filename="bulk-2.pdf")
+    first = Submission(
+        data_json=json.dumps({"_pdf_uuid": first_document.uuid_filename}),
+        created_by_user_id=author.id,
+        assigned_document_id=first_document.id,
+        status="draft",
+    )
+    second = Submission(
+        data_json=json.dumps({
+            "_pdf_uuid": second_document.uuid_filename,
+            "_wrong_sections": ["Thông tin"],
+            "_wrong_fields": ["col_0"],
+        }),
+        created_by_user_id=author.id,
+        assigned_document_id=second_document.id,
+        status="draft",
+    )
+    db.add_all([first, second])
+    db.commit()
+    selected_ids = [first.id, second.id]
+
+    result = submissions.api_bulk_submission_action(
         submissions.BulkSubmissionActionRequest(
-            submission_ids=[1, 2],
+            submission_ids=selected_ids,
             action="submit_for_review",
+        ),
+        current_user=current_user(author),
+        db=db,
+    )
+
+    refreshed = db.query(Submission).filter(Submission.id.in_(selected_ids)).all()
+    assignments = db.query(SubmissionReviewAssignment).filter(
+        SubmissionReviewAssignment.submission_id.in_(selected_ids)
+    ).all()
+    assert result == {
+        "status": "ok",
+        "action": "submit_for_review",
+        "processed_count": 2,
+    }
+    assert {submission.status for submission in refreshed} == {"pending_review"}
+    assert len({submission.created_at for submission in refreshed}) == 1
+    assert all(
+        "_wrong_sections" not in json.loads(submission.data_json)
+        and "_wrong_fields" not in json.loads(submission.data_json)
+        for submission in refreshed
+    )
+    assert {assignment.reviewer_user_id for assignment in assignments} == {reviewer.id}
+    assert first_document.status == "completed"
+    assert second_document.status == "completed"
+
+
+def test_bulk_submit_is_atomic_when_one_report_is_invalid(db):
+    author = add_user(db, "bulk-submit-atomic-author")
+    reviewer = add_user(db, "bulk-submit-atomic-reviewer")
+    template = Template(
+        name="Mẫu nộp hàng loạt",
+        filename="bulk-submit.xlsx",
+        config_json=json.dumps({"required_cols": [1]}),
+    )
+    db.add(template)
+    db.commit()
+    valid_document = assign_document(db, author, reviewer, filename="valid.pdf")
+    invalid_document = assign_document(db, author, reviewer, filename="invalid.pdf")
+    valid = Submission(
+        template_id=template.id,
+        data_json=json.dumps({
+            "col_0": "Đủ dữ liệu",
+            "_pdf_uuid": valid_document.uuid_filename,
+        }),
+        created_by_user_id=author.id,
+        assigned_document_id=valid_document.id,
+        status="draft",
+    )
+    invalid = Submission(
+        template_id=template.id,
+        data_json=json.dumps({"_pdf_uuid": invalid_document.uuid_filename}),
+        created_by_user_id=author.id,
+        assigned_document_id=invalid_document.id,
+        status="draft",
+    )
+    db.add_all([valid, invalid])
+    db.commit()
+
+    with pytest.raises(HTTPException) as error:
+        submissions.api_bulk_submission_action(
+            submissions.BulkSubmissionActionRequest(
+                submission_ids=[valid.id, invalid.id],
+                action="submit_for_review",
+            ),
+            current_user=current_user(author),
+            db=db,
         )
+
+    db.refresh(valid)
+    db.refresh(invalid)
+    db.refresh(valid_document)
+    db.refresh(invalid_document)
+    assert error.value.status_code == 400
+    assert valid.status == "draft"
+    assert invalid.status == "draft"
+    assert valid_document.status == "pending"
+    assert invalid_document.status == "pending"
+    assert db.query(SubmissionReviewAssignment).count() == 0
 
 
 def test_deleting_submission_also_deletes_review_assignment(db):
@@ -1469,7 +1695,10 @@ def test_employee_cannot_delete_another_users_draft(db):
     assert db.query(Submission).filter(Submission.id == submission.id).count() == 1
 
 
-@pytest.mark.parametrize("status", ["pending_review", "rejected", "approved"])
+@pytest.mark.parametrize(
+    "status",
+    ["pending_review", "pending_input_confirmation", "completed"],
+)
 def test_employee_cannot_delete_submitted_submission(db, status):
     author = add_user(db, "author")
     submission = Submission(
@@ -1586,13 +1815,67 @@ def test_review_folders_include_empty_assignments_and_only_submitted_reports(db)
     assert [item["id"] for item in submitted_reports["data"]] == [submitted.id]
 
 
+def test_submission_folder_files_expose_review_statuses(db):
+    author = add_user(db, "folder-status-author")
+    reviewer = add_user(db, "folder-status-reviewer")
+    pending_document = assign_document(db, author, reviewer, filename="pending-review.pdf")
+    approved_document = assign_document(db, author, reviewer, filename="approved-review.pdf")
+    unentered_document = assign_document(db, author, reviewer, filename="unentered.pdf")
+    folder = "004/0042"
+    db.add_all([
+        AssignedDocumentFolder(document_id=pending_document.id, folder_group=folder),
+        AssignedDocumentFolder(document_id=approved_document.id, folder_group=folder),
+        AssignedDocumentFolder(document_id=unentered_document.id, folder_group=folder),
+    ])
+    pending = Submission(
+        data_json=json.dumps({"_pdf_uuid": pending_document.uuid_filename}),
+        created_by_user_id=author.id,
+        assigned_document_id=pending_document.id,
+        folder_path=folder,
+        folder_path_key=folder_path_key(folder),
+        status="pending_review",
+    )
+    approved = Submission(
+        data_json=json.dumps({"_pdf_uuid": approved_document.uuid_filename}),
+        created_by_user_id=author.id,
+        assigned_document_id=approved_document.id,
+        folder_path=folder,
+        folder_path_key=folder_path_key(folder),
+        status="completed",
+        is_checked=True,
+    )
+    db.add_all([pending, approved])
+    db.flush()
+    db.add(SubmissionReviewAssignment(
+        submission_id=pending.id,
+        reviewer_user_id=reviewer.id,
+    ))
+    db.commit()
+
+    payload = submissions.api_get_submission(
+        pending.id,
+        current_user=current_user(reviewer),
+        db=db,
+    )
+
+    statuses = {
+        item["uuid"]: item["review_status"]
+        for item in payload["folder_files"]
+    }
+    assert statuses == {
+        pending_document.uuid_filename: "pending_review",
+        approved_document.uuid_filename: "completed",
+        unentered_document.uuid_filename: None,
+    }
+
+
 def test_reviewer_edits_content_without_overwriting_errors_or_pdf_metadata(db):
     author = add_user(db, "author")
     reviewer = add_user(db, "reviewer")
     submission = Submission(
         data_json='{"field": "old", "_wrong_sections": ["Thông tin"], "_pdf_uuid": "safe.pdf", "_folder_path": "004/0011"}',
         created_by_user_id=author.id,
-        status="rejected",
+        status="pending_review",
     )
     db.add(submission)
     db.flush()
@@ -1619,7 +1902,6 @@ def test_reviewer_edits_content_without_overwriting_errors_or_pdf_metadata(db):
     assert result == {
         "status": "ok",
         "submission_status": "pending_review",
-        "wrong_fields": [],
     }
     assert stored["field"] == "reviewer corrected"
     assert stored["_wrong_sections"] == ["Thông tin"]
@@ -1666,7 +1948,7 @@ def test_unassigned_reviewer_cannot_open_folder_or_edit_report(db):
     assert __import__("json").loads(submission.data_json)["field"] == "old"
 
 
-def test_reviewer_saves_corrected_content_and_error_marks_in_one_transaction(db):
+def test_reviewer_saves_corrected_content_without_manual_error_marks(db):
     author = add_user(db, "atomic-review-author")
     reviewer = add_user(db, "atomic-reviewer")
     submission = Submission(
@@ -1686,7 +1968,6 @@ def test_reviewer_saves_corrected_content_and_error_marks_in_one_transaction(db)
         submission.id,
         submissions.ReviewContentRequest(
             data={"field": "reviewer corrected", "_pdf_uuid": "tampered.pdf"},
-            wrong_fields=["field"],
         ),
         current_user=current_user(reviewer),
         db=db,
@@ -1697,18 +1978,16 @@ def test_reviewer_saves_corrected_content_and_error_marks_in_one_transaction(db)
     assert marked == {
         "status": "ok",
         "submission_status": "pending_review",
-        "wrong_fields": ["field"],
     }
     assert marked_data["field"] == "reviewer corrected"
     assert marked_data["_pdf_uuid"] == "safe.pdf"
-    assert marked_data["_wrong_fields"] == ["field"]
+    assert "_wrong_fields" not in marked_data
     assert submission.status == "pending_review"
 
     cleared = submissions.api_update_review_content(
         submission.id,
         submissions.ReviewContentRequest(
             data={"field": "fully corrected"},
-            wrong_fields=[],
         ),
         current_user=current_user(reviewer),
         db=db,
@@ -1719,14 +1998,93 @@ def test_reviewer_saves_corrected_content_and_error_marks_in_one_transaction(db)
     assert cleared == {
         "status": "ok",
         "submission_status": "pending_review",
-        "wrong_fields": [],
     }
     assert cleared_data["field"] == "fully corrected"
-    assert cleared_data["_wrong_fields"] == []
+    assert "_wrong_fields" not in cleared_data
     assert submission.status == "pending_review"
 
 
-def test_marking_wrong_fields_does_not_return_report_to_input_user(db):
+def test_reviewer_confirmation_saves_content_and_approves_atomically(db):
+    author = add_user(db, "confirm-review-author")
+    reviewer = add_user(db, "confirm-reviewer")
+    submission = Submission(
+        data_json=json.dumps({
+            "col_8": "Nội dung cũ",
+            "_pdf_uuid": "safe.pdf",
+            "_folder_path": "004/0011",
+        }),
+        created_by_user_id=author.id,
+        status="pending_review",
+    )
+    db.add(submission)
+    db.flush()
+    db.add(SubmissionReviewAssignment(
+        submission_id=submission.id,
+        reviewer_user_id=reviewer.id,
+    ))
+    db.commit()
+
+    result = submissions.api_confirm_submission_review(
+        submission.id,
+        submissions.ReviewContentRequest(
+            data={
+                "col_8": "Nội dung đã kiểm duyệt",
+                "_pdf_uuid": "tampered.pdf",
+                "_folder_path": "tampered",
+            },
+        ),
+        current_user=current_user(reviewer),
+        db=db,
+    )
+
+    db.refresh(submission)
+    stored = json.loads(submission.data_json)
+    assert result == {
+        "status": "ok",
+        "submission_status": "pending_input_confirmation",
+        "is_checked": True,
+    }
+    assert submission.status == "pending_input_confirmation"
+    assert submission.is_checked is True
+    assert stored["col_8"] == "Nội dung đã kiểm duyệt"
+    assert stored["_pdf_uuid"] == "safe.pdf"
+    assert stored["_folder_path"] == "004/0011"
+    assert "_wrong_fields" not in stored
+
+
+def test_unassigned_reviewer_cannot_confirm_submission(db):
+    author = add_user(db, "confirm-owner")
+    reviewer = add_user(db, "assigned-confirm-reviewer")
+    outsider = add_user(db, "unassigned-confirm-reviewer")
+    submission = Submission(
+        data_json=json.dumps({"col_8": "Nội dung cũ"}),
+        created_by_user_id=author.id,
+        status="pending_review",
+    )
+    db.add(submission)
+    db.flush()
+    db.add(SubmissionReviewAssignment(
+        submission_id=submission.id,
+        reviewer_user_id=reviewer.id,
+    ))
+    db.commit()
+
+    with pytest.raises(HTTPException) as error:
+        submissions.api_confirm_submission_review(
+            submission.id,
+            submissions.ReviewContentRequest(data={"col_8": "Không được phép"}),
+            current_user=current_user(outsider),
+            db=db,
+        )
+
+    db.refresh(submission)
+    assert error.value.status_code == 403
+    assert submission.status == "pending_review"
+    assert submission.is_checked is False
+    assert json.loads(submission.data_json)["col_8"] == "Nội dung cũ"
+
+
+def test_legacy_wrong_fields_are_discarded_during_review_save(db):
     author = add_user(db, "marker-author")
     reviewer = add_user(db, "marker-reviewer")
     submission = Submission(
@@ -1742,10 +2100,10 @@ def test_marking_wrong_fields_does_not_return_report_to_input_user(db):
     ))
     db.commit()
 
-    result = submissions.api_update_errors(
+    result = submissions.api_update_review_content(
         submission.id,
-        submissions.ErrorSectionsRequest(
-            wrong_sections=[],
+        submissions.ReviewContentRequest(
+            data={"col_8": "reviewed"},
             wrong_fields=["col_8"],
         ),
         current_user=current_user(reviewer),
@@ -1757,10 +2115,9 @@ def test_marking_wrong_fields_does_not_return_report_to_input_user(db):
     assert result == {
         "status": "ok",
         "submission_status": "pending_review",
-        "wrong_fields": ["col_8"],
     }
     assert submission.status == "pending_review"
-    assert stored["_wrong_fields"] == ["col_8"]
+    assert "_wrong_fields" not in stored
 
 
 @pytest.mark.parametrize(
@@ -1779,12 +2136,6 @@ def test_marking_wrong_fields_does_not_return_report_to_input_user(db):
         ),
         lambda db: submissions.api_toggle_check(
             999,
-            current_user={"id": 1, "role": "admin"},
-            db=db,
-        ),
-        lambda db: submissions.api_update_errors(
-            999,
-            submissions.ErrorSectionsRequest(wrong_sections=[]),
             current_user={"id": 1, "role": "admin"},
             db=db,
         ),
@@ -1818,7 +2169,7 @@ def test_next_review_submission_skips_completed_current_item(db):
         created_by_user_id=author.id,
         folder_path="004/0023",
         folder_path_key="004-0023",
-        status="approved",
+        status="pending_input_confirmation",
         created_at=datetime(2026, 1, 1, 11, 0, 0),
     )
     db.add_all([older, current])

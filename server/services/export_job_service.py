@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
 import subprocess
 import sys
+import time
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -17,6 +19,9 @@ EXPORT_SCRATCH_DIR = settings.export_work_dir.resolve()
 EXPORT_LOCK_PATH = EXPORT_SCRATCH_DIR / "export_all.lock"
 _JOB_ID_PATTERN = re.compile(r"^[0-9a-f]{32}$")
 _ACTIVE_STATES = {"queued", "running"}
+_CLEANUP_RETRY_ATTEMPTS = 10
+_CLEANUP_RETRY_DELAY_SECONDS = 0.05
+logger = logging.getLogger(__name__)
 
 
 class ExportJobBusyError(RuntimeError):
@@ -208,14 +213,36 @@ def start_export_job(
     return payload
 
 
-def cleanup_export_job(job_id: str) -> None:
+def _unlink_export_artifact(path: Path) -> bool:
+    for attempt in range(_CLEANUP_RETRY_ATTEMPTS):
+        try:
+            path.unlink()
+            return True
+        except FileNotFoundError:
+            return True
+        except PermissionError:
+            if attempt + 1 < _CLEANUP_RETRY_ATTEMPTS:
+                time.sleep(_CLEANUP_RETRY_DELAY_SECONDS)
+                continue
+            logger.warning("Không thể dọn file xuất đang bị khóa: %s", path)
+            return False
+        except OSError as exc:
+            logger.warning("Không thể dọn file xuất %s: %s", path, exc)
+            return False
+    return False
+
+
+def cleanup_export_job(job_id: str) -> dict:
     payload = read_export_job(job_id) or {}
     extension = payload.get("extension")
     paths = [export_job_status_path(job_id), EXPORT_SCRATCH_DIR / f"export_job_{job_id}.log"]
     if extension in {".xlsx", ".xlsm"}:
         paths.append(export_job_output_path(job_id, extension))
+    removed = 0
+    retained = []
     for path in paths:
-        try:
-            path.unlink()
-        except FileNotFoundError:
-            pass
+        if _unlink_export_artifact(path):
+            removed += 1
+        else:
+            retained.append(str(path))
+    return {"removed": removed, "retained": retained}

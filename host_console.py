@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import ctypes
+import multiprocessing
 import os
 import re
+import signal
 import shutil
 import socket
 import sys
@@ -17,12 +19,16 @@ from typing import Any, Awaitable, Callable
 
 import uvicorn
 from dotenv import load_dotenv
+from server.runtime_config import configure_server_runtime
 
 
 BASE_DIR = Path(__file__).resolve().parent
 STARTED_AT = time.monotonic()
 IS_WINDOWS = os.name == "nt"
-CONSOLE_WIDTH = 145
+CONSOLE_WIDTH = 112
+PANEL_CONTENT_WIDTH = 105
+METRIC_COLUMN_WIDTHS = (14, 21, 22, 22, 14)
+LOG_TAIL_LINES = 14
 ANSI_ESCAPE_RE = re.compile(r"\033\[[0-9;]*m")
 
 
@@ -217,9 +223,33 @@ class _ConsoleCoord(ctypes.Structure):
     _fields_ = [("X", ctypes.c_short), ("Y", ctypes.c_short)]
 
 
+class _SmallRect(ctypes.Structure):
+    _fields_ = [
+        ("Left", ctypes.c_short),
+        ("Top", ctypes.c_short),
+        ("Right", ctypes.c_short),
+        ("Bottom", ctypes.c_short),
+    ]
+
+
+class _ConsoleScreenBufferInfo(ctypes.Structure):
+    _fields_ = [
+        ("dwSize", _ConsoleCoord),
+        ("dwCursorPosition", _ConsoleCoord),
+        ("wAttributes", ctypes.c_ushort),
+        ("srWindow", _SmallRect),
+        ("dwMaximumWindowSize", _ConsoleCoord),
+    ]
+
+
 def _pad_console_line(line: str, width: int) -> str:
-    visible_length = len(ANSI_ESCAPE_RE.sub("", line))
     writable_width = max(1, width - 1)
+    visible_line = ANSI_ESCAPE_RE.sub("", line)
+    visible_length = len(visible_line)
+    if visible_length > writable_width:
+        if writable_width == 1:
+            return visible_line[:1]
+        return f"{visible_line[:writable_width - 1]}…"
     return f"{line}{' ' * max(0, writable_width - visible_length)}"
 
 
@@ -238,17 +268,36 @@ def _write_windows_console_rows(
             _ConsoleCoord,
         ]
         kernel32.SetConsoleCursorPosition.restype = ctypes.c_int
+        kernel32.GetConsoleScreenBufferInfo.argtypes = [
+            ctypes.c_void_p,
+            ctypes.POINTER(_ConsoleScreenBufferInfo),
+        ]
+        kernel32.GetConsoleScreenBufferInfo.restype = ctypes.c_int
         stdout_handle = kernel32.GetStdHandle(-11 & 0xFFFFFFFF)
         if not stdout_handle or stdout_handle == ctypes.c_void_p(-1).value:
             return False
 
+        saved_position: _ConsoleCoord | None = None
+        writable_width = width
+        buffer_info = _ConsoleScreenBufferInfo()
+        if kernel32.GetConsoleScreenBufferInfo(stdout_handle, ctypes.byref(buffer_info)):
+            saved_position = _ConsoleCoord(
+                buffer_info.dwCursorPosition.X,
+                buffer_info.dwCursorPosition.Y,
+            )
+            writable_width = min(width, max(2, int(buffer_info.dwSize.X)))
+
         sys.stdout.flush()
-        for offset, line in enumerate(lines):
-            position = _ConsoleCoord(0, max(0, start_row - 1 + offset))
-            if not kernel32.SetConsoleCursorPosition(stdout_handle, position):
-                return False
-            sys.stdout.write(_pad_console_line(line, width))
-            sys.stdout.flush()
+        try:
+            for offset, line in enumerate(lines):
+                position = _ConsoleCoord(0, max(0, start_row - 1 + offset))
+                if not kernel32.SetConsoleCursorPosition(stdout_handle, position):
+                    return False
+                sys.stdout.write(_pad_console_line(line, writable_width))
+                sys.stdout.flush()
+        finally:
+            if saved_position is not None:
+                kernel32.SetConsoleCursorPosition(stdout_handle, saved_position)
         return True
     except (AttributeError, OSError, ValueError):
         return False
@@ -387,45 +436,133 @@ def find_lan_ip() -> str:
     return "127.0.0.1"
 
 
-def format_status_line(
+def _fit_console_text(text: str, width: int) -> str:
+    visible = ANSI_ESCAPE_RE.sub("", text)
+    if len(visible) <= width:
+        return text
+    return f"{visible[:max(0, width - 1)]}…"
+
+
+def format_panel_row(
+    content: str,
+    *,
+    use_color: bool,
+    width: int = PANEL_CONTENT_WIDTH,
+) -> str:
+    fitted = _fit_console_text(content.strip(), width)
+    visible_length = len(ANSI_ESCAPE_RE.sub("", fitted))
+    edge = paint("│", Ansi.BLUE, use_color)
+    return f"  {edge} {fitted}{' ' * max(0, width - visible_length)} {edge}"
+
+
+def format_panel_rule(
+    left: str,
+    fill: str,
+    right: str,
+    *,
+    use_color: bool,
+    width: int = PANEL_CONTENT_WIDTH,
+) -> str:
+    return paint(f"  {left}{fill * (width + 2)}{right}", Ansi.BLUE, use_color)
+
+
+def format_metric_row(cells: tuple[str, ...]) -> str:
+    if len(cells) != len(METRIC_COLUMN_WIDTHS):
+        raise ValueError("Số ô giám sát không khớp cấu hình cột")
+    formatted_cells = []
+    for cell, width in zip(cells, METRIC_COLUMN_WIDTHS):
+        fitted = _fit_console_text(cell.strip(), width)
+        visible_length = len(ANSI_ESCAPE_RE.sub("", fitted))
+        formatted_cells.append(
+            f"{fitted}{' ' * max(0, width - visible_length)}"
+        )
+    return " │ ".join(formatted_cells)
+
+
+def format_monitor_lines(
     state: str,
     traffic: TrafficSnapshot,
     system: SystemSnapshot,
-    *,
-    use_color: bool,
-) -> str:
-    state_color = Ansi.GREEN if state == "ONLINE" else Ansi.YELLOW
-    if state in {"LỖI", "OFFLINE"}:
-        state_color = Ansi.RED
-    state_text = paint(f"● {state}", state_color, use_color, bold=True)
-    total_text = paint(f"Truy cập {traffic.total}", Ansi.CYAN, use_color, bold=True)
-    error_color = Ansi.RED if traffic.errors else Ansi.GREEN
-    error_text = paint(f"Lỗi {traffic.errors}", error_color, use_color, bold=True)
-    return (
-        f" {state_text} │ {total_text} │ Người dùng {traffic.unique_clients}"
-        f" │ Đang xử lý {traffic.active} │ {error_text} │ {traffic.per_minute}/phút"
-        f" │ TB {traffic.average_ms:.0f}ms "
-    )
-
-
-def format_system_line(
-    system: SystemSnapshot,
+    last_error: tuple[int, str, str] | None,
     *,
     use_color: bool,
     uptime_seconds: float,
-) -> str:
-    label = paint("HỆ THỐNG", Ansi.MAGENTA, use_color, bold=True)
+) -> tuple[str, str, str]:
+    state_color = Ansi.GREEN if state == "ONLINE" else Ansi.YELLOW
+    if state in {"LỖI", "OFFLINE"}:
+        state_color = Ansi.RED
+    state_cell = paint(f"● {state}", state_color, use_color, bold=True)
+
+    traffic_line = format_metric_row((
+        state_cell,
+        f"Truy cập [{traffic.total}]",
+        f"Người dùng [{traffic.unique_clients}]",
+        f"Đang xử lý [{traffic.active}]",
+        f"Lỗi [{traffic.errors}]",
+    ))
+    system_line = format_metric_row((
+        paint("HỆ THỐNG", Ansi.MAGENTA, use_color, bold=True),
+        f"CPU toàn máy [{system.cpu_percent:.1f}]%",
+        f"RAM ứng dụng [{system.process_ram_mb:.0f}]MB",
+        f"RAM toàn máy [{system.system_ram_percent:.0f}]%",
+        f"Đĩa [{system.disk_percent:.0f}]%",
+    ))
+    rate_text = f"[{traffic.per_minute}]/phút · TB [{traffic.average_ms:.0f}]ms"
+    uptime_text = f"Hoạt động [{format_duration(uptime_seconds)}]"
+    if last_error is None:
+        error_cells = (
+            "LỖI GẦN NHẤT",
+            "[Không có lỗi HTTP]",
+            rate_text,
+            uptime_text,
+            "",
+        )
+    else:
+        status_code, method, path = last_error
+        error_cells = (
+            "LỖI GẦN NHẤT",
+            f"[HTTP [{status_code}] {method}]",
+            path,
+            rate_text,
+            f"[{format_duration(uptime_seconds)}]",
+        )
+    return traffic_line, system_line, format_metric_row(error_cells)
+
+
+def build_dashboard_frame(
+    *,
+    state: str,
+    traffic: TrafficSnapshot,
+    system: SystemSnapshot,
+    last_error: tuple[int, str, str] | None,
+    uptime_seconds: float,
+    use_color: bool,
+) -> tuple[str, ...]:
+    monitor_title = paint("GIÁM SÁT TRỰC TIẾP", Ansi.WHITE, use_color, bold=True)
+    command_hint = paint("com", Ansi.CYAN, use_color, bold=True)
+    monitor_lines = format_monitor_lines(
+        state,
+        traffic,
+        system,
+        last_error,
+        use_color=use_color,
+        uptime_seconds=uptime_seconds,
+    )
     return (
-        f" {label} │ CPU toàn máy {system.cpu_percent:.1f}%"
-        f" │ RAM ứng dụng {system.process_ram_mb:.0f}MB"
-        f" │ RAM toàn máy {system.system_ram_percent:.0f}%"
-        f" │ Đĩa {system.disk_percent:.0f}%"
-        f" │ Hoạt động {format_duration(uptime_seconds)} "
+        format_panel_rule("╭", "─", "╮", use_color=use_color),
+        format_panel_row(monitor_title, use_color=use_color),
+        *(format_panel_row(line, use_color=use_color) for line in monitor_lines),
+        format_panel_rule("├", "─", "┤", use_color=use_color),
+        format_panel_row(
+            f"LỆNH          Gõ {command_hint} rồi Enter để mở trung tâm lệnh",
+            use_color=use_color,
+        ),
+        format_panel_rule("╰", "─", "╯", use_color=use_color),
     )
 
 
 class ConsoleDashboard:
-    STATUS_ROW = 18
+    STATUS_ROW = 12
 
     def __init__(self, stats: RequestStats, use_color: bool, interval: float) -> None:
         self.stats = stats
@@ -435,37 +572,54 @@ class ConsoleDashboard:
         self._state = "ĐANG NẠP"
         self._lock = threading.Lock()
         self._stop_event = threading.Event()
+        self._pause_event = threading.Event()
         self._thread: threading.Thread | None = None
         self._last_error: tuple[int, str, str] | None = None
+        self._host = "0.0.0.0"
+        self._port = 80
+        self._local_url = "http://127.0.0.1"
+        self._lan_url = "http://127.0.0.1"
 
     def print_banner(self, host: str, port: int) -> None:
-        os.system("cls" if os.name == "nt" else "clear")
-        colors = (Ansi.CYAN, Ansi.CYAN, Ansi.BLUE, Ansi.BLUE, Ansi.MAGENTA, Ansi.MAGENTA)
-        print()
-        for line, color in zip(BANNER, colors):
-            print(paint(f"  {line}", color, self.use_color, bold=True))
-        print(paint("  HỆ THỐNG SỐ HÓA TÀI LIỆU • BẢNG GIÁM SÁT MÁY CHỦ", Ansi.WHITE, self.use_color, bold=True))
-        print()
-
-        local_url = f"http://127.0.0.1{f':{port}' if port != 80 else ''}"
-        lan_url = f"http://{find_lan_ip()}{f':{port}' if port != 80 else ''}"
-        border = "─" * 74
-
-        def print_info_row(label: str, value: str, color: str = Ansi.WHITE) -> None:
-            plain_prefix = f"  {label:<12}"
-            padding = " " * max(0, len(border) - len(plain_prefix) - len(value))
-            edge = paint("│", Ansi.BLUE, self.use_color)
-            colored_value = paint(value, color, self.use_color, bold=True)
-            print(f"  {edge}{plain_prefix}{colored_value}{padding}{edge}")
-
-        print(paint(f"  ╭{border}╮", Ansi.BLUE, self.use_color))
-        print_info_row("MÁY CHỦ", local_url, Ansi.CYAN)
-        print_info_row("MẠNG NỘI BỘ", lan_url, Ansi.GREEN)
-        print_info_row("LẮNG NGHE", f"{host}:{port}", Ansi.YELLOW)
-        print_info_row("NHẬT KÝ", "logs\\app.log và logs\\error.log")
-        print_info_row("ĐIỀU KHIỂN", "Nhấn Ctrl+C hoặc đóng cửa sổ để dừng máy chủ")
-        print(paint(f"  ╰{border}╯", Ansi.BLUE, self.use_color))
-        print()
+        self._host = host
+        self._port = port
+        port_suffix = f":{port}" if port != 80 else ""
+        self._local_url = f"http://127.0.0.1{port_suffix}"
+        self._lan_url = f"http://{find_lan_ip()}{port_suffix}"
+        traffic = self.stats.snapshot()
+        system = self.sampler.sample()
+        with self._lock:
+            state = self._state
+            last_error = self._last_error
+            os.system("cls" if os.name == "nt" else "clear")
+            colors = (
+                Ansi.CYAN,
+                Ansi.CYAN,
+                Ansi.BLUE,
+                Ansi.BLUE,
+                Ansi.MAGENTA,
+                Ansi.MAGENTA,
+            )
+            print()
+            for line, color in zip(BANNER, colors):
+                print(paint(f"  {line}", color, self.use_color, bold=True))
+            print(paint(
+                "  HỆ THỐNG SỐ HÓA TÀI LIỆU • BẢNG GIÁM SÁT MÁY CHỦ",
+                Ansi.WHITE,
+                self.use_color,
+                bold=True,
+            ))
+            print()
+            for line in build_dashboard_frame(
+                state=state,
+                traffic=traffic,
+                system=system,
+                last_error=last_error,
+                uptime_seconds=time.monotonic() - STARTED_AT,
+                use_color=self.use_color,
+            ):
+                print(line)
+            print()
 
     def set_state(self, state: str) -> None:
         with self._lock:
@@ -480,6 +634,15 @@ class ConsoleDashboard:
             daemon=True,
         )
         self._thread.start()
+
+    def pause(self) -> None:
+        self._pause_event.set()
+
+    def resume(self) -> None:
+        self._pause_event.clear()
+
+    def redraw(self) -> None:
+        self.print_banner(self._host, self._port)
 
     def stop(self) -> None:
         self._stop_event.set()
@@ -508,37 +671,24 @@ class ConsoleDashboard:
 
     def _run(self) -> None:
         while not self._stop_event.is_set():
+            if self._pause_event.is_set():
+                self._stop_event.wait(0.1)
+                continue
             traffic = self.stats.snapshot()
             system = self.sampler.sample()
             with self._lock:
-                line = format_status_line(
+                monitor_lines = format_monitor_lines(
                     self._state,
                     traffic,
                     system,
-                    use_color=self.use_color,
-                )
-                system_line = format_system_line(
-                    system,
+                    self._last_error,
                     use_color=self.use_color,
                     uptime_seconds=time.monotonic() - STARTED_AT,
                 )
-                if self._last_error is None:
-                    error_line = paint(
-                        " LỖI GẦN NHẤT │ Không có lỗi HTTP",
-                        Ansi.DIM,
-                        self.use_color,
-                    )
-                else:
-                    status_code, method, path = self._last_error
-                    short_path = path if len(path) <= 80 else f"{path[:77]}..."
-                    error_label = paint(
-                        f"HTTP {status_code}",
-                        Ansi.RED,
-                        self.use_color,
-                        bold=True,
-                    )
-                    error_line = f" LỖI GẦN NHẤT │ {error_label} │ {method} {short_path}"
-                self._render_lines(line, system_line, error_line)
+                self._render_lines(*(
+                    format_panel_row(item, use_color=self.use_color)
+                    for item in monitor_lines
+                ))
             self._stop_event.wait(self.interval)
 
 
@@ -621,6 +771,246 @@ class TrafficMonitor:
         await self.app(scope, receive, monitored_send)
 
 
+COMMAND_OPTIONS = (
+    ("1", "errorlog", "Xem các dòng lỗi gần nhất"),
+    ("2", "applog", "Xem hoạt động gần nhất của ứng dụng"),
+    ("3", "status", "Xem đầy đủ trạng thái và tài nguyên"),
+    ("4", "network", "Xem địa chỉ truy cập và cổng lắng nghe"),
+    ("5", "refresh", "Làm mới và quay về bảng giám sát"),
+    ("6", "stop", "Dừng máy chủ an toàn (cần xác nhận)"),
+    ("0", "back", "Đóng trung tâm lệnh"),
+)
+COMMAND_ALIASES = {
+    alias: name
+    for number, name, _description in COMMAND_OPTIONS
+    for alias in (number, name)
+}
+
+
+def normalize_command_selection(value: str) -> str | None:
+    return COMMAND_ALIASES.get(value.strip().lower())
+
+
+def read_log_tail(path: Path, limit: int = LOG_TAIL_LINES) -> list[str]:
+    candidates = [path] if path.is_file() else []
+    if os.environ.get("MULTIPROCESS_LOGGING") == "1":
+        worker_logs = [
+            candidate
+            for candidate in path.parent.glob(f"{path.stem}.*{path.suffix}")
+            if candidate.is_file()
+        ]
+        if worker_logs:
+            candidates = worker_logs
+    if not candidates:
+        return [f"Không tìm thấy tệp: {path}"]
+
+    candidates.sort(key=lambda candidate: (candidate.stat().st_mtime_ns, candidate.name))
+    annotate_source = len(candidates) > 1 or candidates[0] != path
+    raw_lines: deque[str] = deque(maxlen=max(1, limit))
+    try:
+        for candidate in candidates:
+            with candidate.open("r", encoding="utf-8", errors="replace") as handle:
+                for raw_line in handle:
+                    prefix = f"[{candidate.name}] " if annotate_source else ""
+                    raw_lines.append(f"{prefix}{raw_line}")
+    except OSError as exc:
+        return [f"Không thể đọc nhật ký: {exc}"]
+    if not raw_lines:
+        return ["Nhật ký đang trống."]
+    cleaned_lines = []
+    for raw_line in raw_lines:
+        line = ANSI_ESCAPE_RE.sub("", raw_line.rstrip("\r\n"))
+        line = re.sub(r"[\x00-\x08\x0b-\x1f\x7f]", " ", line)
+        cleaned_lines.append(line.replace("\t", "    ") or " ")
+    return cleaned_lines
+
+
+class HostCommandCenter:
+    """Interactive command palette kept separate from the live dashboard."""
+
+    def __init__(
+        self,
+        dashboard: ConsoleDashboard,
+        server: uvicorn.Server,
+        *,
+        use_color: bool,
+    ) -> None:
+        self.dashboard = dashboard
+        self.server = server
+        self.use_color = use_color
+        self._stop_event = threading.Event()
+        self._thread: threading.Thread | None = None
+
+    def start(self) -> None:
+        if self._thread is not None or not sys.stdin:
+            return
+        self._thread = threading.Thread(
+            target=self._run,
+            name="host-console-commands",
+            daemon=True,
+        )
+        self._thread.start()
+
+    def stop(self) -> None:
+        self._stop_event.set()
+
+    def _run(self) -> None:
+        while not self._stop_event.is_set():
+            try:
+                raw_command = input("  LỆNH > ").strip().lower()
+            except (EOFError, OSError):
+                return
+            if not raw_command:
+                continue
+            if raw_command not in {"com", "cm", "command"}:
+                print(paint(
+                    "  Lệnh chưa nhận diện. Gõ com rồi Enter để mở danh sách lệnh.",
+                    Ansi.YELLOW,
+                    self.use_color,
+                ))
+                continue
+
+            self.dashboard.pause()
+            try:
+                should_return = self._menu_loop()
+            finally:
+                if not self._stop_event.is_set() and not self.server.should_exit:
+                    self.dashboard.redraw()
+                    self.dashboard.resume()
+            if should_return:
+                return
+
+    def _menu_loop(self) -> bool:
+        while not self._stop_event.is_set():
+            self._show_menu()
+            try:
+                selection = input("  CHỌN LỆNH > ")
+            except (EOFError, OSError):
+                return True
+            command = normalize_command_selection(selection)
+            if command is None:
+                self._show_result(
+                    "LỆNH KHÔNG HỢP LỆ",
+                    ["Hãy nhập số hoặc tên lệnh đúng như danh sách."],
+                )
+                if not self._wait_for_menu():
+                    return True
+                continue
+            if command in {"back", "refresh"}:
+                return False
+            if command == "stop":
+                if self._confirm_stop():
+                    self.server.should_exit = True
+                    self._stop_event.set()
+                    return True
+                continue
+
+            title, lines = self._command_result(command)
+            self._show_result(title, lines)
+            if not self._wait_for_menu():
+                return True
+        return True
+
+    def _show_menu(self) -> None:
+        os.system("cls" if os.name == "nt" else "clear")
+        title = paint("COM • TRUNG TÂM LỆNH", Ansi.CYAN, self.use_color, bold=True)
+        print(format_panel_rule("╭", "─", "╮", use_color=self.use_color))
+        print(format_panel_row(title, use_color=self.use_color))
+        print(format_panel_rule("├", "─", "┤", use_color=self.use_color))
+        for number, name, description in COMMAND_OPTIONS:
+            command_name = paint(name, Ansi.YELLOW, self.use_color, bold=True)
+            print(format_panel_row(
+                f"{number}. {command_name:<12} {description}",
+                use_color=self.use_color,
+            ))
+        print(format_panel_rule("╰", "─", "╯", use_color=self.use_color))
+        print()
+
+    def _show_result(self, title: str, lines: list[str]) -> None:
+        os.system("cls" if os.name == "nt" else "clear")
+        colored_title = paint(title, Ansi.CYAN, self.use_color, bold=True)
+        print(format_panel_rule("╭", "─", "╮", use_color=self.use_color))
+        print(format_panel_row(colored_title, use_color=self.use_color))
+        print(format_panel_rule("├", "─", "┤", use_color=self.use_color))
+        for line in lines:
+            print(format_panel_row(line, use_color=self.use_color))
+        print(format_panel_rule("╰", "─", "╯", use_color=self.use_color))
+        print()
+
+    def _command_result(self, command: str) -> tuple[str, list[str]]:
+        if command == "errorlog":
+            return "ERROR LOG • DÒNG GẦN NHẤT", read_log_tail(
+                BASE_DIR / "logs" / "error.log"
+            )
+        if command == "applog":
+            return "APP LOG • DÒNG GẦN NHẤT", read_log_tail(
+                BASE_DIR / "logs" / "app.log"
+            )
+        if command == "network":
+            return "THÔNG TIN KẾT NỐI", [
+                f"Máy chủ:      {self.dashboard._local_url}",
+                f"Mạng nội bộ:  {self.dashboard._lan_url}",
+                f"Lắng nghe:    {self.dashboard._host}:{self.dashboard._port}",
+                f"Tiến trình:   PID {os.getpid()}",
+            ]
+
+        traffic = self.dashboard.stats.snapshot()
+        system = self.dashboard.sampler.sample()
+        with self.dashboard._lock:
+            state = self.dashboard._state
+            last_error = self.dashboard._last_error
+        error_text = (
+            "Không có lỗi HTTP"
+            if last_error is None
+            else f"HTTP {last_error[0]} • {last_error[1]} {last_error[2]}"
+        )
+        return "TRẠNG THÁI MÁY CHỦ", [
+            f"Trạng thái: {state}    │    Hoạt động: {format_duration(time.monotonic() - STARTED_AT)}",
+            f"Truy cập: {traffic.total}    │    Người dùng: {traffic.unique_clients}    │    Đang xử lý: {traffic.active}",
+            f"Lỗi: {traffic.errors}    │    Tốc độ: {traffic.per_minute}/phút    │    Trung bình: {traffic.average_ms:.0f}ms",
+            f"CPU toàn máy: {system.cpu_percent:.1f}%    │    RAM ứng dụng: {system.process_ram_mb:.0f}MB",
+            f"RAM toàn máy: {system.system_ram_percent:.0f}%    │    Đĩa: {system.disk_percent:.0f}%",
+            f"Lỗi gần nhất: {error_text}",
+        ]
+
+    def _wait_for_menu(self) -> bool:
+        try:
+            input("  Nhấn Enter để quay lại danh sách lệnh...")
+        except (EOFError, OSError):
+            return False
+        return True
+
+    def _confirm_stop(self) -> bool:
+        self._show_result(
+            "XÁC NHẬN DỪNG MÁY CHỦ",
+            [
+                "Các kết nối đang xử lý sẽ được đóng theo cơ chế an toàn.",
+                "Nhập STOP để xác nhận; nhập giá trị khác để hủy.",
+            ],
+        )
+        try:
+            return input("  XÁC NHẬN > ").strip().upper() == "STOP"
+        except (EOFError, OSError):
+            return False
+
+
+class SignalServerController:
+    """Adapter that lets the command center stop Uvicorn's public supervisor."""
+
+    def __init__(self) -> None:
+        self._should_exit = False
+
+    @property
+    def should_exit(self) -> bool:
+        return self._should_exit
+
+    @should_exit.setter
+    def should_exit(self, value: bool) -> None:
+        if value and not self._should_exit:
+            self._should_exit = True
+            signal.raise_signal(signal.SIGINT)
+
+
 def main() -> int:
     os.chdir(BASE_DIR)
     load_dotenv(BASE_DIR / ".env")
@@ -628,45 +1018,77 @@ def main() -> int:
     host = os.getenv("HOST", "0.0.0.0")
     port = int(os.getenv("PORT", "80"))
     interval = float(os.getenv("CONSOLE_STATS_INTERVAL", "1"))
+    runtime = configure_server_runtime()
 
     stats = RequestStats()
     dashboard = ConsoleDashboard(stats, use_color, interval)
     dashboard.print_banner(host, port)
 
-    try:
-        from server.main import app
-    except Exception as exc:
-        dashboard.set_state("LỖI")
-        print(paint(f"\n  KHÔNG THỂ NẠP MÁY CHỦ: {exc}", Ansi.RED, use_color, bold=True))
-        return 1
-
-    monitored_app = TrafficMonitor(app, stats, dashboard)
     dashboard.start()
-    config = uvicorn.Config(
-        monitored_app,
-        host=host,
-        port=port,
-        access_log=False,
-        log_level="warning",
-        use_colors=use_color,
+    if runtime.workers == 1:
+        try:
+            from server.main import app
+        except Exception as exc:
+            dashboard.set_state("LỖI")
+            dashboard.stop()
+            print(paint(f"\n  KHÔNG THỂ NẠP MÁY CHỦ: {exc}", Ansi.RED, use_color, bold=True))
+            return 1
+        monitored_app = TrafficMonitor(app, stats, dashboard)
+        config = uvicorn.Config(
+            monitored_app,
+            host=host,
+            port=port,
+            access_log=False,
+            log_level="warning",
+            use_colors=use_color,
+        )
+        server = uvicorn.Server(config)
+        run_server = server.run
+    else:
+        dashboard.set_state(f"ONLINE • {runtime.workers} WORKERS")
+        server = SignalServerController()
+
+        def run_server():
+            uvicorn.run(
+                "server.main:app",
+                host=host,
+                port=port,
+                access_log=False,
+                log_level="warning",
+                use_colors=use_color,
+                workers=runtime.workers,
+            )
+
+    command_center = HostCommandCenter(
+        dashboard,
+        server,
+        use_color=use_color,
     )
-    server = uvicorn.Server(config)
+    command_center.start()
     try:
-        server.run()
+        run_server()
     except KeyboardInterrupt:
         pass
     finally:
+        command_center.stop()
         dashboard.set_state("OFFLINE")
         dashboard.stop()
 
     final_stats = stats.snapshot()
     print(paint("  Máy chủ đã dừng an toàn.", Ansi.YELLOW, use_color, bold=True))
-    print(
-        f"  Phiên làm việc: {format_duration(time.monotonic() - STARTED_AT)}"
-        f" • {final_stats.total} truy cập • {final_stats.errors} lỗi"
-    )
+    if runtime.workers == 1:
+        print(
+            f"  Phiên làm việc: {format_duration(time.monotonic() - STARTED_AT)}"
+            f" • {final_stats.total} truy cập • {final_stats.errors} lỗi"
+        )
+    else:
+        print(
+            f"  Phiên làm việc: {format_duration(time.monotonic() - STARTED_AT)}"
+            f" • {runtime.workers} workers • dùng lệnh applog để xem log theo worker"
+        )
     return 0
 
 
 if __name__ == "__main__":
+    multiprocessing.freeze_support()
     raise SystemExit(main())

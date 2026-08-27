@@ -62,7 +62,7 @@ const approvedSubmission = [{
     creator_name: 'nguoi-nhap',
     template: 'Mẫu kiểm tra',
     pdf_relative_path: '0000/004/0011/0000130.pdf',
-    status: 'approved',
+    status: 'completed',
     has_errors: false,
 }];
 
@@ -75,7 +75,8 @@ const approvedSubmission = [{
     );
     assert.equal(tableBody.children.length, 1);
     assert.match(tableBody.children[0].innerHTML, /Về chờ duyệt/);
-    assert.match(tableBody.children[0].innerHTML, /reopenSubmissionReview\(41\)/);
+    assert.match(tableBody.children[0].innerHTML, /data-admin-generated-action="reopen-submission"/);
+    assert.match(tableBody.children[0].innerHTML, /data-submission-id="41"/);
 
     tableBody.children.length = 0;
     sandbox.currentUser = { id: 2, role: 'user' };

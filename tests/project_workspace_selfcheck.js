@@ -7,7 +7,7 @@ const formRenderer = fs.readFileSync('frontend/js/form_renderer.js', 'utf8');
 const workspace = fs.readFileSync('frontend/js/project_workspace.js', 'utf8');
 
 assert(html.includes('id="employeeProjectSelect"'));
-assert(html.includes('onchange="onEmployeeProjectSelected()"'));
+assert(html.includes('data-action="onEmployeeProjectSelected"'));
 assert(html.includes('js/project_workspace.js'));
 assert(app.includes('await initializeEmployeeProjectWorkspace()'));
 assert(formRenderer.includes('window.activeProjectWorkspace'));

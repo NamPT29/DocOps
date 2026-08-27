@@ -50,6 +50,45 @@ class DocumentRepository(BaseRepository[AssignedDocument]):
             AssignedDocument.uuid_filename == uuid_filename
         ).first()
 
+    def map_by_ids(self, document_ids: set[int]) -> dict[int, AssignedDocument]:
+        if not document_ids:
+            return {}
+        return {
+            document.id: document
+            for document in self.session.query(AssignedDocument).filter(
+                AssignedDocument.id.in_(document_ids),
+            ).all()
+        }
+
+    def reference_maps(
+        self,
+        *,
+        owner_id: int | None,
+        uuid_filenames: set[str],
+        original_filenames: set[str],
+    ) -> tuple[dict[str, AssignedDocument], dict[str, AssignedDocument]]:
+        """Resolve many PDF references while preserving newest-file semantics."""
+        if not uuid_filenames and not original_filenames:
+            return {}, {}
+        filters = []
+        if uuid_filenames:
+            filters.append(AssignedDocument.uuid_filename.in_(uuid_filenames))
+        if original_filenames:
+            filters.append(AssignedDocument.original_filename.in_(original_filenames))
+        query = self.session.query(AssignedDocument)
+        if owner_id is not None:
+            query = query.filter(AssignedDocument.assigned_to_user_id == owner_id)
+        rows = query.filter(or_(*filters)).order_by(
+            AssignedDocument.created_at.desc(),
+            AssignedDocument.id.desc(),
+        ).all()
+        by_uuid: dict[str, AssignedDocument] = {}
+        by_original: dict[str, AssignedDocument] = {}
+        for document in rows:
+            by_uuid.setdefault(document.uuid_filename, document)
+            by_original.setdefault(document.original_filename, document)
+        return by_uuid, by_original
+
     def get_path_and_folder(self, document_id: int) -> tuple[str | None, str | None]:
         path = self.session.query(AssignedDocumentPath).filter(
             AssignedDocumentPath.document_id == document_id
@@ -94,7 +133,8 @@ class DocumentRepository(BaseRepository[AssignedDocument]):
         return self.session.query(
             AssignedDocument,
             AssignedDocumentPath.relative_path,
-            Submission.id.label("submission_id")
+            Submission.id.label("submission_id"),
+            Submission.status.label("submission_status"),
         ).join(
             AssignedDocumentFolder,
             AssignedDocumentFolder.document_id == AssignedDocument.id,

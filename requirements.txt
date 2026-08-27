@@ -13,3 +13,4 @@ PyJWT
 pytest
 pytest-mock
 cachetools
+redis

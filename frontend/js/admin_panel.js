@@ -67,15 +67,15 @@ function generatePaginationHTML(pagination, onPageClickFnName) {
     if (pagination.total_pages <= 1) return '';
     let html = `<nav><ul class="pagination pagination-sm justify-content-end mb-0">`;
     html += `<li class="page-item ${pagination.page === 1 ? 'disabled' : ''}">
-                <a class="page-link" href="#" onclick="${onPageClickFnName}(${pagination.page - 1})">Trước</a>
+                <a class="page-link" href="#" data-admin-generated-action="paginate" data-page-function="${escapeHTML(onPageClickFnName)}" data-page="${pagination.page - 1}">Trước</a>
              </li>`;
     for (let i = 1; i <= pagination.total_pages; i++) {
         html += `<li class="page-item ${pagination.page === i ? 'active' : ''}">
-                    <a class="page-link" href="#" onclick="${onPageClickFnName}(${i})">${i}</a>
+                    <a class="page-link" href="#" data-admin-generated-action="paginate" data-page-function="${escapeHTML(onPageClickFnName)}" data-page="${i}">${i}</a>
                  </li>`;
     }
     html += `<li class="page-item ${pagination.page === pagination.total_pages ? 'disabled' : ''}">
-                <a class="page-link" href="#" onclick="${onPageClickFnName}(${pagination.page + 1})">Sau</a>
+                <a class="page-link" href="#" data-admin-generated-action="paginate" data-page-function="${escapeHTML(onPageClickFnName)}" data-page="${pagination.page + 1}">Sau</a>
              </li>`;
     html += `</ul></nav>`;
     return html;
@@ -88,6 +88,38 @@ let reviewSubmissionsCurrentPage = 1;
 let submissionsPageSize = 20;
 const selectedSubmissionIds = new Set();
 const selectableSubmissionStatuses = new Map();
+
+function hasSubmissionQualityChanges(submission) {
+    const quality = submission && submission.quality;
+    return Boolean(
+        quality
+        && (
+            quality.has_review_changes === true
+            || Number(quality.changed_field_count) > 0
+            || quality.is_error_report === true
+        )
+    );
+}
+
+function isSubmissionQualityError(submission) {
+    return submission?.quality?.is_error_report === true;
+}
+
+function applySubmissionQualityRowClass(row, submission) {
+    if (!row) return;
+    if (isSubmissionQualityError(submission)) {
+        row.classList.add('submission-quality-error');
+    } else if (hasSubmissionQualityChanges(submission)) {
+        row.classList.add('submission-quality-changed');
+    }
+}
+
+function filterSubmissionsByQuality(submissions, filterValue) {
+    const items = Array.isArray(submissions) ? submissions : [];
+    return filterValue === 'changed'
+        ? items.filter(hasSubmissionQualityChanges)
+        : items;
+}
 
 async function fetchSubmissions(page = 1) {
     submissionsCurrentPage = Math.max(1, Number(page) || 1);
@@ -122,13 +154,19 @@ async function fetchSubmissions(page = 1) {
     if (!tbody) return; // safety
     tbody.innerHTML = '';
 
-    if (res.data.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="9" class="text-center">Chưa có dữ liệu</td></tr>';
+    const qualityFilter = document.getElementById('filterSubmissionQuality')?.value || 'all';
+    const displayedSubmissions = filterSubmissionsByQuality(res.data, qualityFilter);
+
+    if (displayedSubmissions.length === 0) {
+        const emptyMessage = qualityFilter === 'changed' && res.data.length > 0
+            ? 'Trang này không có hồ sơ nào có trường bị sửa.'
+            : 'Chưa có dữ liệu';
+        tbody.innerHTML = `<tr><td colspan="9" class="text-center">${emptyMessage}</td></tr>`;
         renderSubmissionsPagination(res.pagination, 'submissionsPagination', fetchSubmissions);
         return;
     }
 
-    res.data.forEach(sub => {
+    displayedSubmissions.forEach(sub => {
         const tr = document.createElement('tr');
         const safeId = Number(sub.id);
         const safeCreatedAt = escapeHTML(sub.created_at);
@@ -137,36 +175,37 @@ async function fetchSubmissions(page = 1) {
         const safeReviewer = escapeHTML(sub.reviewer_name || 'Chưa phân công');
         const safePdfPath = escapeHTML(sub.pdf_relative_path || sub.pdf_filename || '');
         const canDelete = sub.status === 'draft' || (currentUser && currentUser.role === 'admin');
-        const canSelect = sub.status === 'draft' || sub.status === 'rejected';
+        const canSelect = sub.status === 'draft';
         if (canSelect) selectableSubmissionStatuses.set(safeId, sub.status);
-        if (sub.has_errors || sub.status === 'rejected') {
+        if (sub.has_errors) {
             tr.classList.add('table-danger');
         }
+        applySubmissionQualityRowClass(tr, sub);
 
         let statusBadge = '';
         if (sub.status === 'pending_review') statusBadge = '<span class="badge bg-warning text-dark"><i class="fas fa-hourglass-half"></i> Chờ duyệt</span>';
-        else if (sub.status === 'rejected') statusBadge = '<span class="badge bg-danger"><i class="fas fa-times-circle"></i> Báo lỗi</span>';
-        else if (sub.status === 'approved') statusBadge = '<span class="badge bg-success"><i class="fas fa-check-circle"></i> Đã duyệt</span>';
+        else if (sub.status === 'pending_input_confirmation') statusBadge = '<span class="badge bg-info text-dark"><i class="fas fa-user-check"></i> Chờ người nhập xác nhận</span>';
+        else if (sub.status === 'completed') statusBadge = '<span class="badge bg-success"><i class="fas fa-check-circle"></i> Hoàn thành</span>';
         else statusBadge = '<span class="badge bg-secondary"><i class="fas fa-save"></i> Lưu nháp</span>';
 
         tr.innerHTML = `
             <td class="text-center">
-                ${canSelect ? `<input type="checkbox" class="form-check-input submission-select-checkbox" value="${safeId}" onchange="toggleSubmissionSelection(${safeId}, this.checked)" aria-label="Chọn hồ sơ ${safeId}">` : ''}
+                ${canSelect ? `<input type="checkbox" class="form-check-input submission-select-checkbox" value="${safeId}" data-admin-generated-change="toggle-submission-selection" data-submission-id="${safeId}" aria-label="Chọn hồ sơ ${safeId}">` : ''}
             </td>
             <td class="text-center fw-semibold">${Number(sub.serial_number) || ''}</td>
             <td><span class="badge bg-secondary">${safeTemplate}</span></td>
             <td class="text-nowrap">${safeCreatedAt}</td>
-            <td style="min-width: 260px; max-width: 520px;">
-                ${safePdfPath ? `<button type="button" class="btn btn-link btn-sm text-start text-break p-0" onclick="editSubmission(${safeId})" title="${safePdfPath}"><i class="fas fa-file-pdf text-danger me-1"></i>${safePdfPath}</button>` : '<span class="text-muted fst-italic">Không liên kết PDF</span>'}
+            <td class="generated-submission-path-cell">
+                ${safePdfPath ? `<button type="button" class="btn btn-link btn-sm text-start text-break p-0" data-admin-generated-action="edit-submission" data-submission-id="${safeId}" title="${safePdfPath}"><i class="fas fa-file-pdf text-danger me-1"></i>${safePdfPath}</button>` : '<span class="text-muted fst-italic">Không liên kết PDF</span>'}
             </td>
             <td><span class="badge bg-info text-dark"><i class="fas fa-user"></i> ${safeCreator}</span></td>
             <td><span class="badge bg-primary"><i class="fas fa-user-check"></i> ${safeReviewer}</span></td>
             <td class="text-center">${statusBadge}</td>
-            <td style="min-width: 300px;">
+            <td class="generated-submission-actions-cell">
                 <div class="d-flex flex-wrap align-items-center gap-2">
-                    <button class="btn btn-sm btn-outline-success" onclick="copySubmission(${safeId})">Nhân bản</button>
-                    <button class="btn btn-sm btn-outline-primary" onclick="editSubmission(${safeId})">Xem/Sửa</button>
-                    ${canDelete ? `<button class="btn btn-sm btn-outline-danger" onclick="deleteSubmission(${safeId})" title="${sub.status === 'draft' ? 'Xóa bản nháp' : 'Xóa hồ sơ'}">Xóa</button>` : ''}
+                    <button class="btn btn-sm btn-outline-success" data-admin-generated-action="copy-submission" data-submission-id="${safeId}">Nhân bản</button>
+                    <button class="btn btn-sm btn-outline-primary" data-admin-generated-action="edit-submission" data-submission-id="${safeId}">Xem/Sửa</button>
+                    ${canDelete ? `<button class="btn btn-sm btn-outline-danger" data-admin-generated-action="delete-submission" data-submission-id="${safeId}" title="${sub.status === 'draft' ? 'Xóa bản nháp' : 'Xóa hồ sơ'}">Xóa</button>` : ''}
                 </div>
             </td>
         `;
@@ -184,6 +223,7 @@ function updateBulkSubmissionActions() {
     const selectAllButton = document.getElementById('selectAllSubmissionsBtn');
     const clearButton = document.getElementById('clearSubmissionSelectionBtn');
     const deleteButton = document.getElementById('bulkDeleteSubmissionsBtn');
+    const submitButton = document.getElementById('bulkSubmitSubmissionsBtn');
     document.querySelectorAll('.submission-select-checkbox').forEach(checkbox => {
         const checked = selectedSubmissionIds.has(Number(checkbox.value));
         checkbox.checked = checked;
@@ -204,6 +244,7 @@ function updateBulkSubmissionActions() {
         selectAllButton.setAttribute('aria-pressed', String(allSelected));
     }
     if (clearButton) clearButton.disabled = count === 0;
+    if (submitButton) submitButton.disabled = count === 0;
     if (deleteButton) {
         deleteButton.disabled = count === 0 || Array.from(selectedSubmissionIds).some(
             id => selectableSubmissionStatuses.get(id) !== 'draft'
@@ -232,8 +273,8 @@ function clearSubmissionSelection() {
 async function runBulkSubmissionAction(action) {
     const submissionIds = Array.from(selectedSubmissionIds);
     if (submissionIds.length === 0) return;
-    if (action !== 'delete') return;
-    const actionLabel = 'xóa';
+    if (!['delete', 'submit_for_review'].includes(action)) return;
+    const actionLabel = action === 'delete' ? 'xóa' : 'nộp duyệt';
     if (!confirm(`Bạn có chắc muốn ${actionLabel} ${submissionIds.length} hồ sơ đã chọn?`)) return;
 
     const res = await apiCall('/api/submissions/bulk-action', {
@@ -248,6 +289,10 @@ async function runBulkSubmissionAction(action) {
 
 function bulkDeleteSelectedSubmissions() {
     return runBulkSubmissionAction('delete');
+}
+
+function bulkSubmitSelectedSubmissions() {
+    return runBulkSubmissionAction('submit_for_review');
 }
 
 let activeReviewFolderPath = null;
@@ -350,7 +395,7 @@ async function fetchCompletedSubmissions(page = 1, refreshFolders = Number(page)
     const tbody = document.getElementById('submissionsTableBody');
     const pagination = document.getElementById('submissionsPagination');
     if (!activeCompletedFolderPath) {
-        if (title) title.textContent = 'Chọn một folder để xem hồ sơ đã duyệt';
+        if (title) title.textContent = 'Chọn một folder để xem hồ sơ hoàn thành';
         if (tbody) tbody.innerHTML = '<tr><td colspan="7" class="text-center text-muted py-4">Chưa có hồ sơ hoàn chỉnh theo bộ lọc hiện tại.</td></tr>';
         if (pagination) pagination.innerHTML = '';
         return;
@@ -368,7 +413,7 @@ async function fetchCompletedSubmissions(page = 1, refreshFolders = Number(page)
     if (tbody) tbody.innerHTML = '<tr><td colspan="7" class="text-center">Đang tải hồ sơ trong folder...</td></tr>';
 
     let url = new URL('/api/submissions', window.location.origin);
-    url.searchParams.set('status', 'approved');
+    url.searchParams.set('status', 'completed');
     url.searchParams.set('folder_path', activeCompletedFolderPath);
     url.searchParams.set('page', completedSubmissionsCurrentPage);
     url.searchParams.set('page_size', submissionsPageSize);
@@ -384,7 +429,7 @@ async function fetchCompletedSubmissions(page = 1, refreshFolders = Number(page)
 function renderCompletedFolderTree(folders) {
     renderGenericFolderTree(folders, {
         containerId: 'completedFolderTree',
-        emptyMessage: 'Chưa có folder chứa hồ sơ đã duyệt.',
+        emptyMessage: 'Chưa có folder chứa hồ sơ hoàn thành.',
         activeFolderPath: activeCompletedFolderPath,
         itemClassName: 'completed-folder-item',
         getBadgeHTML: (folder) => `<span class="badge bg-success rounded-pill">${Number(folder.approved_count) || 0}</span>`,
@@ -437,7 +482,7 @@ function renderSubmissionsPagination(pagination, containerId, onPageChange, opti
     previous.className = 'btn btn-sm btn-outline-primary me-2';
     previous.textContent = '‹ Trước';
     previous.disabled = page <= 1;
-    previous.onclick = () => onPageChange(page - 1);
+    previous['onclick'] = () => onPageChange(page - 1);
     container.appendChild(previous);
 
     const pageLabel = document.createElement('span');
@@ -487,12 +532,13 @@ function renderAdminSubmissionsTable(data, tbodyId, isReviewTab, pagination = nu
             submissionUrl += `&return_folder=${encodeURIComponent(activeReviewFolderPath)}`;
         }
         const safeSubmissionUrl = escapeHTML(submissionUrl);
-        if (sub.has_errors || sub.status === 'rejected') tr.classList.add('table-danger');
+        if (sub.has_errors) tr.classList.add('table-danger');
+        applySubmissionQualityRowClass(tr, sub);
 
         let statusBadge = '';
         if (sub.status === 'pending_review') statusBadge = '<span class="badge bg-warning text-dark"><i class="fas fa-hourglass-half"></i> Chờ duyệt</span>';
-        else if (sub.status === 'rejected') statusBadge = '<span class="badge bg-danger"><i class="fas fa-times-circle"></i> Báo lỗi</span>';
-        else if (sub.status === 'approved') statusBadge = '<span class="badge bg-success"><i class="fas fa-check-circle"></i> Đã duyệt</span>';
+        else if (sub.status === 'pending_input_confirmation') statusBadge = '<span class="badge bg-info text-dark"><i class="fas fa-user-check"></i> Chờ người nhập xác nhận</span>';
+        else if (sub.status === 'completed') statusBadge = '<span class="badge bg-success"><i class="fas fa-check-circle"></i> Hoàn thành</span>';
 
         const reviewTarget = isReviewTab ? '' : ' target="_blank"';
         let actions = `<a class="btn btn-sm btn-outline-primary" href="${safeSubmissionUrl}"${reviewTarget} title="Mở để kiểm tra và chỉnh sửa"><i class="fas fa-search"></i> Kiểm tra/Sửa</a>`;
@@ -500,37 +546,27 @@ function renderAdminSubmissionsTable(data, tbodyId, isReviewTab, pagination = nu
             const viewerName = escapeHTML(sub.viewing_user_name || 'Người dùng khác');
             statusBadge += `<span class='badge bg-info text-dark ms-1'><i class='fas fa-eye'></i> Báo cáo đang có người xem: ${viewerName}</span>`;
         }
-        if (isReviewTab) {
-            actions += `<button class="btn btn-sm btn-success" onclick="approveSubmission(${safeId})" title="Duyệt hoàn thành hồ sơ này"><i class="fas fa-check"></i> Duyệt</button>`;
-        }
         if (currentUser && currentUser.role === 'admin') {
-            if (sub.status === 'approved') {
-                actions += `<button class="btn btn-sm btn-outline-warning" onclick="reopenSubmissionReview(${safeId})" title="Chuyển hồ sơ đã duyệt về hàng chờ kiểm tra"><i class="fas fa-undo"></i> Về chờ duyệt</button>`;
+            if (['pending_input_confirmation', 'completed'].includes(sub.status)) {
+                actions += `<button class="btn btn-sm btn-outline-warning" data-admin-generated-action="reopen-submission" data-submission-id="${safeId}" title="Chuyển hồ sơ về hàng chờ kiểm tra"><i class="fas fa-undo"></i> Về chờ duyệt</button>`;
             }
-            actions += `<button class="btn btn-sm btn-outline-danger" onclick="deleteSubmission(${safeId})" title="Xóa hồ sơ"><i class="fas fa-trash"></i></button>`;
+            actions += `<button class="btn btn-sm btn-outline-danger" data-admin-generated-action="delete-submission" data-submission-id="${safeId}" title="Xóa hồ sơ"><i class="fas fa-trash"></i></button>`;
         }
 
         tr.innerHTML = `
             ${isReviewTab ? '' : `<td class="text-center fw-semibold">${Number(sub.serial_number) || ''}</td>`}
             <td><span class="badge bg-secondary">${safeTemplate}</span></td>
             <td class="text-nowrap">${safeCreatedAt}</td>
-            <td style="min-width: 260px; max-width: 520px;">
+            <td class="generated-submission-path-cell">
                 ${safePdfPath ? `<a class="text-break" href="${safeSubmissionUrl}"${reviewTarget} title="${safePdfPath}"><i class="fas fa-file-pdf text-danger me-1"></i>${safePdfPath}</a>` : '<span class="text-muted fst-italic">Không liên kết PDF</span>'}
             </td>
             <td><span class="badge bg-info text-dark"><i class="fas fa-user"></i> ${safeCreator}</span></td>
             <td class="text-center">${statusBadge}</td>
-            <td style="min-width: 300px;"><div class="d-flex flex-wrap align-items-center gap-2">${actions}</div></td>
+            <td class="generated-submission-actions-cell"><div class="d-flex flex-wrap align-items-center gap-2">${actions}</div></td>
         `;
         tbody.appendChild(tr);
     });
     renderPagination();
-}
-
-async function approveSubmission(id) {
-    const res = await apiCall(`/api/submissions/${id}/toggle_check`, { method: 'PUT' });
-    if (res && res.status === 'ok') {
-        fetchReviewSubmissions();
-    }
 }
 
 async function reopenSubmissionReview(id) {
@@ -538,7 +574,7 @@ async function reopenSubmissionReview(id) {
         alert('Chỉ admin được chuyển hồ sơ về chờ duyệt.');
         return;
     }
-    if (!confirm('Chuyển hồ sơ đã duyệt này về trạng thái Chờ duyệt?')) return;
+    if (!confirm('Chuyển hồ sơ này về trạng thái Chờ duyệt?')) return;
 
     const res = await apiCall(`/api/submissions/${id}/reopen-review`, { method: 'PUT' });
     if (res && res.status === 'ok') {
@@ -549,19 +585,66 @@ async function reopenSubmissionReview(id) {
     }
 }
 
-async function toggleCheckSubmission(id, checkbox) {
-    const res = await apiCall(`/api/submissions/${id}/toggle_check`, { method: 'PUT' });
-    if (res && res.status === 'ok') {
-        if (checkbox && typeof res.is_checked === 'boolean') checkbox.checked = res.is_checked;
-        window.reviewApproved = res.is_checked === true;
-        if (window.location.pathname.includes('admin.html')) {
-            fetchReviewSubmissions();
-            fetchCompletedSubmissions();
-        } else {
-            await refreshReviewNextAction();
+function updateReviewConfirmationStatus(status, canConfirm = false) {
+    const checkbox = document.getElementById('reviewConfirmCheckbox');
+    const badge = document.getElementById('reviewConfirmationStatusBadge');
+    const help = document.getElementById('reviewConfirmationHelp');
+    const isConfirmed = status === 'confirmed';
+    const isSaving = status === 'saving';
+
+    if (checkbox) {
+        checkbox.checked = isConfirmed || isSaving;
+        checkbox.disabled = isConfirmed || isSaving || !canConfirm;
+    }
+    if (badge) {
+        badge.className = isConfirmed
+            ? 'badge bg-success'
+            : (isSaving ? 'badge bg-info text-dark' : 'badge bg-warning text-dark');
+        badge.textContent = isConfirmed
+            ? 'Đã kiểm duyệt'
+            : (isSaving ? 'Đang lưu...' : 'Chưa kiểm duyệt');
+    }
+    if (help) {
+        help.textContent = isConfirmed
+            ? 'Nội dung đã được lưu và chuyển cho người nhập kiểm tra lại.'
+            : (isSaving
+                ? 'Hệ thống đang lưu chỉnh sửa và xác nhận kiểm duyệt.'
+                : 'Tích xác nhận để lưu chỉnh sửa và chuyển cho người nhập kiểm tra lại.');
+    }
+}
+
+async function confirmReviewSubmission(checkbox) {
+    if (!checkbox || checkbox.checked !== true) return;
+    const submissionId = Number(currentEditingId);
+    if (!Number.isInteger(submissionId) || submissionId <= 0) {
+        updateReviewConfirmationStatus('pending', true);
+        return;
+    }
+
+    updateReviewConfirmationStatus('saving', false);
+    try {
+        const payload = {
+            data: collectSubmissionFormData(),
+        };
+        const response = await authFetch(`/api/submissions/${submissionId}/confirm-review`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+        });
+        if (!response) throw new Error('Không nhận được phản hồi từ máy chủ.');
+        const result = await response.json().catch(() => ({}));
+        if (!response.ok) {
+            throw new Error(formatApiErrorDetail(result.detail || result.message || `HTTP ${response.status}`));
         }
-    } else {
-        checkbox.checked = !checkbox.checked; // revert
+
+        window.reviewApproved = true;
+        window.reviewEditMode = false;
+        alert('Đã lưu chỉnh sửa và xác nhận kiểm duyệt.');
+        await editSubmission(submissionId);
+    } catch (error) {
+        window.reviewApproved = false;
+        updateReviewConfirmationStatus('pending', true);
+        alert(`Không thể xác nhận kiểm duyệt: ${error.message}`);
     }
 }
 
@@ -614,21 +697,56 @@ function goToNextReviewSubmission() {
     window.location.href = `index.html?${params.toString()}`;
 }
 
-function toggleFormCheck() {
-    if (!currentEditingId) return;
-    const checkbox = document.getElementById('adminFormCheckToggle');
-    toggleCheckSubmission(currentEditingId, checkbox);
+function normalizeCopyScopeValue(value) {
+    return value === null || value === undefined ? null : String(value);
+}
+
+function copyQueuePath(file) {
+    const value = file?.relative_path || file?.name || '';
+    return typeof normalizeQueuePath === 'function'
+        ? normalizeQueuePath(value)
+        : String(value).replace(/\\/g, '/');
+}
+
+function findNextCopyPdfQueueIndex(submission, queue = uploadedFilesQueue) {
+    const files = Array.isArray(queue) ? queue : [];
+    const sourceUuid = submission?.data?._pdf_uuid;
+    const sourceIndex = files.findIndex(file => sourceUuid && file?.uuid === sourceUuid);
+    if (sourceIndex < 0) return -1;
+
+    const sourceFile = files[sourceIndex];
+    const projectId = normalizeCopyScopeValue(sourceFile.project_id);
+    const caseId = normalizeCopyScopeValue(sourceFile.case_id);
+    const templateId = normalizeCopyScopeValue(submission?.template_id ?? sourceFile.template_id);
+    if (projectId === null || caseId === null || templateId === null) return -1;
+
+    const scopedFiles = files
+        .map((file, index) => ({ file, index }))
+        .filter(({ file }) => (
+            file?.temporary_view !== true
+            && normalizeCopyScopeValue(file?.project_id) === projectId
+            && normalizeCopyScopeValue(file?.case_id) === caseId
+            && normalizeCopyScopeValue(file?.template_id) === templateId
+        ))
+        .sort((left, right) => (
+            copyQueuePath(left.file).localeCompare(copyQueuePath(right.file), 'vi', {
+                numeric: true,
+                sensitivity: 'base',
+            }) || left.index - right.index
+        ));
+    const sourcePosition = scopedFiles.findIndex(item => item.index === sourceIndex);
+    if (sourcePosition < 0) return -1;
+
+    for (let offset = 1; offset < scopedFiles.length; offset++) {
+        const candidate = scopedFiles[(sourcePosition + offset) % scopedFiles.length];
+        if (candidate.file.completed !== true) return candidate.index;
+    }
+    return -1;
 }
 
 async function copySubmission(id) {
-    if (!confirm('Bạn có chắc muốn nhân bản hồ sơ này? Bản sao sẽ được tạo ngay lập tức.')) return;
-    const res = await apiCall(`/api/submissions/${id}/copy`, { method: 'POST' });
-    if (res) {
-        fetchSubmissions();
-        if (res.new_id) {
-            editSubmission(res.new_id, true);
-        }
-    }
+    if (!confirm('Bạn có chắc muốn nhân bản hồ sơ này sang PDF chưa nhập tiếp theo?')) return;
+    await editSubmission(id, true);
 }
 
 let activeSubmissionViewId = null;
@@ -708,10 +826,7 @@ async function editSubmission(id, isCopied = false) {
     }
     
     if (window.isCopiedSubmissionEdit) {
-        const inputs = document.querySelectorAll('#dataForm input[type="text"], #dataForm textarea, #dataForm select');
-        const snap = {};
-        inputs.forEach(input => snap[input.name] = input.value);
-        window.originalEditingData = JSON.stringify(snap);
+        window.originalEditingData = collectSubmissionFormData();
     }
     
     // Save initial cover data to detect modifications
@@ -721,6 +836,55 @@ async function editSubmission(id, isCopied = false) {
             const key = `col_${c-1}`;
             window.initialCoverData[key] = res.data[key] || '';
         });
+    }
+
+    if (window.isCopiedSubmissionEdit) {
+        const nextPdfIndex = findNextCopyPdfQueueIndex(res);
+        if (nextPdfIndex < 0) {
+            alert('Không còn PDF chưa nhập trong cùng dự án, cùng cấp hồ sơ và cùng biểu mẫu.');
+            cancelEdit();
+            return;
+        }
+
+        if (typeof stopSubmissionView === 'function') stopSubmissionView();
+        currentEditingId = null;
+        isEditingFromList = false;
+        window.copySourceSubmissionId = Number(id);
+        window.reviewEditMode = false;
+        window.reviewApproved = false;
+
+        const actionBtns = document.getElementById('actionButtonsRow');
+        const readonlyNotice = document.getElementById('readonlyNotice');
+        const clearFormBtn = document.getElementById('clearFormBtn');
+        const cancelEditBtn = document.getElementById('cancelEditBtn');
+        const adminCheckArea = document.getElementById('adminCheckArea');
+        const pdfLinkBtn = document.getElementById('pdfLinkBtn');
+        if (actionBtns) actionBtns.classList.remove('d-none');
+        if (readonlyNotice) readonlyNotice.style.display = 'none';
+        if (clearFormBtn) clearFormBtn.classList.remove('d-none');
+        if (cancelEditBtn) cancelEditBtn.classList.remove('d-none');
+        if (adminCheckArea) adminCheckArea.classList.add('d-none');
+        if (pdfLinkBtn) pdfLinkBtn.classList.remove('d-none');
+        document.querySelectorAll('#dataForm input, #dataForm textarea, #dataForm select').forEach(input => {
+            input.disabled = false;
+        });
+        document.querySelectorAll('.clear-category-btn').forEach(button => {
+            button.classList.remove('d-none');
+        });
+        if (typeof setSubmissionModeButtons === 'function') setSubmissionModeButtons(false, false);
+
+        await selectFileFromQueue(nextPdfIndex, { allowSubmissionNavigation: false });
+
+        window.initialCoverData = {};
+        if (window.activeTemplateConfig && window.activeTemplateConfig.cover_cols) {
+            window.activeTemplateConfig.cover_cols.forEach(c => {
+                const key = `col_${c - 1}`;
+                const input = document.getElementById(key);
+                window.initialCoverData[key] = input ? input.value : '';
+            });
+        }
+        await refreshReviewNextAction();
+        return;
     }
 
     // Set editing state
@@ -735,11 +899,11 @@ async function editSubmission(id, isCopied = false) {
 
     const isAdmin = currentUser && currentUser.role === 'admin';
     const canReview = res.can_review === true;
-    const reviewEditMode = canReview && (res.submission_status === 'pending_review' || res.submission_status === 'rejected');
+    const reviewEditMode = canReview && res.submission_status === 'pending_review';
     window.reviewEditMode = reviewEditMode;
-    window.reviewApproved = canReview && (res.submission_status === 'approved' || res.is_checked === true);
-    const isLocked = !isAdmin && !reviewEditMode && (res.submission_status === 'pending_review' || res.submission_status === 'approved');
-    const canSubmitFromEnteredReport = !canReview && ['draft', 'rejected'].includes(res.submission_status);
+    window.reviewApproved = canReview && ['pending_input_confirmation', 'completed'].includes(res.submission_status);
+    const isLocked = !isAdmin && !reviewEditMode && res.submission_status !== 'draft';
+    const canSubmitFromEnteredReport = !canReview && res.submission_status === 'draft';
 
     if (isLocked) {
         if (actionBtns) actionBtns.classList.add('d-none');
@@ -752,47 +916,31 @@ async function editSubmission(id, isCopied = false) {
 
         // Cập nhật text nút
         if (typeof setSubmissionModeButtons === 'function') {
-            setSubmissionModeButtons(canSubmitFromEnteredReport, res.submission_status === 'rejected');
+            setSubmissionModeButtons(canSubmitFromEnteredReport, false);
         }
     }
 
     document.getElementById('cancelEditBtn').classList.remove('d-none');
 
-    // Error markers are stored per visible input. Legacy `_wrong_sections`
-    // remains untouched in the record, but new reviews use `_wrong_fields`.
-    const wrongFields = Array.isArray(data._wrong_fields) ? data._wrong_fields : [];
-    document.querySelectorAll('.field-error-checkbox').forEach(cb => {
-        const fieldContainer = cb.closest('.position-relative');
-        cb.checked = canReview && wrongFields.includes(cb.dataset.field);
-        if (fieldContainer) {
-            fieldContainer.classList.toggle('border', cb.checked);
-            fieldContainer.classList.toggle('border-danger', cb.checked);
-            fieldContainer.classList.toggle('rounded', cb.checked);
-            fieldContainer.classList.toggle('p-2', cb.checked);
-            fieldContainer.classList.toggle('bg-danger', cb.checked);
-            fieldContainer.classList.toggle('bg-opacity-10', cb.checked);
-        }
-    });
-
     if (canReview) {
         const adminCheckArea = document.getElementById('adminCheckArea');
-        if (adminCheckArea) {
-            adminCheckArea.classList.remove('d-none');
-            document.getElementById('adminFormCheckToggle').checked = !!res.is_checked;
-        }
+        if (adminCheckArea) adminCheckArea.classList.remove('d-none');
+        updateReviewConfirmationStatus(
+            window.reviewApproved ? 'confirmed' : 'pending',
+            reviewEditMode,
+        );
 
-        // Người kiểm tra được sửa nội dung, nhưng không được đổi luồng nộp duyệt.
+        // Việc lưu nội dung kiểm duyệt được thực hiện bởi ô xác nhận riêng.
         const draftBtn = document.getElementById('draftBtn');
-        if (draftBtn) {
-            draftBtn.classList.toggle('d-none', !reviewEditMode);
-            draftBtn.innerHTML = '<i class="fas fa-save"></i> Lưu nội dung đã sửa';
-        }
+        if (draftBtn) draftBtn.classList.add('d-none');
         const btnSubmit = document.getElementById('submitBtn');
         if (btnSubmit) btnSubmit.classList.add('d-none');
-        if (actionBtns) actionBtns.classList.toggle('d-none', !reviewEditMode);
+        if (actionBtns) actionBtns.classList.add('d-none');
         if (readonlyNotice) {
             readonlyNotice.style.display = reviewEditMode ? 'none' : 'block';
-            if (reviewEditMode) readonlyNotice.textContent = '';
+            readonlyNotice.textContent = reviewEditMode
+                ? ''
+                : 'Hồ sơ đã kiểm duyệt. Nội dung chỉ được phép xem.';
         }
 
         const btnClear = document.getElementById('clearFormBtn');
@@ -810,58 +958,11 @@ async function editSubmission(id, isCopied = false) {
         // Chỉ khóa nội dung khi hồ sơ đã rời khỏi bước kiểm tra.
         const inputs = document.querySelectorAll('#dataForm input, #dataForm textarea, #dataForm select');
         inputs.forEach(input => {
-            if (input.id !== 'adminFormCheckToggle' && !input.classList.contains('field-error-checkbox')) {
-                input.disabled = !reviewEditMode;
-            }
-        });
-
-        // Each visible field has its own internal error marker. Marking a field
-        // keeps the report in review; the reviewer corrects the value directly.
-        document.querySelectorAll('.review-field-error-check').forEach(el => el.classList.remove('d-none'));
-        document.querySelectorAll('.field-error-checkbox').forEach(cb => {
-            cb.disabled = !reviewEditMode;
-            cb.onchange = async () => {
-                if (!reviewEditMode) return;
-                const wrongFields = Array.from(
-                    document.querySelectorAll('.field-error-checkbox:checked'),
-                    checkbox => checkbox.dataset.field,
-                );
-
-                // Toggle visual highlight
-                const fieldContainer = cb.closest('.position-relative');
-                if (fieldContainer) {
-                    fieldContainer.classList.toggle('border', cb.checked);
-                    fieldContainer.classList.toggle('border-danger', cb.checked);
-                    fieldContainer.classList.toggle('rounded', cb.checked);
-                    fieldContainer.classList.toggle('p-2', cb.checked);
-                    fieldContainer.classList.toggle('bg-danger', cb.checked);
-                    fieldContainer.classList.toggle('bg-opacity-10', cb.checked);
-                }
-
-                const savePromise = apiCall(`/api/submissions/${id}/errors`, {
-                    method: 'PUT',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        wrong_sections: Array.isArray(data._wrong_sections) ? data._wrong_sections : [],
-                        wrong_fields: wrongFields,
-                    })
-                });
-                window.reviewErrorSavePromise = savePromise;
-                try {
-                    await savePromise;
-                } finally {
-                    if (window.reviewErrorSavePromise === savePromise) {
-                        window.reviewErrorSavePromise = null;
-                    }
-                }
-            };
+            input.disabled = !reviewEditMode;
         });
     } else {
-        // Error markers are internal review metadata, not a request for the
-        // input user to re-enter the report.
-        document.querySelectorAll('.review-field-error-check').forEach(el => {
-            el.classList.add('d-none');
-        });
+        const adminCheckArea = document.getElementById('adminCheckArea');
+        if (adminCheckArea) adminCheckArea.classList.add('d-none');
     }
 
     await refreshReviewNextAction();
@@ -956,10 +1057,10 @@ async function fetchDocumentStats() {
                     <td><span class="badge bg-danger">${reviewPending}</span></td>
                     <td>
                         <div class="d-flex flex-wrap gap-2">
-                            <button type="button" class="btn btn-sm btn-outline-primary" onclick="showAssignedFolders(${safeUserId})" ${pending === 0 ? 'disabled' : ''}>
+                            <button type="button" class="btn btn-sm btn-outline-primary" data-admin-generated-action="show-assigned-folders" data-user-id="${safeUserId}" ${pending === 0 ? 'disabled' : ''}>
                                 <i class="fas fa-folder-open"></i> Tài liệu đã giao
                             </button>
-                            <button type="button" class="btn btn-sm btn-outline-danger" onclick="revokeAssignments(${safeUserId}, 'reviewer')" ${reviewPending === 0 ? 'disabled' : ''}>
+                            <button type="button" class="btn btn-sm btn-outline-danger" data-admin-generated-action="revoke-reviewer-assignments" data-user-id="${safeUserId}" ${reviewPending === 0 ? 'disabled' : ''}>
                                 <i class="fas fa-user-check"></i> Thu hồi việc kiểm tra
                             </button>
                         </div>
@@ -1570,4 +1671,40 @@ async function uploadAndAssign() {
         statusDiv.innerHTML = `<div class="alert alert-danger">${escapeHTML(error.message)}</div>`;
         btn.disabled = false;
     }
+}
+
+const ADMIN_GENERATED_PAGINATION_ACTIONS = Object.freeze({
+    fetchSubmissions: page => fetchSubmissions(page),
+    fetchReviewSubmissions: page => fetchReviewSubmissions(page),
+    fetchCompletedSubmissions: page => fetchCompletedSubmissions(page),
+    fetchDocumentInventory: page => fetchDocumentInventory(page),
+});
+
+const ADMIN_GENERATED_CLICK_ACTIONS = Object.freeze({
+    paginate: trigger => {
+        const action = ADMIN_GENERATED_PAGINATION_ACTIONS[trigger.dataset.pageFunction];
+        if (action) return action(Number(trigger.dataset.page));
+        return undefined;
+    },
+    'edit-submission': trigger => editSubmission(Number(trigger.dataset.submissionId)),
+    'copy-submission': trigger => copySubmission(Number(trigger.dataset.submissionId)),
+    'delete-submission': trigger => deleteSubmission(Number(trigger.dataset.submissionId)),
+    'reopen-submission': trigger => reopenSubmissionReview(Number(trigger.dataset.submissionId)),
+    'show-assigned-folders': trigger => showAssignedFolders(Number(trigger.dataset.userId)),
+    'revoke-reviewer-assignments': trigger => revokeAssignments(Number(trigger.dataset.userId), 'reviewer'),
+});
+
+if (typeof document.addEventListener === 'function') {
+    document.addEventListener('click', event => {
+        const trigger = event.target?.closest?.('[data-admin-generated-action]');
+        const action = trigger && ADMIN_GENERATED_CLICK_ACTIONS[trigger.dataset.adminGeneratedAction];
+        if (!action) return;
+        if (trigger.matches('a[href="#"]')) event.preventDefault();
+        action(trigger);
+    });
+
+    document.addEventListener('change', event => {
+        const trigger = event.target?.closest?.('[data-admin-generated-change="toggle-submission-selection"]');
+        if (trigger) toggleSubmissionSelection(Number(trigger.dataset.submissionId), trigger.checked);
+    });
 }

@@ -44,6 +44,50 @@ function setSubmissionModeButtons(canSubmit = false, isResubmission = false) {
     }
 }
 
+function collectSubmissionFormData() {
+    const inputs = document.querySelectorAll('#dataForm input[type="text"], #dataForm textarea, #dataForm select');
+    const data = {};
+    inputs.forEach(input => {
+        data[input.name] = input.value;
+    });
+    return data;
+}
+
+function getCopiedSubmissionPathFieldName() {
+    const config = typeof getLinkedPdfPathConfig === 'function'
+        ? getLinkedPdfPathConfig()
+        : null;
+    return config ? `col_${config.col - 1}` : null;
+}
+
+function normalizeCopiedSubmissionValue(value) {
+    if (value === null || value === undefined) return '';
+    if (typeof value === 'string') return value.trim();
+    if (Array.isArray(value)) return value.map(normalizeCopiedSubmissionValue);
+    if (typeof value === 'object') {
+        return Object.keys(value).sort().reduce((normalized, key) => {
+            normalized[key] = normalizeCopiedSubmissionValue(value[key]);
+            return normalized;
+        }, {});
+    }
+    return value;
+}
+
+function hasCopiedSubmissionBusinessChanges(sourceData, currentData) {
+    const ignoredPathField = getCopiedSubmissionPathFieldName();
+    const keys = new Set([
+        ...Object.keys(sourceData || {}),
+        ...Object.keys(currentData || {}),
+    ]);
+    const comparableKeys = Array.from(keys)
+        .filter(key => typeof key === 'string' && !key.startsWith('_') && key !== ignoredPathField)
+        .sort();
+    return comparableKeys.some(key => (
+        JSON.stringify(normalizeCopiedSubmissionValue(sourceData?.[key]))
+        !== JSON.stringify(normalizeCopiedSubmissionValue(currentData?.[key]))
+    ));
+}
+
 async function submitData(targetStatus = 'draft') {
     const draftBtn = document.getElementById('draftBtn');
     const submitBtn = document.getElementById('submitBtn');
@@ -61,10 +105,16 @@ async function submitData(targetStatus = 'draft') {
 
     try {
         const inputs = document.querySelectorAll('#dataForm input[type="text"], #dataForm textarea, #dataForm select');
-        const data = {};
-        inputs.forEach(input => {
-            data[input.name] = input.value;
-        });
+        const data = collectSubmissionFormData();
+
+        if (
+            window.isCopiedSubmissionEdit
+            && window.originalEditingData
+            && !hasCopiedSubmissionBusinessChanges(window.originalEditingData, data)
+        ) {
+            alert('Không thể lưu: ngoài trường đường dẫn PDF, bạn phải sửa ít nhất một trường dữ liệu so với báo cáo nguồn.');
+            return;
+        }
         
         // Attach PDF filename if linked
         if (window.pdfLinkState.isLinked() && iframeCurrentIndex >= 0 && iframeCurrentIndex < uploadedFilesQueue.length) {
@@ -86,15 +136,6 @@ async function submitData(targetStatus = 'draft') {
             ? iframeCurrentIndex
             : -1;
             
-        // Duplicate check for copied submissions
-        if (window.isCopiedSubmissionEdit && window.originalEditingData) {
-            if (JSON.stringify(data) === window.originalEditingData) {
-                if (!confirm("Cảnh báo: Bạn chưa sửa đổi trường dữ liệu nào từ bản gốc. Nếu lưu sẽ gây trùng lặp báo cáo. Bạn có chắc chắn muốn lưu lại không? (Nhấn Hủy để kiểm tra lại)")) {
-                    return;
-                }
-            }
-        }
-        
         let updateCover = false;
         const coverCols = window.activeTemplateConfig && window.activeTemplateConfig.cover_cols ? window.activeTemplateConfig.cover_cols : [];
         const coverFolderLevels = window.activeTemplateConfig && window.activeTemplateConfig.cover_folder_level ? window.activeTemplateConfig.cover_folder_level : 0;
@@ -129,25 +170,19 @@ async function submitData(targetStatus = 'draft') {
         let method = isEditing ? 'PUT' : 'POST';
         
         const payload = isReviewEdit
-            ? {
-                data: data,
-                wrong_fields: Array.from(
-                    document.querySelectorAll('.field-error-checkbox:checked'),
-                    checkbox => checkbox.dataset.field,
-                ),
-            }
+            ? { data: data }
             : {
                 data: data,
                 template_id: window.activeTemplateId,
                 status: targetStatus,
                 sync_cover: updateCover
         };
+        if (!isReviewEdit && window.isCopiedSubmissionEdit && Number.isInteger(Number(window.copySourceSubmissionId))) {
+            payload.copy_source_submission_id = Number(window.copySourceSubmissionId);
+        }
 
         // A checkbox change auto-saves its marker. Wait for that request before
         // saving corrected content so two writes cannot overwrite data_json.
-        if (isReviewEdit && window.reviewErrorSavePromise) {
-            await window.reviewErrorSavePromise;
-        }
         const response = await authFetch(url, {
             method: method,
             headers: {
@@ -160,6 +195,9 @@ async function submitData(targetStatus = 'draft') {
         if (!response.ok) {
             if (res.detail && res.detail.code === 'duplicate_submission') {
                 throw new Error(res.detail.message || `Có ${res.detail.duplicate_count} báo cáo trùng.`);
+            }
+            if (res.detail && res.detail.code === 'copy_unchanged') {
+                throw new Error(res.detail.message || 'Báo cáo nhân bản chưa có thay đổi ngoài đường dẫn PDF.');
             }
             throw new Error(formatApiErrorDetail(res.detail || res.message || `HTTP ${response.status}`));
         }
@@ -210,6 +248,12 @@ async function submitData(targetStatus = 'draft') {
                 fetchSubmissions();
             }
 
+            if (!isEditing && window.isCopiedSubmissionEdit) {
+                window.isCopiedSubmissionEdit = false;
+                window.originalEditingData = null;
+                window.copySourceSubmissionId = null;
+            }
+
             // Tài liệu đã nhập vẫn được giữ trong hàng chờ và chỉ đổi trạng thái.
             if (!isEditing && linkedQueueIndex >= 0 && uploadedFilesQueue[linkedQueueIndex]) {
                 uploadedFilesQueue[linkedQueueIndex].completed = true;
@@ -233,6 +277,7 @@ function cancelEdit() {
     isEditingFromList = false;
     window.isCopiedSubmissionEdit = false;
     window.originalEditingData = null;
+    window.copySourceSubmissionId = null;
     const inputs = document.querySelectorAll('#dataForm input[type="text"], #dataForm textarea');
     inputs.forEach(input => input.value = '');
     if (typeof resizeDynamicFormInputs === 'function') {
@@ -297,5 +342,162 @@ function resetFormData(silent = false) {
     if (typeof localStorage !== 'undefined') {
         if (typeof removeCurrentFormDraft === 'function') removeCurrentFormDraft();
     }
+}
+
+function setSubmissionUnreadBadge(value) {
+    const badge = document.getElementById('submissionUnreadBadge');
+    if (!badge) return;
+    const count = Math.max(0, Number(value) || 0);
+    badge.dataset.count = String(count);
+    badge.textContent = count > 99 ? '99+' : String(count || '');
+    badge.classList.toggle('d-none', count === 0);
+    badge.setAttribute(
+        'aria-label',
+        count > 0 ? `${count} hồ sơ có thay đổi chưa xem` : ''
+    );
+}
+
+async function refreshSubmissionUnreadBadge() {
+    const response = await apiCall('/api/submissions?page=1&page_size=1');
+    if (response) setSubmissionUnreadBadge(response.unread_review_count);
+    return response;
+}
+
+function configureInputCorrectionFromDetail(detail) {
+    const quality = detail?.quality;
+    if (typeof applySubmissionQualityFieldStyles === 'function') {
+        applySubmissionQualityFieldStyles(quality);
+    }
+
+    const reviewedChanges = Array.isArray(quality?.reviewed_changes)
+        ? quality.reviewed_changes.filter(name => typeof name === 'string')
+        : [];
+    const correctedFields = Array.isArray(quality?.corrected_fields)
+        ? quality.corrected_fields.filter(name => typeof name === 'string')
+        : [];
+    const canCorrect = (
+        detail?.submission_status === 'pending_input_confirmation'
+        && quality != null
+        && correctedFields.length === 0
+        && detail?.can_review !== true
+    );
+    window.inputCorrectionMode = canCorrect;
+    window.inputCorrectionFields = canCorrect ? reviewedChanges : [];
+
+    if (!canCorrect) return;
+
+    const actionButtons = document.getElementById('actionButtonsRow');
+    const draftContainer = document.getElementById('draftButtonContainer');
+    const submitContainer = document.getElementById('submitButtonContainer');
+    const draftButton = document.getElementById('draftBtn');
+    const readonlyNotice = document.getElementById('readonlyNotice');
+    const clearButton = document.getElementById('clearFormBtn');
+    const pdfLinkButton = document.getElementById('pdfLinkBtn');
+
+    if (actionButtons) actionButtons.classList.remove('d-none');
+    if (draftContainer) {
+        draftContainer.classList.remove('col-6');
+        draftContainer.classList.add('col-12');
+    }
+    if (submitContainer) submitContainer.classList.add('d-none');
+    if (draftButton) {
+        draftButton.classList.remove('d-none');
+        draftButton.innerHTML = '<i class="fas fa-check-circle"></i> Xác nhận hoàn thành';
+    }
+    if (readonlyNotice) {
+        readonlyNotice.style.display = 'block';
+        readonlyNotice.textContent = reviewedChanges.length > 0
+            ? 'Kiểm tra lại nội dung người kiểm duyệt. Bạn có thể sửa các trường màu đỏ trước khi xác nhận hoàn thành.'
+            : 'Kiểm tra lại nội dung người kiểm duyệt và xác nhận để hoàn thành hồ sơ.';
+    }
+    if (clearButton) clearButton.classList.add('d-none');
+    if (pdfLinkButton) pdfLinkButton.classList.add('d-none');
+    document.querySelectorAll('.clear-category-btn').forEach(button => {
+        button.classList.add('d-none');
+    });
+    document.querySelectorAll('#dataForm input, #dataForm textarea, #dataForm select').forEach(input => {
+        input.disabled = !reviewedChanges.includes(input.id);
+    });
+}
+
+async function submitInputCorrection() {
+    const submissionId = Number(currentEditingId);
+    if (!Number.isInteger(submissionId) || submissionId <= 0) return;
+
+    const data = {};
+    (window.inputCorrectionFields || []).forEach(fieldName => {
+        const input = document.getElementById(fieldName);
+        if (input) data[fieldName] = input.value;
+    });
+    const draftButton = document.getElementById('draftBtn');
+    if (draftButton) draftButton.disabled = true;
+
+    try {
+        const response = await authFetch(`/api/submissions/${submissionId}/input-confirmation`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ data }),
+        });
+        if (!response) return;
+        const result = await response.json().catch(() => ({}));
+        if (!response.ok) {
+            throw new Error(formatApiErrorDetail(result.detail || result.message || `HTTP ${response.status}`));
+        }
+        window.inputCorrectionMode = false;
+        window.inputCorrectionFields = [];
+        alert('Hồ sơ đã hoàn thành.');
+        if (typeof window.editSubmission === 'function') {
+            await window.editSubmission(submissionId);
+        }
+    } catch (error) {
+        alert(`Không thể xác nhận hoàn thành: ${error.message}`);
+    } finally {
+        if (draftButton) draftButton.disabled = false;
+    }
+}
+
+function installSubmissionQualityIntegration() {
+    if (window.submissionQualityIntegrationInstalled === true) return;
+    window.submissionQualityIntegrationInstalled = true;
+
+    const baseEditSubmission = window.editSubmission;
+    if (typeof baseEditSubmission === 'function') {
+        window.editSubmission = async function qualityAwareEditSubmission(id, isCopied = false) {
+            const result = await baseEditSubmission.call(this, id, isCopied);
+            if (isCopied || Number(currentEditingId) !== Number(id)) return result;
+
+            const detail = await apiCall(`/api/submissions/${Number(id)}`);
+            if (detail) {
+                configureInputCorrectionFromDetail(detail);
+                if (detail.quality) await refreshSubmissionUnreadBadge();
+            }
+            return result;
+        };
+    }
+
+    const baseFetchSubmissions = window.fetchSubmissions;
+    if (typeof baseFetchSubmissions === 'function') {
+        window.fetchSubmissions = async function qualityAwareFetchSubmissions(...args) {
+            const result = await baseFetchSubmissions.apply(this, args);
+            await refreshSubmissionUnreadBadge();
+            return result;
+        };
+    }
+
+    const baseSubmitData = window.submitData;
+    if (typeof baseSubmitData === 'function') {
+        window.submitData = function qualityAwareSubmitData(targetStatus = 'draft') {
+            if (window.inputCorrectionMode === true) return submitInputCorrection();
+            return baseSubmitData.call(this, targetStatus);
+        };
+    }
+
+    if (typeof currentUserCanInput !== 'function' || currentUserCanInput()) {
+        refreshSubmissionUnreadBadge();
+    }
+}
+
+if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
+    window.addEventListener('load', installSubmissionQualityIntegration, { once: true });
 }
 

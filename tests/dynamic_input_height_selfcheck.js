@@ -6,6 +6,7 @@ const source = fs.readFileSync('frontend/js/form_renderer.js', 'utf8');
 const submissionSource = fs.readFileSync('frontend/js/submission.js', 'utf8');
 const adminPanelSource = fs.readFileSync('frontend/js/admin_panel.js', 'utf8');
 const employeeHtml = fs.readFileSync('frontend/index.html', 'utf8');
+const employeeCss = fs.readFileSync('frontend/index-page.css', 'utf8');
 const sandbox = {
     window: {},
     document: {},
@@ -47,7 +48,8 @@ assert(submissionSource.includes("#dataForm textarea"));
 assert(submissionSource.includes("resizeDynamicFormInputs(document.getElementById('dataForm'))"));
 assert(adminPanelSource.includes("#dataForm input, #dataForm textarea, #dataForm select"));
 assert(adminPanelSource.includes("resizeDynamicFormInputs(document.getElementById('dataForm'))"));
-assert(employeeHtml.includes('overflow-y: auto; overflow-x: hidden;'));
+assert(employeeHtml.includes('class="index-form-scroll"'));
+assert.match(employeeCss, /\.index-form-scroll\s*{[^}]*overflow-y:\s*auto;[^}]*overflow-x:\s*hidden;/s);
 assert.match(employeeHtml, /<script src="js\/form_renderer\.js\?v=[^"]+"><\/script>/);
 
 console.log('Dynamic input height self-check: OK');

@@ -286,6 +286,7 @@ def test_mapping_cache_reads_excel_once_and_reloads_after_invalidation(mocker):
     repository_class = mocker.patch.object(processing, "TemplateRepository")
     repository_class.return_value.get.return_value = SimpleNamespace(filename="form.xlsx")
     mocker.patch.object(processing.os.path, "exists", return_value=True)
+    mocker.patch.object(processing, "template_file_version", return_value="version-1")
     ma_xa_loader = mocker.patch.object(
         processing,
         "get_ma_xa_mapping",
@@ -385,6 +386,37 @@ def test_document_assignment_rejects_malformed_user_list():
 
     assert error.value.status_code == 400
     assert error.value.detail == "Danh sách nhân viên không hợp lệ."
+
+
+def test_document_inventory_uses_validated_storage_setting(tmp_path, mocker):
+    stored_file = tmp_path / "stored.pdf"
+    stored_file.write_bytes(b"%PDF-1.4")
+    document = SimpleNamespace(
+        id=7,
+        original_filename="source.pdf",
+        uuid_filename=stored_file.name,
+        status="pending",
+    )
+
+    repository = mocker.patch.object(documents, "DocumentRepository").return_value
+    repository.get_inventory_folders.return_value = []
+    repository.get_inventory_documents.return_value = (
+        [(document, "source/path.pdf", "case-a", "worker", None)],
+        1,
+    )
+    mocker.patch.object(
+        documents,
+        "settings",
+        SimpleNamespace(pdf_storage_path=tmp_path),
+    )
+
+    result = documents.get_inventory(
+        current_user={"id": 1, "role": "admin"},
+        db=object(),
+    )
+
+    assert result["data"][0]["storage_exists"] is True
+    assert result["summary"] == {"total": 1, "stored": 1, "missing": 0}
 
 
 def test_password_hashes_are_salted_and_malformed_hashes_fail_closed():

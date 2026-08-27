@@ -3,7 +3,11 @@ from sqlalchemy import func
 from server.models import Submission
 
 
-DUPLICATE_REPORT_STATUSES = ("pending_review", "rejected", "approved")
+DUPLICATE_REPORT_STATUSES = (
+    "pending_review",
+    "pending_input_confirmation",
+    "completed",
+)
 
 
 def duplicate_document_ids_query(session):

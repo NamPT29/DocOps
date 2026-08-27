@@ -32,7 +32,18 @@ def test_development_settings_keep_compatible_defaults():
     assert configured.document_upload_max_bytes == 100 * 1024 * 1024
     assert configured.heavy_api_rate_limit == 240
     assert configured.heavy_api_rate_window_seconds == 60
+    assert configured.project_upload_chunk_rate_limit == 2400
     assert configured.dictionary_cache_ttl_seconds == 30
+    assert configured.redis_url is None
+    assert configured.api_docs_enabled is False
+
+
+def test_production_redis_requires_tls_url():
+    environment = production_environment()
+    environment["REDIS_URL"] = "redis://redis:6379/0"
+
+    with pytest.raises(RuntimeError, match="rediss"):
+        Settings.from_env(environment)
 
 
 @pytest.mark.parametrize(
@@ -76,3 +87,37 @@ def test_dictionary_cache_ttl_must_be_positive():
 
     with pytest.raises(RuntimeError, match="DICTIONARY_CACHE_TTL_SECONDS"):
         Settings.from_env(environment)
+
+
+def test_logging_settings_are_environment_driven():
+    configured = Settings.from_env(
+        {
+            "LOG_LEVEL": "warning",
+            "LOG_DIR": "runtime-logs",
+            "LOG_MAX_BYTES": "4096",
+            "LOG_BACKUP_COUNT": "2",
+        },
+        generated_secret="d" * 32,
+    )
+
+    assert configured.log_level == "WARNING"
+    assert configured.log_dir == Path("runtime-logs")
+    assert configured.log_max_bytes == 4096
+    assert configured.log_backup_count == 2
+
+
+def test_logging_level_rejects_unsupported_values():
+    with pytest.raises(RuntimeError, match="LOG_LEVEL"):
+        Settings.from_env({"LOG_LEVEL": "verbose"}, generated_secret="d" * 32)
+
+
+def test_api_docs_require_explicit_boolean_configuration():
+    configured = Settings.from_env(
+        {"API_DOCS_ENABLED": "true"},
+        generated_secret="d" * 32,
+    )
+
+    assert configured.api_docs_enabled is True
+
+    with pytest.raises(RuntimeError, match="API_DOCS_ENABLED"):
+        Settings.from_env({"API_DOCS_ENABLED": "sometimes"}, generated_secret="d" * 32)

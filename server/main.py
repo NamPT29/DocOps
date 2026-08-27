@@ -2,7 +2,6 @@ import os
 import logging
 from pathlib import Path
 from fastapi import FastAPI, HTTPException
-from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, Response
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
@@ -12,9 +11,16 @@ load_dotenv()
 from server.settings import settings
 from server.api_errors import API_ERROR_RESPONSES, register_exception_handlers
 from server.logging_config import RequestLoggingMiddleware, configure_logging
+from server.frontend_static import PublicFrontendStaticFiles, resolve_public_frontend_file
 from server.security_headers import SecurityHeadersMiddleware
+from server.openapi import configure_openapi
 
-configure_logging()
+configure_logging(
+    settings.log_dir,
+    level=settings.log_level,
+    max_bytes=settings.log_max_bytes,
+    backup_count=settings.log_backup_count,
+)
 logger = logging.getLogger("server")
 
 # Initialize database
@@ -26,9 +32,15 @@ from server.services.submission_metadata_service import (
     backfill_submission_metadata,
     ensure_submission_metadata_schema,
 )
+from server.services.project_status_service import ensure_project_status_schema
+from server.services.submission_status_service import ensure_submission_status_schema
+from server.services.user_profile_service import ensure_user_profile_schema
 
 Base.metadata.create_all(bind=engine)
+ensure_user_profile_schema(engine)
 ensure_submission_metadata_schema(engine)
+ensure_project_status_schema(engine)
+ensure_submission_status_schema(engine)
 with SessionLocal() as metadata_db:
     backfill_submission_metadata(metadata_db)
 init_admin()
@@ -48,7 +60,33 @@ def seed_default_template():
 
 seed_default_template()
 
-app = FastAPI(title="Số hóa All in One", responses=API_ERROR_RESPONSES)
+OPENAPI_TAGS = [
+    {"name": "auth", "description": "Sign-in and account administration."},
+    {"name": "templates", "description": "Template management and configuration."},
+    {"name": "tasks", "description": "Background processing tasks."},
+    {"name": "submissions", "description": "Submission intake, review, and export."},
+    {"name": "documents", "description": "Document and folder operations."},
+    {"name": "processing", "description": "Template field processing."},
+    {"name": "dictionaries", "description": "Dictionary and lookup data."},
+    {"name": "notifications", "description": "User notifications."},
+    {"name": "projects", "description": "Project and membership management."},
+    {"name": "project-uploads", "description": "Chunked project asset uploads."},
+]
+
+app = FastAPI(
+    title="Số hóa All in One API",
+    summary="Document digitization and review API.",
+    description=(
+        "API for digitizing documents, completing structured submissions, and managing review workflows. "
+        "Protected endpoints require a JWT access token in the Authorization bearer header."
+    ),
+    version="1.0.0",
+    openapi_tags=OPENAPI_TAGS,
+    docs_url="/docs" if settings.api_docs_enabled else None,
+    redoc_url="/redoc" if settings.api_docs_enabled else None,
+    openapi_url="/openapi.json" if settings.api_docs_enabled else None,
+    responses=API_ERROR_RESPONSES,
+)
 register_exception_handlers(app)
 
 cors_origins = list(settings.cors_origins)
@@ -61,7 +99,7 @@ app.add_middleware(
     expose_headers=["X-Request-ID"],
 )
 app.add_middleware(SecurityHeadersMiddleware)
-app.add_middleware(RequestLoggingMiddleware, secret_key=settings.secret_key)
+app.add_middleware(RequestLoggingMiddleware)
 
 # Include routers
 from server.routers import auth, templates, tasks, submissions, documents, processing, dictionaries, notifications, projects, project_uploads
@@ -76,6 +114,7 @@ app.include_router(dictionaries.router)
 app.include_router(notifications.router)
 app.include_router(projects.router)
 app.include_router(project_uploads.router)
+configure_openapi(app)
 
 PDF_STORAGE_PATH = str(settings.pdf_storage_path)
 os.makedirs(PDF_STORAGE_PATH, exist_ok=True)
@@ -85,7 +124,7 @@ os.makedirs("scratch", exist_ok=True)
 os.makedirs(settings.template_storage_path, exist_ok=True)
 
 # Mount static directories
-app.mount("/frontend", StaticFiles(directory="frontend"), name="frontend")
+app.mount("/frontend", PublicFrontendStaticFiles(directory="frontend"), name="frontend")
 
 @app.get("/favicon.ico", include_in_schema=False)
 def favicon():
@@ -97,13 +136,8 @@ def serve_index():
 
 @app.get("/{filename:path}")
 def serve_root_files(filename: str):
-    frontend_dir = Path("frontend").resolve()
-    file_path = (frontend_dir / filename).resolve()
-    try:
-        file_path.relative_to(frontend_dir)
-    except ValueError:
-        raise HTTPException(status_code=404, detail="File not found")
-    if file_path.is_file():
+    file_path = resolve_public_frontend_file(Path("frontend"), filename)
+    if file_path is not None:
         return FileResponse(file_path)
     raise HTTPException(status_code=404, detail="File not found")
 

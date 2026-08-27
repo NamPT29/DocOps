@@ -101,7 +101,11 @@ def test_unhandled_error_is_logged_without_leaking_detail(caplog):
         "detail": None,
     }
     assert "database password must not leak" not in response.text
-    assert "Unhandled exception: GET /broken" in caplog.text
+    assert "Unhandled request exception" in caplog.text
+    error_record = next(record for record in caplog.records if record.name == "server")
+    assert error_record.error_type == "RuntimeError"
+    assert "/broken" not in caplog.text
+    assert "database password must not leak" not in caplog.text
 
 
 def test_openapi_documents_the_shared_error_schema():

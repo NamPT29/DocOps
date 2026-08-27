@@ -5,13 +5,15 @@ import time
 import host_console
 from host_console import (
     ConsoleDashboard,
+    HostCommandCenter,
     RequestStats,
     SystemSnapshot,
     TrafficMonitor,
     _read_memory_usage,
+    build_dashboard_frame,
     format_duration,
-    format_status_line,
-    format_system_line,
+    normalize_command_selection,
+    read_log_tail,
 )
 
 
@@ -90,37 +92,6 @@ def test_traffic_monitor_counts_uncaught_exception_as_error():
     assert snapshot.active == 0
 
 
-def test_status_line_contains_requested_live_metrics_without_color():
-    stats = RequestStats()
-    started = stats.begin("10.0.0.1")
-    stats.finish(started, 200, 10)
-    system = SystemSnapshot(
-        cpu_percent=2.5,
-        process_ram_mb=128,
-        system_ram_percent=42,
-        disk_percent=61,
-    )
-
-    traffic_line = format_status_line(
-        "ONLINE", stats.snapshot(), system, use_color=False
-    )
-    system_line = format_system_line(system, use_color=False, uptime_seconds=65)
-
-    assert "ONLINE" in traffic_line
-    assert "Truy cập 1" in traffic_line
-    assert "Người dùng 1" in traffic_line
-    assert "Đang xử lý 0" in traffic_line
-    assert "Lỗi 0" in traffic_line
-    assert "CPU toàn máy 2.5%" in system_line
-    assert "RAM ứng dụng 128MB" in system_line
-    assert "RAM toàn máy 42%" in system_line
-    assert "Đĩa 61%" in system_line
-    assert "00:01:05" in system_line
-    assert len(traffic_line) < 120
-    assert len(system_line) < 120
-    assert "\033[" not in traffic_line + system_line
-
-
 def test_http_error_is_stored_without_printing_a_scrolling_line(capsys):
     dashboard = ConsoleDashboard(RequestStats(), use_color=False, interval=1)
 
@@ -138,9 +109,9 @@ def test_dashboard_renders_fixed_rows_without_newlines(monkeypatch, capsys):
 
     output = capsys.readouterr().out
     assert "\n" not in output
-    assert "\033[18;1H\033[2Ktraffic" in output
-    assert "\033[19;1H\033[2Ksystem" in output
-    assert "\033[20;1H\033[2Klast error" in output
+    assert "\033[12;1H\033[2Ktraffic" in output
+    assert "\033[13;1H\033[2Ksystem" in output
+    assert "\033[14;1H\033[2Klast error" in output
 
 
 def test_dashboard_uses_native_writer_on_windows(monkeypatch, capsys):
@@ -161,7 +132,9 @@ def test_dashboard_uses_native_writer_on_windows(monkeypatch, capsys):
 
     dashboard._render_lines("traffic", "system", "last error")
 
-    assert calls == [(("traffic", "system", "last error"), 18, 145)]
+    assert calls == [
+        (("traffic", "system", "last error"), 12, host_console.CONSOLE_WIDTH)
+    ]
     assert capsys.readouterr().out == ""
 
 
@@ -171,6 +144,13 @@ def test_windows_line_padding_ignores_ansi_color_bytes():
     padded = host_console._pad_console_line(colored, width=12)
 
     assert padded == f"{colored}{' ' * 5}"
+
+
+def test_windows_line_padding_clips_before_console_wraps():
+    padded = host_console._pad_console_line("123456789", width=8)
+
+    assert padded == "123456…"
+    assert len(padded) == 7
 
 
 def test_format_duration_supports_long_running_server():
@@ -185,3 +165,115 @@ def test_memory_metrics_are_available_on_windows():
     assert 0 <= system_ram_percent <= 100
     if os.name == "nt":
         assert process_ram_mb > 0
+
+
+def test_dashboard_frame_keeps_live_metrics_inside_one_box():
+    traffic = RequestStats().snapshot()
+    system = SystemSnapshot(
+        cpu_percent=12.5,
+        process_ram_mb=256,
+        system_ram_percent=48,
+        disk_percent=62,
+    )
+
+    lines = build_dashboard_frame(
+        state="ONLINE",
+        traffic=traffic,
+        system=system,
+        last_error=(404, "GET", "/api/missing"),
+        uptime_seconds=65,
+        use_color=False,
+    )
+
+    assert len(lines) == 8
+    assert lines[0].startswith("  ╭")
+    assert lines[-1].startswith("  ╰")
+    assert all(line.startswith(("  │", "  ├", "  ╭", "  ╰")) for line in lines)
+    assert "GIÁM SÁT TRỰC TIẾP" in lines[1]
+    assert "ONLINE" in lines[2]
+    assert "Truy cập [0]" in lines[2]
+    assert "CPU toàn máy [12.5]%" in lines[3]
+    assert "RAM ứng dụng [256]MB" in lines[3]
+    assert "RAM toàn máy [48]%" in lines[3]
+    assert "Đĩa [62]%" in lines[3]
+    assert "HTTP [404]" in lines[4]
+    separator_positions = [
+        [index for index, character in enumerate(line) if character == "│"]
+        for line in lines[2:5]
+    ]
+    assert separator_positions[0] == separator_positions[1] == separator_positions[2]
+    assert "com" in lines[6]
+
+
+def test_command_palette_accepts_numbers_and_command_names():
+    assert normalize_command_selection("1") == "errorlog"
+    assert normalize_command_selection(" ERRORLOG ") == "errorlog"
+    assert normalize_command_selection("2") == "applog"
+    assert normalize_command_selection("status") == "status"
+    assert normalize_command_selection("6") == "stop"
+    assert normalize_command_selection("unknown") is None
+
+
+def test_command_center_opens_with_com(monkeypatch):
+    class FakeServer:
+        should_exit = False
+
+    dashboard = ConsoleDashboard(RequestStats(), use_color=False, interval=1)
+    command_center = HostCommandCenter(dashboard, FakeServer(), use_color=False)
+    monkeypatch.setattr("builtins.input", lambda _prompt="": "com")
+    monkeypatch.setattr(command_center, "_menu_loop", lambda: True)
+    monkeypatch.setattr(dashboard, "pause", lambda: None)
+    monkeypatch.setattr(dashboard, "redraw", lambda: None)
+    monkeypatch.setattr(dashboard, "resume", lambda: None)
+
+    command_center._run()
+
+
+def test_read_log_tail_returns_only_recent_sanitized_lines(tmp_path):
+    log_path = tmp_path / "error.log"
+    log_path.write_text(
+        "old\nsecond\nthird\tvalue\nfourth\x00value\n",
+        encoding="utf-8",
+    )
+
+    lines = read_log_tail(log_path, limit=2)
+
+    assert lines == ["third    value", "fourth value"]
+
+
+def test_read_log_tail_merges_process_specific_worker_logs(monkeypatch, tmp_path):
+    monkeypatch.setenv("MULTIPROCESS_LOGGING", "1")
+    (tmp_path / "app.100.log").write_text("worker-one\n", encoding="utf-8")
+    (tmp_path / "app.200.log").write_text("worker-two\n", encoding="utf-8")
+
+    lines = read_log_tail(tmp_path / "app.log", limit=5)
+
+    assert sorted(lines) == [
+        "[app.100.log] worker-one",
+        "[app.200.log] worker-two",
+    ]
+
+
+def test_stop_command_requires_explicit_confirmation(monkeypatch):
+    class FakeServer:
+        should_exit = False
+
+    dashboard = ConsoleDashboard(RequestStats(), use_color=False, interval=1)
+    server = FakeServer()
+    command_center = HostCommandCenter(dashboard, server, use_color=False)
+    responses = iter(["6", "not-stop", "0"])
+    monkeypatch.setattr("builtins.input", lambda _prompt="": next(responses))
+
+    should_stop_thread = command_center._menu_loop()
+
+    assert should_stop_thread is False
+    assert server.should_exit is False
+
+    confirmed_center = HostCommandCenter(dashboard, server, use_color=False)
+    responses = iter(["stop", "STOP"])
+    monkeypatch.setattr("builtins.input", lambda _prompt="": next(responses))
+
+    should_stop_thread = confirmed_center._menu_loop()
+
+    assert should_stop_thread is True
+    assert server.should_exit is True

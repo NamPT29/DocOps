@@ -1,10 +1,12 @@
 import os
+import multiprocessing
 import sys
 import webbrowser
 import threading
 import time
 import uvicorn
 from dotenv import load_dotenv
+from server.runtime_config import configure_server_runtime
 
 load_dotenv()
 
@@ -25,7 +27,7 @@ def open_browser(host, port):
     url = f"http://{url_host}:{port}" if port != 80 else f"http://{url_host}"
     webbrowser.open(url)
 
-if __name__ == "__main__":
+def main():
     # Change working directory to the base directory
     base_dir = get_base_dir()
     os.chdir(base_dir)
@@ -37,10 +39,12 @@ if __name__ == "__main__":
     # Read environment variables
     host = os.environ.get("HOST", "0.0.0.0")
     port = int(os.environ.get("PORT", "80"))
+    runtime = configure_server_runtime()
     
     print("=" * 50)
     print("  SO HOA ALL IN ONE")
     print("  Dang khoi dong may chu...")
+    print(f"  Workers: {runtime.workers}")
     print("=" * 50)
     
     # Open browser in a separate thread
@@ -52,4 +56,15 @@ if __name__ == "__main__":
     print("=" * 50)
     
     # Start the server (no reload when packaged)
-    uvicorn.run("server.main:app", host=host, port=port, reload=False)
+    uvicorn.run(
+        "server.main:app",
+        host=host,
+        port=port,
+        reload=False,
+        workers=runtime.workers,
+    )
+
+
+if __name__ == "__main__":
+    multiprocessing.freeze_support()
+    main()

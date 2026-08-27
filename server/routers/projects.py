@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 from server.database import get_db
 from server.routers.auth import get_admin_user, get_current_user
 from server.routers.project_access import get_project_input_member
-from server.services.project_service import create_project, list_projects
+from server.services.project_service import create_project, list_projects, update_project_status
 from server.services.project_admin_service import (
     delete_project,
     hard_delete_project_pdf,
@@ -51,6 +51,10 @@ class ProjectMembersUpdateRequest(BaseModel):
     reviewer_user_ids: list[int] = Field(default_factory=list)
 
 
+class ProjectStatusUpdateRequest(BaseModel):
+    status: Literal["new", "in_progress", "completed", "overdue"]
+
+
 @router.post("")
 def api_create_project(
     request: ProjectCreateRequest,
@@ -88,6 +92,24 @@ def api_list_my_projects(
     db: Session = Depends(get_db),
 ):
     return {"status": "ok", "data": list_projects(db, current_user=current_user)}
+
+
+@router.put("/{project_id}")
+@router.put("/{project_id}/status")
+def api_update_project_status(
+    project_id: int,
+    request: ProjectStatusUpdateRequest,
+    current_user: dict = Depends(get_admin_user),
+    db: Session = Depends(get_db),
+):
+    return {
+        "status": "ok",
+        "data": update_project_status(
+            db,
+            project_id=project_id,
+            status=request.status,
+        ),
+    }
 
 
 @router.delete("/{project_id}")

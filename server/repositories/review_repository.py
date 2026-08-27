@@ -25,6 +25,19 @@ class ReviewRepository(BaseRepository[SubmissionReviewAssignment]):
             SubmissionReviewAssignment.submission_id == submission_id
         ).first()
 
+    def submission_assignments_by_ids(
+        self,
+        submission_ids: set[int] | list[int],
+    ) -> dict[int, SubmissionReviewAssignment]:
+        if not submission_ids:
+            return {}
+        return {
+            assignment.submission_id: assignment
+            for assignment in self.session.query(SubmissionReviewAssignment).filter(
+                SubmissionReviewAssignment.submission_id.in_(submission_ids),
+            ).all()
+        }
+
     def get_document_assignment(
         self,
         document_id: int,
@@ -32,6 +45,21 @@ class ReviewRepository(BaseRepository[SubmissionReviewAssignment]):
         return self.session.query(AssignedDocumentReviewAssignment).filter(
             AssignedDocumentReviewAssignment.document_id == document_id
         ).first()
+
+    def document_assignments_by_ids(
+        self,
+        document_ids: set[int] | list[int],
+    ) -> dict[int, AssignedDocumentReviewAssignment]:
+        if not document_ids:
+            return {}
+        return {
+            assignment.document_id: assignment
+            for assignment in self.session.query(
+                AssignedDocumentReviewAssignment,
+            ).filter(
+                AssignedDocumentReviewAssignment.document_id.in_(document_ids),
+            ).all()
+        }
 
     def get_folder_reviewer(self, folder_path: str) -> int | None:
         if not folder_path or folder_path == "__ROOT__":
@@ -43,6 +71,24 @@ class ReviewRepository(BaseRepository[SubmissionReviewAssignment]):
             AssignedDocumentFolder.folder_group == folder_path
         ).first()
         return assignment[0] if assignment else None
+
+    def folder_reviewers_by_paths(self, folder_paths: set[str]) -> dict[str, int]:
+        if not folder_paths:
+            return {}
+        rows = self.session.query(
+            AssignedDocumentFolder.folder_group,
+            AssignedDocumentReviewAssignment.reviewer_user_id,
+        ).join(
+            AssignedDocumentReviewAssignment,
+            AssignedDocumentReviewAssignment.document_id
+            == AssignedDocumentFolder.document_id,
+        ).filter(
+            AssignedDocumentFolder.folder_group.in_(folder_paths),
+        ).all()
+        result: dict[str, int] = {}
+        for folder_path, reviewer_id in rows:
+            result.setdefault(folder_path, reviewer_id)
+        return result
 
     def delete_document_assignments(self, document_ids: list[int]) -> int:
         if not document_ids:
@@ -69,7 +115,7 @@ class ReviewRepository(BaseRepository[SubmissionReviewAssignment]):
             Submission.id == SubmissionReviewAssignment.submission_id,
         ).filter(
             SubmissionReviewAssignment.reviewer_user_id == reviewer_id,
-            Submission.status.in_(["pending_review", "rejected"]),
+            Submission.status == "pending_review",
         ).all()
 
     def pending_assignment_context(self) -> tuple[list[Submission], dict, dict]:
@@ -340,7 +386,7 @@ class ReviewRepository(BaseRepository[SubmissionReviewAssignment]):
             Submission,
             Submission.id == SubmissionReviewAssignment.submission_id,
         ).filter(
-            Submission.status.in_(["pending_review", "rejected"]),
+            Submission.status == "pending_review",
         ).group_by(
             SubmissionReviewAssignment.reviewer_user_id
         ).all()

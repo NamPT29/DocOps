@@ -7,7 +7,7 @@ from collections.abc import Callable
 from datetime import datetime, timezone
 
 from fastapi import HTTPException
-from sqlalchemy import delete
+from sqlalchemy import delete, select
 from sqlalchemy.dialects.postgresql import insert as postgresql_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Session
@@ -88,9 +88,34 @@ class DatabaseRateLimiter:
             math.ceil(expires_at.replace(tzinfo=timezone.utc).timestamp() - now),
         )
 
+    def retry_after(self, scope: str, key: str) -> int:
+        bucket_key, expires_at, now = self._bucket_values(scope, key)
+        table = ApiRateLimitBucket.__table__
+        with self._session_factory() as db:
+            request_count = db.execute(
+                select(table.c.request_count).where(table.c.bucket_key == bucket_key)
+            ).scalar_one_or_none()
+        if request_count is None or int(request_count) < self.max_requests:
+            return 0
+        return max(
+            1,
+            math.ceil(expires_at.replace(tzinfo=timezone.utc).timestamp() - now),
+        )
+
+    def reset(self, scope: str, key: str) -> None:
+        bucket_key, _expires_at, _now = self._bucket_values(scope, key)
+        table = ApiRateLimitBucket.__table__
+        with self._session_factory() as db:
+            db.execute(delete(table).where(table.c.bucket_key == bucket_key))
+            db.commit()
+
 
 heavy_api_rate_limiter = DatabaseRateLimiter(
     settings.heavy_api_rate_limit,
+    settings.heavy_api_rate_window_seconds,
+)
+project_upload_chunk_rate_limiter = DatabaseRateLimiter(
+    settings.project_upload_chunk_rate_limit,
     settings.heavy_api_rate_window_seconds,
 )
 
@@ -105,5 +130,18 @@ def enforce_heavy_api_rate_limit(scope: str, user_id: int, *, cost: int = 1) -> 
         raise HTTPException(
             status_code=429,
             detail="Bạn thao tác quá nhanh. Vui lòng thử lại sau.",
+            headers={"Retry-After": str(retry_after)},
+        )
+
+
+def enforce_project_upload_chunk_rate_limit(user_id: int) -> None:
+    retry_after = project_upload_chunk_rate_limiter.consume(
+        "project-upload-chunk",
+        f"user:{int(user_id)}",
+    )
+    if retry_after:
+        raise HTTPException(
+            status_code=429,
+            detail="Tốc độ tải PDF đang quá cao. Hệ thống sẽ tự tiếp tục sau ít giây.",
             headers={"Retry-After": str(retry_after)},
         )

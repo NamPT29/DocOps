@@ -1,4 +1,5 @@
 from fastapi import APIRouter, BackgroundTasks, Depends, UploadFile, File, HTTPException, Form
+from starlette.concurrency import run_in_threadpool
 from sqlalchemy.orm import Session
 from typing import List, Literal, Optional
 from datetime import datetime
@@ -7,6 +8,7 @@ import secrets
 import uuid
 from urllib.parse import quote
 from server.database import get_db, get_utc_now
+from server.settings import settings
 from server.routers.auth import (
     get_admin_user,
     get_input_user,
@@ -155,11 +157,26 @@ async def upload_and_assign_documents(
             raise HTTPException(status_code=400, detail="Vui lòng chọn ít nhất 1 người kiểm tra.")
     except ValueError as exc:
         raise HTTPException(status_code=400, detail="Danh sách người kiểm tra không hợp lệ.") from exc
-        
-    from dotenv import load_dotenv
-    load_dotenv()
-    PDF_STORAGE_PATH = os.getenv("PDF_STORAGE_PATH", "uploads")
-    os.makedirs(PDF_STORAGE_PATH, exist_ok=True)
+
+    return await run_in_threadpool(
+        _upload_and_assign_documents_sync,
+        template_id,
+        user_id_list,
+        reviewer_id_list,
+        files,
+        db,
+    )
+
+
+def _upload_and_assign_documents_sync(
+    template_id: int,
+    user_id_list: list[int],
+    reviewer_id_list: list[int],
+    files: List[UploadFile],
+    db: Session,
+):
+    pdf_storage_path = str(settings.pdf_storage_path)
+    os.makedirs(pdf_storage_path, exist_ok=True)
 
     template = TemplateRepository(db).get(template_id)
     if not template:
@@ -189,7 +206,7 @@ async def upload_and_assign_documents(
 
             original_filename = os.path.basename(file.filename)
             uuid_name = str(uuid.uuid4()) + "_" + original_filename
-            filepath = os.path.join(PDF_STORAGE_PATH, uuid_name)
+            filepath = os.path.join(pdf_storage_path, uuid_name)
 
             save_validated_upload(file, filepath, kind="document")
             created_paths.append(filepath)
@@ -417,31 +434,51 @@ def redistribute_folder_reviewers(
     try:
         document_repository = DocumentRepository(db)
         review_repository = ReviewRepository(db)
+        document_ids = {
+            document.id
+            for group, _reviewer_id in assignment_plan
+            for document in group["documents"]
+        }
+        submission_ids = {
+            submission.id
+            for group, _reviewer_id in assignment_plan
+            for submission in group["active_submissions"]
+        }
+        document_assignments = review_repository.document_assignments_by_ids(
+            document_ids,
+        )
+        submission_assignments = review_repository.submission_assignments_by_ids(
+            submission_ids,
+        )
         for group, reviewer_id in assignment_plan:
             distribution[reviewer_id]["folder_count"] += 1
             for document in group["documents"]:
-                mapping = review_repository.get_document_assignment(document.id)
+                mapping = document_assignments.get(document.id)
                 if mapping:
                     mapping.reviewer_user_id = reviewer_id
                     mapping.assigned_at = datetime.now()
                 else:
-                    document_repository.add_review_assignment(AssignedDocumentReviewAssignment(
-                        document_id=document.id,
-                        reviewer_user_id=reviewer_id,
-                    ))
+                    mapping = document_repository.add_review_assignment(
+                        AssignedDocumentReviewAssignment(
+                            document_id=document.id,
+                            reviewer_user_id=reviewer_id,
+                        )
+                    )
+                    document_assignments[document.id] = mapping
                 document_updates += 1
                 distribution[reviewer_id]["document_count"] += 1
 
             for submission in group["active_submissions"]:
-                mapping = review_repository.get_submission_assignment(submission.id)
+                mapping = submission_assignments.get(submission.id)
                 if mapping:
                     mapping.reviewer_user_id = reviewer_id
                     mapping.assigned_at = datetime.now()
                 else:
-                    review_repository.add(SubmissionReviewAssignment(
+                    mapping = review_repository.add(SubmissionReviewAssignment(
                         submission_id=submission.id,
                         reviewer_user_id=reviewer_id,
                     ))
+                    submission_assignments[submission.id] = mapping
                 submission_updates += 1
                 distribution[reviewer_id]["submission_count"] += 1
         db.commit()
@@ -487,8 +524,7 @@ def get_document_stats(current_user: dict = Depends(get_admin_user), db: Session
             "review_pending": review_reservations + active_reviews,
             "submissions_draft": sub_counts.get("draft", 0),
             "submissions_pending_review": sub_counts.get("pending_review", 0),
-            "submissions_approved": sub_counts.get("approved", 0),
-            "submissions_rejected": sub_counts.get("rejected", 0),
+            "submissions_completed": sub_counts.get("completed", 0),
             "submissions_total": sum(sub_counts.values()),
         })
         
@@ -545,7 +581,7 @@ def get_inventory(
     folders = repo.get_inventory_folders()
     rows, total = repo.get_inventory_documents(folder_path=folder_path, page=page, page_size=page_size)
     
-    upload_dir = os.getenv("PDF_STORAGE_PATH", "uploads")
+    upload_dir = str(settings.pdf_storage_path)
     existing_files = set(os.listdir(upload_dir)) if os.path.exists(upload_dir) else set()
     
     data = []

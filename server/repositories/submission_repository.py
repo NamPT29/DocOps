@@ -1,8 +1,14 @@
 from datetime import datetime
 
-from sqlalchemy import func, or_
+from sqlalchemy import and_, func, or_
 
-from server.models import Submission, Template, User
+from server.models import (
+    ProjectCase,
+    ProjectDocumentAsset,
+    Submission,
+    Template,
+    User,
+)
 from server.repositories.base import BaseRepository
 from server.repositories.submission_query_helpers import (
     DUPLICATE_REPORT_STATUSES as _DUPLICATE_REPORT_STATUSES,
@@ -13,6 +19,121 @@ from server.utils.folder_utils import folder_path_key, normalize_folder_path
 
 class SubmissionRepository(BaseRepository[Submission]):
     model = Submission
+
+    def active_input_user_id(self, submission: Submission) -> int | None:
+        """Return the current case assignee without rewriting the original author."""
+        if submission.assigned_document_id is not None:
+            row = (
+                self.session.query(ProjectCase.assigned_input_user_id)
+                .join(
+                    ProjectDocumentAsset,
+                    ProjectDocumentAsset.case_id == ProjectCase.id,
+                )
+                .filter(
+                    ProjectDocumentAsset.assigned_document_id
+                    == submission.assigned_document_id
+                )
+                .first()
+            )
+            if row is not None:
+                return row[0]
+        return submission.created_by_user_id
+
+    def is_active_input_assignee(
+        self,
+        submission: Submission,
+        user_id: int,
+    ) -> bool:
+        return self.active_input_user_id(submission) == user_id
+
+    def active_input_user_ids(
+        self,
+        submissions: list[Submission],
+    ) -> dict[int, int | None]:
+        """Resolve current input ownership for a batch in one query.
+
+        A project-case assignment, including an explicit ``NULL`` assignment,
+        takes precedence over the report's original author just like
+        :meth:`active_input_user_id`.
+        """
+        result = {
+            submission.id: submission.created_by_user_id
+            for submission in submissions
+        }
+        document_ids = {
+            submission.assigned_document_id
+            for submission in submissions
+            if submission.assigned_document_id is not None
+        }
+        if not document_ids:
+            return result
+
+        assignee_by_document = dict(
+            self.session.query(
+                ProjectDocumentAsset.assigned_document_id,
+                ProjectCase.assigned_input_user_id,
+            ).join(
+                ProjectCase,
+                ProjectCase.id == ProjectDocumentAsset.case_id,
+            ).filter(
+                ProjectDocumentAsset.assigned_document_id.in_(document_ids),
+            ).all()
+        )
+        for submission in submissions:
+            document_id = submission.assigned_document_id
+            if document_id in assignee_by_document:
+                result[submission.id] = assignee_by_document[document_id]
+        return result
+
+    def paginate_for_input_user(
+        self,
+        *,
+        user_id: int,
+        status: str | None,
+        template_id: int | None,
+        start_date: str | None,
+        end_date: str | None,
+        folder_path: str | None,
+        page: int,
+        page_size: int,
+        duplicate_only: bool = False,
+    ) -> tuple[list[Submission], int, int, int]:
+        """Paginate reports owned by a user's current project assignment."""
+        query = self._apply_filters(
+            self.session.query(Submission),
+            owner_id=None,
+            status=status,
+            template_id=template_id,
+            start_date=start_date,
+            end_date=end_date,
+            folder_path=folder_path,
+            duplicate_only=duplicate_only,
+        )
+        query = query.outerjoin(
+            ProjectDocumentAsset,
+            ProjectDocumentAsset.assigned_document_id
+            == Submission.assigned_document_id,
+        ).outerjoin(
+            ProjectCase,
+            ProjectCase.id == ProjectDocumentAsset.case_id,
+        )
+        query = query.filter(or_(
+            ProjectCase.assigned_input_user_id == user_id,
+            and_(
+                ProjectDocumentAsset.id.is_(None),
+                Submission.created_by_user_id == user_id,
+            ),
+        ))
+        total = query.count()
+        total_pages = max(1, (total + page_size - 1) // page_size)
+        current_page = min(page, total_pages)
+        rows = query.order_by(
+            Submission.created_at.desc(),
+            Submission.id.desc(),
+        ).offset(
+            (current_page - 1) * page_size
+        ).limit(page_size).all()
+        return rows, total, total_pages, current_page
 
     def list_by_ids(self, submission_ids: list[int]) -> list[Submission]:
         if not submission_ids:
@@ -38,6 +159,39 @@ class SubmissionRepository(BaseRepository[Submission]):
         else:
             query = query.filter(Submission.template_id == template_id)
         return query.all()
+
+    def exact_duplicate_candidates_by_scope(
+        self,
+        scopes: set[tuple[int | None, str | None]],
+        *,
+        exclude_submission_ids: set[int] | None = None,
+    ) -> dict[tuple[int | None, str | None], list[Submission]]:
+        """Load duplicate candidates for several template/folder scopes."""
+        if not scopes:
+            return {}
+        scope_filters = []
+        for template_id, folder_key in scopes:
+            scope_filters.append(and_(
+                Submission.template_id.is_(None)
+                if template_id is None
+                else Submission.template_id == template_id,
+                Submission.folder_path_key.is_(None)
+                if folder_key is None
+                else Submission.folder_path_key == folder_key,
+            ))
+        query = self.session.query(Submission).filter(
+            Submission.status.in_(_DUPLICATE_REPORT_STATUSES),
+            or_(*scope_filters),
+        )
+        if exclude_submission_ids:
+            query = query.filter(Submission.id.notin_(exclude_submission_ids))
+        result = {scope: [] for scope in scopes}
+        for submission in query.all():
+            result.setdefault(
+                (submission.template_id, submission.folder_path_key),
+                [],
+            ).append(submission)
+        return result
 
     def list_user_drafts(self, user_id: int) -> list[Submission]:
         return self.session.query(Submission).filter(
@@ -67,7 +221,7 @@ class SubmissionRepository(BaseRepository[Submission]):
 
     def list_active_reviews(self) -> list[Submission]:
         return self.session.query(Submission).filter(
-            Submission.status.in_(["pending_review", "rejected"])
+            Submission.status == "pending_review"
         ).all()
 
     def list_active_review_submissions(
@@ -78,7 +232,7 @@ class SubmissionRepository(BaseRepository[Submission]):
     ) -> list[Submission]:
         query = self._apply_filters(
             self.session.query(Submission),
-            status='pending_review,rejected',
+            status='pending_review',
             template_id=template_id,
             folder_path=folder_path,
         )
@@ -102,7 +256,7 @@ class SubmissionRepository(BaseRepository[Submission]):
                 Submission.created_by_user_id,
                 Submission.template_id,
             ),
-            status='pending_review,rejected',
+            status='pending_review',
             template_id=template_id,
             folder_path=folder_path,
             duplicate_only=duplicate_only,
@@ -203,7 +357,7 @@ class SubmissionRepository(BaseRepository[Submission]):
     ) -> tuple[list[tuple], list[tuple], list[tuple]]:
         query = self._apply_filters(
             self.session.query(Submission),
-            status="approved",
+            status="completed",
             template_id=template_id,
             start_date=start_date,
             end_date=end_date,
@@ -246,7 +400,11 @@ class SubmissionRepository(BaseRepository[Submission]):
     ) -> list[Submission]:
         query = self._apply_filters(
             self.session.query(Submission),
-            status="pending_review,approved" if include_pending_review else "approved",
+            status=(
+                "pending_review,pending_input_confirmation,completed"
+                if include_pending_review
+                else "completed"
+            ),
             template_id=template_id,
             folder_path=folder_path,
             start_date=start_date,

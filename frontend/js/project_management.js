@@ -10,6 +10,19 @@ let activeProjectReportsView = 'review';
 let activeProjectReportsFolderPath = '';
 let activeProjectReportsPage = 1;
 
+const PROJECT_STATUS_LABELS = {
+    new: 'Mới',
+    in_progress: 'Đang tiến hành',
+    completed: 'Hoàn thành',
+    overdue: 'Quá hạn',
+};
+const PROJECT_STATUS_CLASSES = {
+    new: 'text-secondary',
+    in_progress: 'text-warning',
+    completed: 'text-success',
+    overdue: 'text-danger',
+};
+
 function setProjectUploadStatus(message, tone = 'muted') {
     const status = document.getElementById('projectUploadStatus');
     if (!status) return;
@@ -189,6 +202,24 @@ function appendProjectCell(row, text, className = '') {
     return cell;
 }
 
+async function updateProjectStatus(project, status, select) {
+    const previousStatus = project.status;
+    try {
+        const response = await apiCall(`/api/projects/${Number(project.id)}/status`, {
+            method: 'PUT',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({status}),
+        });
+        if (!response) throw new Error('Không thể cập nhật trạng thái dự án.');
+        project.status = response.data?.status || status;
+        select.className = `form-select form-select-sm ${PROJECT_STATUS_CLASSES[project.status] || ''}`.trim();
+    } catch (error) {
+        project.status = previousStatus;
+        select.value = previousStatus;
+        throw error;
+    }
+}
+
 async function loadProjectList() {
     const body = document.getElementById('projectListBody');
     if (body) body.innerHTML = '<tr><td colspan="7" class="text-center text-muted">Đang tải...</td></tr>';
@@ -217,8 +248,25 @@ async function loadProjectList() {
         appendProjectCell(row, `${metrics.total_pdfs || 0} (lỗi ${metrics.error_pdfs || 0})`);
         appendProjectCell(row, `${metrics.entered_reports || 0}/${metrics.required_reports || 0}`);
         appendProjectCell(row, `${metrics.approved_reports || 0}/${metrics.entered_reports || 0}`);
-        const statusCell = appendProjectCell(row, project.status || '');
-        statusCell.classList.add(project.status === 'ready' ? 'text-success' : 'text-warning');
+        const statusCell = appendProjectCell(row, '');
+        const statusSelect = document.createElement('select');
+        statusSelect.className = `form-select form-select-sm ${PROJECT_STATUS_CLASSES[project.status] || ''}`.trim();
+        Object.entries(PROJECT_STATUS_LABELS).forEach(([value, label]) => {
+            const option = document.createElement('option');
+            option.value = value;
+            option.textContent = label;
+            option.selected = project.status === value;
+            statusSelect.appendChild(option);
+        });
+        statusSelect.addEventListener('change', async () => {
+            try {
+                await updateProjectStatus(project, statusSelect.value, statusSelect);
+            } catch (error) {
+                statusSelect.value = project.status;
+                setProjectUploadStatus(error.message || 'Không thể cập nhật trạng thái.', 'danger');
+            }
+        });
+        statusCell.appendChild(statusSelect);
         const actionCell = appendProjectCell(row, '');
         actionCell.className = 'text-nowrap';
         const membersButton = document.createElement('button');
@@ -226,74 +274,99 @@ async function loadProjectList() {
         membersButton.className = 'btn btn-sm btn-outline-primary me-1';
         membersButton.innerHTML = '<i class="fas fa-users"></i> Nhân sự';
         membersButton.addEventListener('click', () => openProjectMembers(project.id));
-        const updateButton = document.createElement('button');
-        updateButton.type = 'button';
-        updateButton.className = 'btn btn-sm btn-outline-warning me-1';
-        updateButton.innerHTML = '<i class="fas fa-sync-alt"></i> Cập nhật PDF';
-        updateButton.addEventListener('click', () => prepareProjectFolderUpdate(project.id));
-        const assetsButton = document.createElement('button');
-        assetsButton.type = 'button';
-        assetsButton.className = 'btn btn-sm btn-outline-danger';
-        assetsButton.innerHTML = '<i class="fas fa-file-pdf"></i> PDF';
-        assetsButton.addEventListener('click', () => openProjectAssets(project.id));
-        const reportActions = document.createElement('div');
-        reportActions.className = 'dropdown d-inline-block ms-1';
-        const reportActionsButton = document.createElement('button');
-        reportActionsButton.type = 'button';
-        reportActionsButton.className = 'btn btn-sm btn-success dropdown-toggle';
-        reportActionsButton.dataset.bsToggle = 'dropdown';
-        reportActionsButton.setAttribute('aria-expanded', 'false');
-        reportActionsButton.innerHTML = '<i class="fas fa-folder-open"></i> Hồ sơ / Xuất';
-        const reportActionsMenu = document.createElement('ul');
-        reportActionsMenu.className = 'dropdown-menu dropdown-menu-end';
-        const appendAction = (label, icon, handler, className = '') => {
-            const item = document.createElement('li');
-            const button = document.createElement('button');
-            button.type = 'button';
-            button.className = `dropdown-item ${className}`.trim();
-            button.innerHTML = `<i class="fas ${icon} me-2"></i>${label}`;
-            button.addEventListener('click', handler);
-            item.appendChild(button);
-            reportActionsMenu.appendChild(item);
-            return button;
+        const buildActionDropdown = (label, icon, buttonClass, actions) => {
+            const dropdown = document.createElement('div');
+            dropdown.className = 'dropdown d-inline-block ms-1';
+            const toggle = document.createElement('button');
+            toggle.type = 'button';
+            toggle.className = `btn btn-sm ${buttonClass} dropdown-toggle`;
+            toggle.dataset.bsToggle = 'dropdown';
+            toggle.setAttribute('aria-expanded', 'false');
+            toggle.innerHTML = `<i class="fas ${icon}"></i> ${label}`;
+            const menu = document.createElement('ul');
+            menu.className = 'dropdown-menu dropdown-menu-end';
+            actions.forEach(action => {
+                if (action.divider) {
+                    const divider = document.createElement('li');
+                    divider.innerHTML = '<hr class="dropdown-divider">';
+                    menu.appendChild(divider);
+                    return;
+                }
+                const item = document.createElement('li');
+                const button = document.createElement('button');
+                button.type = 'button';
+                button.className = `dropdown-item ${action.className || ''}`.trim();
+                button.innerHTML = `<i class="fas ${action.icon} me-2"></i>${action.label}`;
+                button.addEventListener('click', action.handler);
+                if (action.trackExport) button.dataset.projectExportId = String(project.id);
+                item.appendChild(button);
+                menu.appendChild(item);
+            });
+            dropdown.append(toggle, menu);
+            return dropdown;
         };
-        appendAction(
-            'Xem kiểm duyệt hồ sơ',
-            'fa-search',
-            () => openProjectReports(project.id, 'review'),
+        const documentActions = buildActionDropdown(
+            'Cập nhật tài liệu',
+            'fa-file-circle-plus',
+            'btn-outline-warning',
+            [
+                {
+                    label: 'Thêm / cập nhật PDF',
+                    icon: 'fa-sync-alt',
+                    handler: () => prepareProjectFolderUpdate(project.id),
+                },
+                {
+                    label: 'Quản lý / xóa PDF',
+                    icon: 'fa-file-pdf',
+                    handler: () => openProjectAssets(project.id),
+                },
+                {divider: true},
+                {
+                    label: 'Xóa dự án',
+                    icon: 'fa-trash',
+                    handler: () => deleteProject(project),
+                    className: 'text-danger fw-bold',
+                },
+            ],
         );
-        appendAction(
-            'Xem hồ sơ hoàn chỉnh',
-            'fa-check-circle',
-            () => openProjectReports(project.id, 'completed'),
+        const reviewActions = buildActionDropdown(
+            'Kiểm duyệt',
+            'fa-clipboard-check',
+            'btn-success',
+            [
+                {
+                    label: 'Hồ sơ hoàn chỉnh',
+                    icon: 'fa-check-circle',
+                    handler: () => openProjectReports(project.id, 'completed'),
+                },
+                {
+                    label: 'Kiểm duyệt',
+                    icon: 'fa-search',
+                    handler: () => openProjectReports(project.id, 'review'),
+                },
+            ],
         );
-        const divider = document.createElement('li');
-        divider.innerHTML = '<hr class="dropdown-divider">';
-        reportActionsMenu.appendChild(divider);
-        const completedExportButton = appendAction(
-            'Xuất hồ sơ hoàn chỉnh',
+        const exportActions = buildActionDropdown(
+            'Xuất bản',
             'fa-file-export',
-            () => exportProjectReports(project.id, false),
+            'btn-outline-success',
+            [
+                {
+                    label: 'Xuất toàn bộ',
+                    icon: 'fa-box-archive',
+                    handler: () => exportProjectReports(project.id, true),
+                    className: 'fw-bold',
+                    trackExport: true,
+                },
+                {
+                    label: 'Chỉ xuất hồ sơ đã kiểm duyệt',
+                    icon: 'fa-circle-check',
+                    handler: () => exportProjectReports(project.id, false),
+                    trackExport: true,
+                },
+            ],
         );
-        completedExportButton.dataset.projectExportId = String(project.id);
-        const allExportButton = appendAction(
-            'Xuất toàn bộ',
-            'fa-file-export',
-            () => exportProjectReports(project.id, true),
-            'fw-bold',
-        );
-        allExportButton.dataset.projectExportId = String(project.id);
-        const deleteDivider = document.createElement('li');
-        deleteDivider.innerHTML = '<hr class="dropdown-divider">';
-        reportActionsMenu.appendChild(deleteDivider);
-        appendAction(
-            'Xóa dự án',
-            'fa-trash',
-            () => deleteProject(project),
-            'text-danger fw-bold',
-        );
-        reportActions.append(reportActionsButton, reportActionsMenu);
-        actionCell.append(membersButton, updateButton, assetsButton, reportActions);
+        actionCell.append(membersButton, documentActions, reviewActions, exportActions);
         body.appendChild(row);
     });
 }
@@ -378,10 +451,15 @@ function cancelProjectFolderUpdate() {
     setProjectUploadStatus('');
 }
 
-function renderProjectMemberEditor(containerId, users, selectedUserIds, className) {
+function renderProjectMemberEditor(containerId, users, selectedUserIds, className, reportStats = null) {
     const container = document.getElementById(containerId);
     if (!container) return;
     const selected = new Set((selectedUserIds || []).map(Number));
+    const showReportStats = Array.isArray(reportStats);
+    const statsByUser = new Map(
+        (Array.isArray(reportStats) ? reportStats : [])
+            .map(item => [Number(item.user_id), item]),
+    );
     container.replaceChildren();
     if (!users.length) {
         const empty = document.createElement('span');
@@ -402,7 +480,20 @@ function renderProjectMemberEditor(containerId, users, selectedUserIds, classNam
         const label = document.createElement('label');
         label.className = 'form-check-label';
         label.htmlFor = input.id;
-        label.textContent = `${user.username}${user.role === 'admin' ? ' (Admin)' : ''}`;
+        const name = document.createElement('span');
+        name.textContent = `${user.username}${user.role === 'admin' ? ' (Admin)' : ''}`;
+        label.appendChild(name);
+        if (showReportStats) {
+            const stats = statsByUser.get(Number(user.id)) || {};
+            const details = document.createElement('small');
+            details.className = 'd-block text-muted';
+            details.textContent = [
+                `Lỗi ${Number(stats.error_reports || 0)}`,
+                `Chờ duyệt ${Number(stats.pending_review_reports || 0)}`,
+                `Tổng ${Number(stats.total_reports || 0)}`,
+            ].join(' / ');
+            label.appendChild(details);
+        }
         wrapper.append(input, label);
         container.appendChild(wrapper);
     });
@@ -418,6 +509,7 @@ function openProjectMembers(projectId) {
         projectManagementUsers.filter(user => user.role !== 'admin'),
         project.input_user_ids,
         'project-member-input',
+        project.member_report_stats,
     );
     renderProjectMemberEditor(
         'projectMembersReviewerList',
@@ -434,10 +526,18 @@ function checkedMemberEditorIds(className) {
         .filter(Number.isInteger);
 }
 
+function formatProjectMemberDistribution(rows) {
+    return (rows || []).map(row => {
+        const user = projectManagementUsers.find(item => Number(item.id) === Number(row.user_id));
+        const username = user?.username || `#${Number(row.user_id)}`;
+        return `${username}: ${Number(row.case_count || 0)} folder / ${Number(row.pdf_count || 0)} PDF`;
+    }).join('\n');
+}
+
 async function saveProjectMembers() {
     const projectId = Number(document.getElementById('projectMembersProjectId')?.value || 0);
     if (!projectId) return;
-    if (!confirm('Lưu danh sách nhân sự và tự động chuyển nguyên hồ sơ của những người bị gỡ?')) return;
+    if (!confirm('Lưu nhân sự và tự động phân chia lại phần nhập, kiểm tra theo danh sách mới?')) return;
     const button = document.getElementById('saveProjectMembersButton');
     if (button) button.disabled = true;
     try {
@@ -452,8 +552,9 @@ async function saveProjectMembers() {
         if (!response) return;
         const result = response.data || {};
         alert(
-            `Đã cập nhật. Chuyển ${result.input_cases_transferred || 0} hồ sơ nhập, `
-            + `${result.reviewer_cases_transferred || 0} hồ sơ kiểm và ${result.submissions_transferred || 0} báo cáo.`,
+            `Đã lưu và phân chia lại.\n\nNgười nhập:\n${formatProjectMemberDistribution(result.input_distribution) || 'Chưa có nhân sự'}\n\n`
+            + `Người kiểm tra:\n${formatProjectMemberDistribution(result.reviewer_distribution) || 'Chưa có nhân sự'}\n\n`
+            + `Đã chuyển ${result.input_cases_transferred || 0} folder nhập và ${result.reviewer_cases_transferred || 0} folder kiểm tra.`,
         );
         bootstrap.Modal.getInstance(document.getElementById('projectMembersModal'))?.hide();
         await loadProjectList();
@@ -601,7 +702,7 @@ function renderProjectReportRows(items, pagination) {
     }
     items.forEach(item => {
         const row = document.createElement('tr');
-        if (item.has_errors || item.status === 'rejected') row.classList.add('table-danger');
+        if (item.has_errors) row.classList.add('table-danger');
         appendProjectCell(row, String(Number(item.serial_number) || ''), 'text-center fw-semibold');
         appendProjectCell(row, item.template || '');
         appendProjectCell(row, item.created_at || '', 'text-nowrap');
@@ -625,15 +726,15 @@ function renderProjectReportRows(items, pagination) {
 
         const statusCell = appendProjectCell(row, '', 'text-center');
         const badge = document.createElement('span');
-        badge.className = item.status === 'approved'
+        badge.className = item.status === 'completed'
             ? 'badge bg-success'
-            : item.status === 'rejected'
-                ? 'badge bg-danger'
+            : item.status === 'pending_input_confirmation'
+                ? 'badge bg-info text-dark'
                 : 'badge bg-warning text-dark';
-        badge.textContent = item.status === 'approved'
-            ? 'Đã duyệt'
-            : item.status === 'rejected'
-                ? 'Báo lỗi'
+        badge.textContent = item.status === 'completed'
+            ? 'Hoàn thành'
+            : item.status === 'pending_input_confirmation'
+                ? 'Chờ người nhập xác nhận'
                 : 'Chờ duyệt';
         statusCell.appendChild(badge);
         if (item.viewer) {
@@ -655,7 +756,7 @@ function renderProjectReportRows(items, pagination) {
             const approveButton = document.createElement('button');
             approveButton.type = 'button';
             approveButton.className = 'btn btn-sm btn-success me-1';
-            approveButton.innerHTML = '<i class="fas fa-check"></i> Duyệt';
+            approveButton.innerHTML = '<i class="fas fa-check"></i> Xác nhận kiểm duyệt';
             approveButton.addEventListener('click', () => approveProjectSubmission(item.id));
             actionCell.appendChild(approveButton);
         } else {
@@ -783,7 +884,7 @@ async function approveProjectSubmission(submissionId) {
 }
 
 async function reopenProjectSubmission(submissionId) {
-    if (!confirm('Chuyển hồ sơ đã duyệt này về trạng thái Chờ duyệt?')) return;
+    if (!confirm('Chuyển hồ sơ này về trạng thái Chờ duyệt?')) return;
     const response = await apiCall(`/api/submissions/${Number(submissionId)}/reopen-review`, {method: 'PUT'});
     if (!response || response.status !== 'ok') return;
     await Promise.all([reloadProjectReports(), loadProjectList()]);
@@ -933,7 +1034,7 @@ async function uploadOneProjectFile(session, fileInfo, fileByPath, progressState
         const chunk = file.slice(offset, Math.min(file.size, offset + session.chunk_size_bytes));
         let responseData = null;
         let lastError = null;
-        for (let attempt = 1; attempt <= 3; attempt += 1) {
+        for (let attempt = 1; attempt <= 5; attempt += 1) {
             try {
                 const response = await authFetch(
                     `/api/project-upload-sessions/${encodeURIComponent(session.id)}/files/${Number(fileInfo.file_id)}`,
@@ -945,13 +1046,28 @@ async function uploadOneProjectFile(session, fileInfo, fileByPath, progressState
                 );
                 if (!response) throw new Error('Phiên đăng nhập đã hết hạn');
                 responseData = await response.json().catch(() => ({}));
+                if (response.status === 429 && attempt < 5) {
+                    const retryAfterSeconds = Math.max(
+                        1,
+                        Number(response.headers.get('Retry-After') || 1),
+                    );
+                    setProjectUploadStatus(
+                        `Máy chủ đang điều tiết tốc độ; tự tiếp tục sau ${retryAfterSeconds} giây...`,
+                        'warning',
+                    );
+                    await new Promise(resolve => setTimeout(
+                        resolve,
+                        retryAfterSeconds * 1000,
+                    ));
+                    continue;
+                }
                 if (!response.ok) {
                     throw new Error(formatApiErrorDetail(responseData.detail || responseData.message));
                 }
                 break;
             } catch (error) {
                 lastError = error;
-                if (attempt < 3) await new Promise(resolve => setTimeout(resolve, attempt * 500));
+                if (attempt < 5) await new Promise(resolve => setTimeout(resolve, attempt * 500));
             }
         }
         if (!responseData || responseData.status !== 'ok') throw lastError || new Error('Không tải được chunk');

@@ -15,12 +15,20 @@ from server.models import (
     ProjectMember,
     ProjectReportUnit,
     Submission,
+    SubmissionQualityAssessment,
     Template,
     User,
 )
-from server.routers.projects import ProjectCreateRequest, api_create_project, router
+from server.routers.projects import (
+    ProjectCreateRequest,
+    ProjectStatusUpdateRequest,
+    api_create_project,
+    api_update_project_status,
+    router,
+)
 from server.services import project_service
-from server.services.project_service import create_project, list_projects
+from server.services.project_service import create_project, list_projects, update_project_status
+from server.services.project_status_service import ensure_project_status_schema
 
 
 @pytest.fixture()
@@ -88,6 +96,7 @@ def test_create_project_uses_folder_name_and_allows_overlapping_roles(database):
     _, worker, reviewer, project = create_ready_project(database)
 
     assert project.name == "Du an A"
+    assert project.status == "new"
     assert project.root_folder_name == "Du an A"
     assert project.template_filename_snapshot.startswith("snapshot-")
     assert json.loads(project.form_schema_json_snapshot) == [{"category": "Thông tin"}]
@@ -199,7 +208,7 @@ def test_project_listing_scopes_employee_and_calculates_metrics(database):
             template_id=project.template_id,
             created_by_user_id=worker.id,
             assigned_document_id=document.id,
-            status="approved",
+            status="completed",
         ),
     ])
     database.commit()
@@ -224,6 +233,101 @@ def test_project_listing_scopes_employee_and_calculates_metrics(database):
     assert list_projects(database, current_user={"id": admin.id, "role": "admin"})[0]["id"] == project.id
 
 
+def test_admin_project_listing_includes_quality_stats_by_original_submitter(database):
+    admin, worker, reviewer, project = create_ready_project(database)
+    case_row = ProjectCase(
+        project_id=project.id,
+        case_key="quality",
+        display_name="quality",
+        assigned_input_user_id=reviewer.id,
+    )
+    database.add(case_row)
+    database.flush()
+    report = ProjectReportUnit(
+        project_id=project.id,
+        case_id=case_row.id,
+        report_key="quality/report",
+        display_name="quality report",
+    )
+    document = AssignedDocument(
+        original_filename="quality.pdf",
+        uuid_filename="quality-stats.pdf",
+        assigned_to_user_id=reviewer.id,
+        template_id=project.template_id,
+        status="completed",
+    )
+    database.add_all([report, document])
+    database.flush()
+    database.add(ProjectDocumentAsset(
+        project_id=project.id,
+        case_id=case_row.id,
+        report_unit_id=report.id,
+        assigned_document_id=document.id,
+        relative_path="quality/report/quality.pdf",
+        normalized_relative_path="quality/report/quality.pdf",
+        original_filename="quality.pdf",
+        storage_filename="quality-stats.pdf",
+        content_sha256="b" * 64,
+        byte_size=10,
+    ))
+    draft = Submission(
+        data_json='{"col_0": "draft"}',
+        template_id=project.template_id,
+        created_by_user_id=worker.id,
+        assigned_document_id=document.id,
+        status="draft",
+    )
+    pending = Submission(
+        data_json='{"col_0": "pending"}',
+        template_id=project.template_id,
+        created_by_user_id=reviewer.id,
+        assigned_document_id=document.id,
+        status="pending_review",
+    )
+    approved = Submission(
+        data_json='{"col_0": "approved"}',
+        template_id=project.template_id,
+        created_by_user_id=reviewer.id,
+        assigned_document_id=document.id,
+        status="completed",
+    )
+    database.add_all([draft, pending, approved])
+    database.flush()
+    database.add_all([
+        SubmissionQualityAssessment(
+            submission_id=pending.id,
+            input_user_id=worker.id,
+            baseline_data_json=pending.data_json,
+            visible_field_count=1,
+        ),
+        SubmissionQualityAssessment(
+            submission_id=approved.id,
+            input_user_id=worker.id,
+            baseline_data_json=approved.data_json,
+            visible_field_count=1,
+            changed_field_count=1,
+            is_error_report=True,
+        ),
+    ])
+    database.commit()
+
+    admin_project = list_projects(
+        database,
+        current_user={"id": admin.id, "role": "admin"},
+    )[0]
+    assert admin_project["member_report_stats"] == [{
+        "user_id": worker.id,
+        "error_reports": 1,
+        "pending_review_reports": 1,
+        "total_reports": 3,
+    }]
+    employee_project = list_projects(
+        database,
+        current_user={"id": worker.id, "role": "user"},
+    )[0]
+    assert employee_project["member_report_stats"] == []
+
+
 def test_project_routes_and_direct_create_endpoint(database):
     admin, worker, _, template = seed_users_and_template(database)
     routes = {
@@ -234,6 +338,7 @@ def test_project_routes_and_direct_create_endpoint(database):
     assert ("/api/projects", "POST") in routes
     assert ("/api/projects", "GET") in routes
     assert ("/api/projects/mine", "GET") in routes
+    assert ("/api/projects/{project_id}/status", "PUT") in routes
 
     response = api_create_project(
         ProjectCreateRequest(
@@ -247,4 +352,100 @@ def test_project_routes_and_direct_create_endpoint(database):
         db=database,
     )
     assert response["status"] == "ok"
-    assert database.get(Project, response["project_id"]).report_level is None
+    created = database.get(Project, response["project_id"])
+    assert created.report_level is None
+    assert created.status == "new"
+
+
+def test_project_status_update_validates_and_persists(database):
+    admin, _, _, project = create_ready_project(database)
+
+    response = api_update_project_status(
+        project.id,
+        ProjectStatusUpdateRequest(status="in_progress"),
+        current_user={"id": admin.id, "role": "admin"},
+        db=database,
+    )
+    assert response == {"status": "ok", "data": {"id": project.id, "status": "in_progress"}}
+    assert database.get(Project, project.id).status == "in_progress"
+
+    with pytest.raises(ValueError):
+        ProjectStatusUpdateRequest(status="ready")
+    with pytest.raises(HTTPException, match="không hợp lệ"):
+        update_project_status(database, project_id=project.id, status="ready")
+
+
+def test_project_cannot_complete_until_all_required_reports_are_completed(database):
+    _, worker, _, project = create_ready_project(database)
+    case_row = ProjectCase(
+        project_id=project.id,
+        case_key="completion-gate",
+        display_name="completion-gate",
+        assigned_input_user_id=worker.id,
+    )
+    database.add(case_row)
+    database.flush()
+    report = ProjectReportUnit(
+        project_id=project.id,
+        case_id=case_row.id,
+        report_key="completion-gate/report",
+        display_name="report",
+    )
+    document = AssignedDocument(
+        original_filename="completion-gate.pdf",
+        uuid_filename="completion-gate.pdf",
+        assigned_to_user_id=worker.id,
+        template_id=project.template_id,
+        status="completed",
+    )
+    database.add_all([report, document])
+    database.flush()
+    database.add(ProjectDocumentAsset(
+        project_id=project.id,
+        case_id=case_row.id,
+        report_unit_id=report.id,
+        assigned_document_id=document.id,
+        relative_path="completion-gate/report/document.pdf",
+        normalized_relative_path="completion-gate/report/document.pdf",
+        original_filename="completion-gate.pdf",
+        storage_filename="completion-gate-storage.pdf",
+        content_sha256="c" * 64,
+        byte_size=10,
+    ))
+    submission = Submission(
+        data_json=json.dumps({"_pdf_uuid": document.uuid_filename}),
+        template_id=project.template_id,
+        created_by_user_id=worker.id,
+        assigned_document_id=document.id,
+        status="pending_input_confirmation",
+    )
+    database.add(submission)
+    database.commit()
+
+    with pytest.raises(HTTPException) as incomplete:
+        update_project_status(database, project_id=project.id, status="completed")
+
+    assert incomplete.value.status_code == 409
+    assert incomplete.value.detail == {
+        "code": "project_reports_not_completed",
+        "message": "Chỉ được hoàn thành dự án khi tất cả báo cáo bắt buộc đã hoàn thành",
+        "completed_reports": 0,
+        "required_reports": 1,
+    }
+    assert database.get(Project, project.id).status == "new"
+
+    submission.status = "completed"
+    database.commit()
+    result = update_project_status(database, project_id=project.id, status="completed")
+
+    assert result == {"id": project.id, "status": "completed"}
+
+
+def test_project_status_migration_normalizes_legacy_values(database):
+    _, _, _, project = create_ready_project(database)
+    database.query(Project).filter(Project.id == project.id).update({"status": "ready"})
+    database.commit()
+
+    ensure_project_status_schema(database.get_bind())
+
+    assert database.get(Project, project.id).status == "in_progress"

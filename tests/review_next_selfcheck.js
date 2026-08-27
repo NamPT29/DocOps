@@ -8,5 +8,5 @@ assert(source.includes('/api/review-next-submission?'));
 assert(source.includes('function goToNextReviewSubmission()'));
 assert(source.includes('button.dataset.nextId'));
 assert(html.includes('id="reviewNextButton"'));
-assert(html.includes('onclick="goToNextReviewSubmission()"'));
+assert(html.includes('data-action="goToNextReviewSubmission"'));
 console.log('Review next self-check: OK');

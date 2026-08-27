@@ -6,10 +6,6 @@
     <title>Đăng nhập - Số hóa All in One</title>
     <link href="vendor/bootstrap/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="vendor/fontawesome/css/all.min.css">
-    <style>
-        body { background-color: #f0f2f5; height: 100vh; display: flex; align-items: center; justify-content: center; }
-        .login-card { width: 400px; max-width: 90%; border-radius: 10px; border: none; box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
-    </style>
     <link rel="stylesheet" href="windows-ui.css?v=1">
 </head>
 <body class="login-shell">
@@ -21,49 +17,12 @@
         </div>
         <div class="mb-4">
             <label class="form-label text-muted fw-bold">Mật khẩu</label>
-            <input type="password" id="loginPassword" class="form-control form-control-lg" placeholder="Nhập mật khẩu" onkeyup="if(event.key === 'Enter') doLogin()">
+            <input type="password" id="loginPassword" class="form-control form-control-lg" placeholder="Nhập mật khẩu">
         </div>
-        <button class="btn btn-primary btn-lg w-100" onclick="doLogin()">Đăng nhập</button>
-        <p id="loginError" class="text-danger mt-3 text-center" style="display:none;"></p>
+        <button type="button" id="loginButton" class="btn btn-primary btn-lg w-100">Đăng nhập</button>
+        <p id="loginError" class="text-danger mt-3 text-center" hidden></p>
     </div>
 
-    <script>
-        async function doLogin() {
-            const user = document.getElementById('loginUsername').value.trim();
-            const pass = document.getElementById('loginPassword').value.trim();
-            if (!user || !pass) return;
-            
-            try {
-                const res = await fetch('/api/login', {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({username: user, password: pass})
-                });
-                const data = await res.json();
-                
-                if (data.status === 'ok') {
-                    localStorage.setItem('token', data.token);
-                    localStorage.setItem('user', JSON.stringify(data.user));
-                    
-                    if (data.user.role === 'admin') {
-                        window.location.href = '/admin.html';
-                    } else {
-                        window.location.href = '/index.html';
-                    }
-                } else {
-                    document.getElementById('loginError').innerText = data.message;
-                    document.getElementById('loginError').style.display = 'block';
-                }
-            } catch (e) {
-                document.getElementById('loginError').innerText = "Lỗi kết nối máy chủ";
-                document.getElementById('loginError').style.display = 'block';
-            }
-        }
-        
-        // Luôn cho phép đăng nhập lại để người dùng có thể đổi tài khoản.
-        document.addEventListener('DOMContentLoaded', () => {
-            document.getElementById('loginUsername').focus();
-        });
-    </script>
+    <script src="login.js?v=1"></script>
 </body>
 </html>

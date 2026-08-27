@@ -235,18 +235,24 @@ function appendQueueFileRow(fileQueueList, file, index) {
     btn.style.fontSize = '0.9rem';
     btn.title = file.relative_path || file.name;
 
+    const reviewStatus = typeof file.review_status === 'string' ? file.review_status : '';
+    const isReviewFile = reviewStatus.length > 0;
+    const isCompleted = isReviewFile ? reviewStatus === 'completed' : file.completed === true;
     const statusBadge = document.createElement('span');
-    statusBadge.className = file.completed
+    const isAwaitingInput = reviewStatus === 'pending_input_confirmation';
+    statusBadge.className = isCompleted
         ? 'badge bg-success me-2'
-        : 'badge bg-secondary me-2';
-    statusBadge.textContent = file.completed ? 'Đã nhập' : 'Chưa nhập';
+        : (isAwaitingInput ? 'badge bg-info text-dark me-2' : (isReviewFile ? 'badge bg-warning text-dark me-2' : 'badge bg-secondary me-2'));
+    statusBadge.textContent = isReviewFile
+        ? (isCompleted ? 'Hoàn thành' : (isAwaitingInput ? 'Chờ người nhập xác nhận' : 'Chờ kiểm duyệt'))
+        : (isCompleted ? 'Đã nhập' : 'Chưa nhập');
 
     const icon = document.createElement('i');
     icon.className = 'fas fa-file-pdf text-danger me-2';
     const textSpan = document.createElement('span');
     textSpan.className = 'text-truncate flex-grow-1 text-start';
     textSpan.innerText = getQueueDocumentName(file);
-    if (file.completed) textSpan.classList.add('text-success', 'text-decoration-line-through');
+    if (isCompleted) textSpan.classList.add('text-success', 'text-decoration-line-through');
 
     const removeBtn = document.createElement('button');
     removeBtn.type = 'button';
@@ -281,7 +287,7 @@ function appendQueueFileRow(fileQueueList, file, index) {
     btn.appendChild(removeBtn);
     if (iframeCurrentIndex === index) {
         btn.classList.add('active');
-        if (file.completed) textSpan.classList.remove('text-success');
+        if (isCompleted) textSpan.classList.remove('text-success');
     }
     btn.onclick = () => selectFileFromQueue(index);
     fileQueueList.appendChild(btn);
@@ -658,6 +664,7 @@ function loadReviewFolderFiles(folderFiles, selectedUuid) {
             template_id: file.template_id || null,
             template_name: file.template_name || null,
             submission_id: file.submission_id || null,
+            review_status: file.review_status || null,
             temporary_view: true,
         });
     });

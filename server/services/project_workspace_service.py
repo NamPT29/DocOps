@@ -10,6 +10,7 @@ from server.models import (
     AssignedDocumentReviewAssignment,
 )
 from server.repositories.project_workspace_repository import ProjectWorkspaceRepository
+from server.repositories.template_repository import TemplateRepository
 
 
 def _project_folder_group(project_id, case_key):
@@ -36,15 +37,17 @@ def sync_project_assets_to_documents(db, *, project_id):
         if asset.assigned_document_id is not None
     }
     statuses_by_document = repository.submission_statuses_by_document(linked_document_ids)
+    documents_by_id = repository.documents_by_ids(linked_document_ids)
+    paths_by_document = repository.document_paths_by_ids(linked_document_ids)
+    folders_by_document = repository.document_folders_by_ids(linked_document_ids)
+    review_assignments_by_document = (
+        repository.document_review_assignments_by_ids(linked_document_ids)
+    )
     created = 0
     updated = 0
 
     for asset, case_row in rows:
-        document = (
-            repository.get_document(asset.assigned_document_id)
-            if asset.assigned_document_id is not None
-            else None
-        )
+        document = documents_by_id.get(asset.assigned_document_id)
         if asset.assigned_document_id is not None and document is None:
             asset.assigned_document_id = None
 
@@ -61,6 +64,7 @@ def sync_project_assets_to_documents(db, *, project_id):
             db.flush()
             asset.assigned_document_id = document.id
             statuses_by_document[document.id] = []
+            documents_by_id[document.id] = document
             created += 1
 
         if document is None:
@@ -75,44 +79,48 @@ def sync_project_assets_to_documents(db, *, project_id):
             statuses_by_document.get(document.id, []),
         )
 
-        path = repository.get_document_path(document.id)
+        path = paths_by_document.get(document.id)
         if path:
             path.relative_path = asset.relative_path
         else:
-            repository.add_document_path(
+            path = repository.add_document_path(
                 AssignedDocumentPath(
                     document_id=document.id,
                     relative_path=asset.relative_path,
                     upload_id=f"project-asset-{asset.id}",
                 )
             )
+            paths_by_document[document.id] = path
 
         folder_group = _project_folder_group(project.id, case_row.case_key)
-        folder = repository.get_document_folder(document.id)
+        folder = folders_by_document.get(document.id)
         if folder:
             folder.folder_group = folder_group
         else:
-            repository.add_document_folder(
+            folder = repository.add_document_folder(
                 AssignedDocumentFolder(
                     document_id=document.id,
                     folder_group=folder_group,
                 )
             )
+            folders_by_document[document.id] = folder
 
-        review_assignment = repository.get_document_review_assignment(document.id)
+        review_assignment = review_assignments_by_document.get(document.id)
         reviewer_user_id = case_row.assigned_reviewer_user_id
         if reviewer_user_id is None:
             if review_assignment:
                 repository.delete_document_review_assignment(review_assignment)
+                review_assignments_by_document.pop(document.id, None)
         elif review_assignment:
             review_assignment.reviewer_user_id = reviewer_user_id
         else:
-            repository.add_document_review_assignment(
+            review_assignment = repository.add_document_review_assignment(
                 AssignedDocumentReviewAssignment(
                     document_id=document.id,
                     reviewer_user_id=reviewer_user_id,
                 )
             )
+            review_assignments_by_document[document.id] = review_assignment
         updated += 1
 
     db.flush()
@@ -138,11 +146,29 @@ def get_project_workspace(db, *, project_id, current_user):
         config = json.loads(project.template_config_json_snapshot or "{}")
     except (TypeError, ValueError):
         config = {}
+    if not isinstance(config, dict):
+        config = {}
+
+    template = TemplateRepository(db).get(project.template_id)
+    if template:
+        try:
+            current_template_config = json.loads(template.config_json or "{}")
+        except (TypeError, ValueError):
+            current_template_config = {}
+        if isinstance(current_template_config, dict):
+            # Keep the project snapshot as a fallback, but always let the
+            # template's current configuration win. Backend validation also
+            # reads the current template, so the workspace must use the same
+            # required/hidden/readonly/path rules.
+            config.update(current_template_config)
 
     rows = repository.list_input_workspace_assets(project.id, current_user["id"])
-    submission_summary = repository.submission_summary_by_report({
-        report.id for _asset, _case_row, report, _document in rows
-    })
+    document_ids = {
+        document.id
+        for _asset, _case_row, _report, document in rows
+        if document is not None
+    }
+    submission_statuses = repository.submission_statuses_by_document(document_ids)
     files = []
     for asset, case_row, report, document in rows:
         files.append({
@@ -157,7 +183,10 @@ def get_project_workspace(db, *, project_id, current_user):
             "report_name": report.display_name,
             "template_id": project.template_id,
             "template_name": project.template_name_snapshot,
-            "entered": submission_summary[report.id]["submission_count"] > 0,
+            "entered": bool(
+                document is not None
+                and submission_statuses.get(document.id)
+            ),
         })
 
     return {

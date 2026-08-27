@@ -8,24 +8,25 @@ from server.services.excel_service import get_ma_xa_mapping, get_don_vi_do_mappi
 from server.services.address_service import process_address
 from server.routers.auth import get_current_user
 from server.repositories import TemplateRepository
+from server.services.template_cache_service import (
+    template_artifact_cache,
+    template_file_version,
+)
 
 router = APIRouter(prefix="/api/templates", tags=["processing"])
 class ProcessFieldRequest(BaseModel):
     field_name: str
     value: str
 
-# In-memory cache to avoid reading Excel file on every keystroke
-MAPPING_CACHE = {}
+# Backwards-compatible handle for local diagnostics and existing test cleanup.
+MAPPING_CACHE = template_artifact_cache.local_cache
 
 
 def invalidate_mappings(template_id: int) -> None:
-    MAPPING_CACHE.pop(template_id, None)
+    template_artifact_cache.invalidate(template_id)
 
 
 def get_mappings(template_id: int, db: Session):
-    if template_id in MAPPING_CACHE:
-        return MAPPING_CACHE[template_id]
-        
     template = TemplateRepository(db).get(template_id)
     if not template:
         raise HTTPException(status_code=404, detail="Template not found")
@@ -33,15 +34,17 @@ def get_mappings(template_id: int, db: Session):
     file_path = os.path.join("templates", template.filename)
     if not os.path.exists(file_path):
         raise HTTPException(status_code=404, detail="Template file not found")
-        
-    ma_xa = get_ma_xa_mapping(file_path)
-    don_vi = get_don_vi_do_mapping(file_path)
-    
-    MAPPING_CACHE[template_id] = {
-        "ma_xa": ma_xa,
-        "don_vi": don_vi
-    }
-    return MAPPING_CACHE[template_id]
+
+    file_version = template_file_version(file_path)
+    return template_artifact_cache.get_or_compute(
+        "address_mappings",
+        template_id,
+        file_version,
+        lambda: {
+            "ma_xa": get_ma_xa_mapping(file_path),
+            "don_vi": get_don_vi_do_mapping(file_path),
+        },
+    )
 
 @router.post("/{template_id}/process-field")
 def api_process_field(template_id: int, req: ProcessFieldRequest, current_user: dict = Depends(get_current_user), db: Session = Depends(get_db)):

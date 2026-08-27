@@ -1,9 +1,11 @@
 from fastapi import APIRouter, Depends, HTTPException, Header, Request
 from pydantic import BaseModel, Field
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 import hashlib
 import hmac
 import jwt
+import logging
 import os
 import secrets
 from typing import Literal
@@ -11,19 +13,44 @@ from datetime import datetime, timedelta, timezone
 from server.database import get_db, SessionLocal
 from server.models import User
 from server.repositories import UserRepository
-from server.services.login_rate_limit_service import LoginRateLimiter
+from server.services.login_rate_limit_service import (
+    DatabaseLoginRateLimiter,
+    LoginRateLimiter,
+    RateLimitBackendUnavailable,
+    RedisLoginRateLimiter,
+)
+from server.services.personnel_statistics_service import get_personnel_statistics
 from server.settings import settings
 
 router = APIRouter(prefix="/api", tags=["auth"])
+logger = logging.getLogger("server.auth")
 
 SECRET_KEY = settings.secret_key
 
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 1440 # 24 hours
-login_rate_limiter = LoginRateLimiter(
-    settings.login_max_failures,
-    settings.login_failure_window_seconds,
-)
+def _create_login_rate_limiter():
+    if not settings.redis_url:
+        return DatabaseLoginRateLimiter(
+            settings.login_max_failures,
+            settings.login_failure_window_seconds,
+        )
+    import redis
+
+    client = redis.Redis.from_url(
+        settings.redis_url,
+        socket_connect_timeout=1,
+        socket_timeout=1,
+        health_check_interval=30,
+    )
+    return RedisLoginRateLimiter(
+        settings.login_max_failures,
+        settings.login_failure_window_seconds,
+        redis_client=client,
+    )
+
+
+login_rate_limiter = _create_login_rate_limiter()
 
 _SCRYPT_N = 2 ** 14
 _SCRYPT_R = 8
@@ -120,12 +147,28 @@ def get_user_capability_profile(user: User, db: Session) -> dict:
     )
 
 
-def build_user_payload(user: User, db: Session) -> dict:
+def build_user_payload(
+    user: User,
+    db: Session,
+    *,
+    capability_flags: tuple[bool, bool] | None = None,
+) -> dict:
+    full_name = str(getattr(user, "full_name", "") or "").strip()
+    if capability_flags is None:
+        capability_profile = get_user_capability_profile(user, db)
+    else:
+        capability_profile = _capability_profile(
+            user,
+            can_input=capability_flags[0],
+            can_review=capability_flags[1],
+        )
     return {
         "id": user.id,
         "username": user.username,
+        "full_name": full_name or user.username,
+        "phone_number": getattr(user, "phone_number", None),
         "role": user.role,
-        **get_user_capability_profile(user, db),
+        **capability_profile,
     }
 
 
@@ -165,6 +208,7 @@ def init_admin():
             admin = User(
                 username="admin",
                 password=hash_password(initial_password),
+                full_name="admin",
                 role="admin",
             )
             repository.add(admin)
@@ -184,7 +228,13 @@ def api_login(
 ):
     client_host = request.client.host if request.client else "unknown"
     rate_limit_key = f"{client_host}:{req.username.strip().casefold()}"
-    retry_after = login_rate_limiter.retry_after(rate_limit_key)
+    try:
+        retry_after = login_rate_limiter.retry_after(rate_limit_key)
+    except RateLimitBackendUnavailable as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="Dịch vụ bảo vệ đăng nhập tạm thời không khả dụng.",
+        ) from exc
     if retry_after:
         raise HTTPException(
             status_code=429,
@@ -194,7 +244,13 @@ def api_login(
 
     user = UserRepository(db).get_by_username(req.username)
     if not user or not verify_password(req.password, user.password):
-        retry_after = login_rate_limiter.record_failure(rate_limit_key)
+        try:
+            retry_after = login_rate_limiter.record_failure(rate_limit_key)
+        except RateLimitBackendUnavailable as exc:
+            raise HTTPException(
+                status_code=503,
+                detail="Dịch vụ bảo vệ đăng nhập tạm thời không khả dụng.",
+            ) from exc
         if retry_after:
             raise HTTPException(
                 status_code=429,
@@ -203,7 +259,13 @@ def api_login(
             )
         raise HTTPException(status_code=401, detail="Sai tên đăng nhập hoặc mật khẩu")
 
-    login_rate_limiter.reset(rate_limit_key)
+    try:
+        login_rate_limiter.reset(rate_limit_key)
+    except RateLimitBackendUnavailable as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="Dịch vụ bảo vệ đăng nhập tạm thời không khả dụng.",
+        ) from exc
 
     if not user.password.startswith("scrypt$"):
         user.password = hash_password(req.password)
@@ -225,6 +287,8 @@ def api_login(
 class CreateUserRequest(BaseModel):
     username: str
     password: str = Field(min_length=8, max_length=128)
+    full_name: str | None = Field(default=None, max_length=255)
+    phone_number: str | None = Field(default=None, max_length=50)
     role: Literal["admin", "user"] = "user"
 
 @router.post("/users")
@@ -235,6 +299,8 @@ def api_create_user(req: CreateUserRequest, current_user: dict = Depends(get_adm
     user = User(
         username=req.username,
         password=hash_password(req.password),
+        full_name=(req.full_name or "").strip() or req.username,
+        phone_number=(req.phone_number or "").strip() or None,
         role=req.role,
     )
     repository.add(user)
@@ -250,17 +316,39 @@ def api_delete_user(user_id: int, current_user: dict = Depends(get_admin_user), 
     user = repository.get(user_id)
     if not user:
         raise HTTPException(status_code=404, detail="Không tìm thấy người dùng")
-        
+
+    blockers = repository.deletion_blockers(user_id)
+    if blockers:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "Không thể xóa tài khoản vì vẫn còn dữ liệu lịch sử: "
+                f"{', '.join(blockers)}."
+            ),
+        )
+
     try:
         repository.detach_references_and_delete(user)
         db.commit()
         return {"status": "ok"}
-    except Exception:
+    except IntegrityError as exc:
         db.rollback()
-        raise HTTPException(status_code=500, detail="Không thể xóa người dùng")
+        raise HTTPException(
+            status_code=409,
+            detail="Không thể xóa tài khoản vì vẫn còn dữ liệu đang tham chiếu.",
+        ) from exc
+    except Exception as exc:
+        db.rollback()
+        logger.exception("Unexpected error while deleting user", extra={"user_id": user_id})
+        raise HTTPException(status_code=500, detail="Không thể xóa người dùng") from exc
 
 class ChangePasswordRequest(BaseModel):
     new_password: str = Field(min_length=8, max_length=128)
+
+
+class UpdateUserProfileRequest(BaseModel):
+    full_name: str | None = Field(default=None, max_length=255)
+    phone_number: str | None = Field(default=None, max_length=50)
 
 @router.put("/users/{user_id}/password")
 def api_change_user_password(
@@ -278,10 +366,48 @@ def api_change_user_password(
     db.commit()
     return {"status": "ok"}
 
+
+@router.patch("/users/{user_id}")
+def api_update_user_profile(
+    user_id: int,
+    req: UpdateUserProfileRequest,
+    current_user: dict = Depends(get_admin_user),
+    db: Session = Depends(get_db),
+):
+    repository = UserRepository(db)
+    user = repository.get(user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="Không tìm thấy người dùng")
+
+    user.full_name = (req.full_name or "").strip() or user.username
+    user.phone_number = (req.phone_number or "").strip() or None
+    db.commit()
+    return {"status": "ok", "user": build_user_payload(user, db)}
+
 @router.get("/users")
 def api_get_users(current_user: dict = Depends(get_admin_user), db: Session = Depends(get_db)):
-    users = UserRepository(db).list_all()
-    return {"status": "ok", "data": [build_user_payload(user, db) for user in users]}
+    repository = UserRepository(db)
+    users = repository.list_all()
+    capability_flags = repository.capability_flags_map({user.id for user in users})
+    return {
+        "status": "ok",
+        "data": [
+            build_user_payload(
+                user,
+                db,
+                capability_flags=capability_flags[user.id],
+            )
+            for user in users
+        ],
+    }
+
+
+@router.get("/users/personnel-stats")
+def api_get_personnel_statistics(
+    current_user: dict = Depends(get_admin_user),
+    db: Session = Depends(get_db),
+):
+    return {"status": "ok", "data": get_personnel_statistics(db)}
 
 
 @router.get("/me")

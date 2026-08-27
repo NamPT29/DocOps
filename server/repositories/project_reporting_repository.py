@@ -3,9 +3,13 @@ from sqlalchemy import func
 from server.models import Project, ProjectCase, ProjectDocumentAsset, Submission
 
 
-PROJECT_REVIEW_STATUSES = ("pending_review", "rejected")
-PROJECT_COMPLETED_STATUSES = ("approved",)
-PROJECT_EXPORT_ALL_STATUSES = ("pending_review", "approved")
+PROJECT_REVIEW_STATUSES = ("pending_review",)
+PROJECT_COMPLETED_STATUSES = ("completed",)
+PROJECT_EXPORT_ALL_STATUSES = (
+    "pending_review",
+    "pending_input_confirmation",
+    "completed",
+)
 
 
 class ProjectReportingRepository:

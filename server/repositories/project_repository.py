@@ -7,6 +7,7 @@ from server.models import (
     ProjectMember,
     ProjectReportUnit,
     Submission,
+    SubmissionQualityAssessment,
 )
 from server.repositories.base import BaseRepository
 
@@ -62,6 +63,53 @@ class ProjectRepository(BaseRepository[Project]):
             result[project_id][member_role].append(user_id)
         return result
 
+    def member_report_stats_by_project(self, project_ids):
+        result = {project_id: [] for project_id in project_ids}
+        if not project_ids:
+            return result
+
+        attributed_user_id = func.coalesce(
+            SubmissionQualityAssessment.input_user_id,
+            Submission.created_by_user_id,
+        )
+        rows = (
+            self.session.query(
+                ProjectDocumentAsset.project_id,
+                attributed_user_id.label("user_id"),
+                func.sum(
+                    case((SubmissionQualityAssessment.is_error_report.is_(True), 1), else_=0)
+                ).label("error_reports"),
+                func.sum(
+                    case((Submission.status == "pending_review", 1), else_=0)
+                ).label("pending_review_reports"),
+                func.count(Submission.id).label("total_reports"),
+            )
+            .join(
+                Submission,
+                Submission.assigned_document_id
+                == ProjectDocumentAsset.assigned_document_id,
+            )
+            .outerjoin(
+                SubmissionQualityAssessment,
+                SubmissionQualityAssessment.submission_id == Submission.id,
+            )
+            .filter(
+                ProjectDocumentAsset.project_id.in_(project_ids),
+                attributed_user_id.is_not(None),
+            )
+            .group_by(ProjectDocumentAsset.project_id, attributed_user_id)
+            .order_by(ProjectDocumentAsset.project_id, attributed_user_id)
+            .all()
+        )
+        for project_id, user_id, error_reports, pending_reports, total_reports in rows:
+            result[project_id].append({
+                "user_id": int(user_id),
+                "error_reports": int(error_reports or 0),
+                "pending_review_reports": int(pending_reports or 0),
+                "total_reports": int(total_reports or 0),
+            })
+        return result
+
     def metrics_by_project(self, project_ids):
         result = {
             project_id: {
@@ -108,7 +156,7 @@ class ProjectRepository(BaseRepository[Project]):
             self.session.query(
                 ProjectDocumentAsset.report_unit_id.label("report_unit_id"),
                 func.count(Submission.id).label("submission_count"),
-                func.sum(case((Submission.status == "approved", 1), else_=0)).label(
+                func.sum(case((Submission.status == "completed", 1), else_=0)).label(
                     "approved_count"
                 ),
             )

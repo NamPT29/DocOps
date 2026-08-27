@@ -78,7 +78,7 @@ def get_project_submissions(
         submission.id: case_row
         for submission, case_row in rows
     }
-    document_metadata, assignment_map, user_map, template_map = (
+    document_metadata, assignment_map, user_map, template_map, quality_map = (
         SubmissionService._fetch_submission_relations(submissions, db)
     )
     viewer_map = SubmissionViewRepository(db).active_map(
@@ -95,6 +95,7 @@ def get_project_submissions(
             assignment_map,
             user_map,
             template_map,
+            quality_map,
         )
         case_row = case_by_submission_id[submission.id]
         item["folder_path"] = case_row.case_key

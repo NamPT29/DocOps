@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, Header, Request
+from starlette.concurrency import run_in_threadpool
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
@@ -10,7 +11,10 @@ from server.services.project_upload_service import (
     get_upload_session,
     write_upload_chunk,
 )
-from server.services.api_rate_limit_service import enforce_heavy_api_rate_limit
+from server.services.api_rate_limit_service import (
+    enforce_heavy_api_rate_limit,
+    enforce_project_upload_chunk_rate_limit,
+)
 
 
 router = APIRouter(tags=["project-uploads"])
@@ -74,9 +78,13 @@ async def api_upload_project_file_chunk(
     current_user: dict = Depends(get_admin_user),
     db: Session = Depends(get_db),
 ):
-    enforce_heavy_api_rate_limit("project-upload-chunk", current_user["id"])
+    await run_in_threadpool(
+        enforce_project_upload_chunk_rate_limit,
+        current_user["id"],
+    )
     chunk = await request.body()
-    return write_upload_chunk(
+    return await run_in_threadpool(
+        write_upload_chunk,
         db,
         session_id=session_id,
         file_id=file_id,

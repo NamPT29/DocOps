@@ -7,6 +7,8 @@ __pycache__/
 build/
 dist/
 *.spec
+# The application spec is source configuration, not a generated artifact.
+!scan_to_excel.spec
 
 # C extensions
 *.so
@@ -63,6 +65,22 @@ logs/
 # Scratch and temp files
 scratch/
 tai_lieu_mau/~$*.xlsx
+
+# Pytest temporary state
+.pytest_cache/
+.pytest-*/
+pytest-*/
+
+# Local PostgreSQL runtime, database state, and recovery artifacts.
+# Recreate the portable runtime with download_pg.ps1; restore data from pg_dump.
+database_engine/
+postgresql.zip
+pg_pw.txt
+
+# Generated deployment/runtime artifacts
+exports/
+.gitnexus/
+.codex/model-routing-history.jsonl
 
 .agents/
 .grapuco/

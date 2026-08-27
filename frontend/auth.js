@@ -1,5 +1,10 @@
 let currentUser = null;
 let currentToken = null;
+let adminUserData = [];
+
+function userDisplayName(user) {
+    return String(user?.full_name || '').trim() || user?.username || '';
+}
 
 function currentUserCanInput() {
     if (!currentUser) return false;
@@ -52,7 +57,7 @@ async function refreshCurrentUserProfile() {
     currentUser = data.user;
     localStorage.setItem('user', JSON.stringify(currentUser));
     const userNameText = document.getElementById('userNameText');
-    if (userNameText) userNameText.innerText = currentUser.username;
+    if (userNameText) userNameText.innerText = userDisplayName(currentUser);
     return true;
 }
 
@@ -69,7 +74,7 @@ function checkAuth() {
         if (userInfo) userInfo.style.display = 'flex';
         
         const userNameText = document.getElementById('userNameText');
-        if (userNameText) userNameText.innerText = currentUser.username;
+        if (userNameText) userNameText.innerText = userDisplayName(currentUser);
         
         // Try fetching user tasks for KPI if element exists
         // (Moved to handlePostAuthInit)
@@ -120,7 +125,7 @@ async function loadNotifications() {
         return;
     }
     list.innerHTML = notificationItems.map(item => `
-        <button type="button" class="list-group-item list-group-item-action ${item.read_at ? '' : 'fw-semibold bg-light'}" onclick="markNotificationRead(${Number(item.id)})">
+        <button type="button" class="list-group-item list-group-item-action ${item.read_at ? '' : 'fw-semibold bg-light'}" data-auth-action="mark-notification-read" data-notification-id="${Number(item.id)}">
             <div class="d-flex justify-content-between gap-2"><span>${escapeHTML(item.title)}</span><small class="text-muted text-nowrap">${formatNotificationDate(item.created_at)}</small></div>
             <div class="small text-muted mt-1 text-start">${escapeHTML(item.message).replace(/\n/g, '<br>')}</div>
         </button>
@@ -292,32 +297,72 @@ async function apiCall(url, options = {}, errorMessage = "Lỗi kết nối máy
 
 // ---------------- ADMIN LOGIC ----------------
 
+function renderPersonnelStatistics(rows) {
+    const tbody = document.getElementById('personnelStatsTableBody');
+    if (!tbody) return;
+
+    const personnel = Array.isArray(rows) ? rows : [];
+    if (personnel.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="6" class="text-center text-muted py-3">Chưa có dữ liệu nhân sự.</td></tr>';
+        return;
+    }
+
+    tbody.innerHTML = personnel.map(user => {
+        const fullName = escapeHTML(userDisplayName(user));
+        const username = escapeHTML(user.username || '');
+        const activeProjects = Number(user.active_project_count) || 0;
+        const submittedReports = Number(user.submitted_report_count) || 0;
+        const reviewedReports = Number(user.reviewed_report_count) || 0;
+        const inputErrors = Number(user.input_error_report_count) || 0;
+        const reviewerErrors = Number(user.reviewer_error_field_count) || 0;
+        return `
+            <tr>
+                <td><span class="fw-semibold">${fullName}</span><div class="small text-muted">${username}</div></td>
+                <td class="text-center fw-semibold">${activeProjects}</td>
+                <td class="text-center">${submittedReports}</td>
+                <td class="text-center">${reviewedReports}</td>
+                <td class="text-center">${inputErrors ? `<span class="badge bg-danger">${inputErrors}</span>` : '0'}</td>
+                <td class="text-center">${reviewerErrors ? `<span class="badge bg-warning text-dark">${reviewerErrors}</span>` : '0'}</td>
+            </tr>
+        `;
+    }).join('');
+}
+
 async function fetchAdminData() {
     if (currentUser.role !== 'admin') return;
     
-    // Fetch users for table
-    const data = await apiCall('/api/users');
+    const [data, personnelStats] = await Promise.all([
+        apiCall('/api/users'),
+        apiCall('/api/users/personnel-stats'),
+    ]);
+    if (personnelStats) renderPersonnelStatistics(personnelStats.data);
     if (!data) return;
     
     const tbody = document.getElementById('adminUsersTableBody');
     if (tbody) {
+        adminUserData = data.data;
         tbody.innerHTML = '';
         data.data.forEach(u => {
             const safeId = Number(u.id);
             const safeUsername = escapeHTML(u.username);
+            const safeFullName = escapeHTML(userDisplayName(u));
+            const safePhoneNumber = escapeHTML(u.phone_number || '—');
             const badges = [];
             if (u.role === 'admin') badges.push('<span class="badge bg-danger">Admin</span>');
             if (u.can_input) badges.push('<span class="badge bg-primary">Nhập liệu</span>');
             if (u.can_review) badges.push('<span class="badge bg-warning text-dark">Kiểm tra</span>');
             if (badges.length === 0) badges.push('<span class="badge bg-secondary">Chưa phân công</span>');
-            let deleteBtn = safeId === currentUser.id ? '' : `<button class="btn btn-sm btn-danger" onclick="deleteUser(${safeId})"><i class="fas fa-trash"></i> Xóa</button>`;
-            let changePwdBtn = `<button class="btn btn-sm btn-warning ms-1" onclick="openChangePasswordModal(${safeId}, '${safeUsername}')"><i class="fas fa-key"></i> Đổi MK</button>`;
+            let deleteBtn = safeId === currentUser.id ? '' : `<button class="btn btn-sm btn-danger" data-auth-action="delete-user" data-user-id="${safeId}"><i class="fas fa-trash"></i> Xóa</button>`;
+            let changePwdBtn = `<button class="btn btn-sm btn-warning ms-1" data-auth-action="change-user-password" data-user-id="${safeId}" data-username="${safeUsername}"><i class="fas fa-key"></i> Đổi MK</button>`;
+            let editBtn = `<button class="btn btn-sm btn-outline-primary ms-1" data-auth-action="edit-user" data-user-id="${safeId}"><i class="fas fa-user-pen"></i> Sửa</button>`;
             tbody.innerHTML += `
                 <tr>
                     <td>${safeId}</td>
                     <td>${safeUsername}</td>
+                    <td>${safeFullName}</td>
+                    <td>${safePhoneNumber}</td>
                     <td><div class="d-flex flex-wrap gap-1">${badges.join('')}</div></td>
-                    <td>${deleteBtn}${changePwdBtn}</td>
+                    <td>${deleteBtn}${changePwdBtn}${editBtn}</td>
                 </tr>
             `;
         });
@@ -347,6 +392,7 @@ async function submitChangePassword() {
     
     const data = await apiCall(`/api/users/${userId}/password`, {
         method: 'PUT',
+        headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({ new_password: newPassword })
     });
     
@@ -574,17 +620,17 @@ async function fetchDashboardStats() {
     const statsData = await apiCall('/api/documents/stats');
     if (statsData && statsData.user_stats) {
         let totalPendingReview = 0;
-        let totalApproved = 0;
+        let totalCompleted = 0;
         const tbody = document.getElementById('dashUserDetailBody');
         if (tbody) {
             tbody.innerHTML = '';
             const users = statsData.user_stats.filter(u => u.submissions_total > 0 || u.pending > 0 || u.completed > 0);
             if (users.length === 0) {
-                tbody.innerHTML = '<tr><td colspan="8" class="text-center text-muted py-3">Chưa có dữ liệu nhập liệu.</td></tr>';
+                tbody.innerHTML = '<tr><td colspan="7" class="text-center text-muted py-3">Chưa có dữ liệu nhập liệu.</td></tr>';
             } else {
                 users.forEach(u => {
                     totalPendingReview += u.submissions_pending_review || 0;
-                    totalApproved += u.submissions_approved || 0;
+                    totalCompleted += u.submissions_completed || 0;
                     const tr = document.createElement('tr');
                     tr.innerHTML = `
                         <td class="fw-semibold"><i class="fas fa-user text-primary me-1"></i> ${escapeHTML(u.username)}</td>
@@ -592,8 +638,7 @@ async function fetchDashboardStats() {
                         <td class="text-center">${u.completed}</td>
                         <td class="text-center">${u.submissions_draft || 0}</td>
                         <td class="text-center"><span class="badge bg-warning text-dark">${u.submissions_pending_review || 0}</span></td>
-                        <td class="text-center"><span class="badge bg-success">${u.submissions_approved || 0}</span></td>
-                        <td class="text-center">${u.submissions_rejected ? '<span class="badge bg-danger">' + u.submissions_rejected + '</span>' : '0'}</td>
+                        <td class="text-center"><span class="badge bg-success">${u.submissions_completed || 0}</span></td>
                         <td class="text-center fw-bold">${u.submissions_total || 0}</td>
                     `;
                     tbody.appendChild(tr);
@@ -601,9 +646,9 @@ async function fetchDashboardStats() {
             }
         }
         const pendingEl = document.getElementById('dashPendingReview');
-        const approvedEl = document.getElementById('dashApproved');
+        const completedEl = document.getElementById('dashApproved');
         if (pendingEl) pendingEl.textContent = totalPendingReview;
-        if (approvedEl) approvedEl.textContent = totalApproved;
+        if (completedEl) completedEl.textContent = totalCompleted;
     }
 
     // Also load templates dropdown so export/filter works
@@ -652,10 +697,10 @@ async function fetchAdminTemplates() {
                 <td><b>${safeName}</b></td>
                 <td>${safeFilename}</td>
                 <td>
-                    <button class="btn btn-sm btn-outline-primary me-1" onclick="openConfigModal(${safeId}, decodeURIComponent('${encodedName}'))">
+                    <button class="btn btn-sm btn-outline-primary me-1" data-auth-action="configure-template" data-template-id="${safeId}" data-template-name="${encodedName}">
                         <i class="fas fa-cog"></i> Cấu hình
                     </button>
-                    <button class="btn btn-sm btn-outline-danger" onclick="deleteTemplate(${safeId}, decodeURIComponent('${encodedName}'))">
+                    <button class="btn btn-sm btn-outline-danger" data-auth-action="delete-template" data-template-id="${safeId}" data-template-name="${encodedName}">
                         <i class="fas fa-trash"></i> Xóa
                     </button>
                 </td>
@@ -696,6 +741,8 @@ async function uploadTemplate() {
 async function createUser() {
     const u = document.getElementById('newUsername').value.trim();
     const p = document.getElementById('newPassword').value.trim();
+    const fullName = document.getElementById('newFullName').value.trim();
+    const phoneNumber = document.getElementById('newPhoneNumber').value.trim();
     if (!u || !p) return alert("Vui lòng nhập tên và mật khẩu");
     if (p.length < 8) return alert("Mật khẩu phải có ít nhất 8 ký tự");
     const data = await apiCall('/api/users', {
@@ -704,6 +751,8 @@ async function createUser() {
         body: JSON.stringify({
             username: u,
             password: p,
+            full_name: fullName,
+            phone_number: phoneNumber,
         })
     });
     
@@ -712,6 +761,8 @@ async function createUser() {
         alert("Tạo tài khoản thành công!");
         document.getElementById('newUsername').value = '';
         document.getElementById('newPassword').value = '';
+        document.getElementById('newFullName').value = '';
+        document.getElementById('newPhoneNumber').value = '';
         fetchAdminData();
     }
 }
@@ -736,6 +787,32 @@ async function downloadExportResponse(res, fallbackFilename) {
     anchor.click();
     anchor.remove();
     window.URL.revokeObjectURL(url);
+}
+
+function openEditUserModal(userId) {
+    const user = adminUserData.find(item => Number(item.id) === Number(userId));
+    if (!user) return;
+    document.getElementById('editUserId').value = user.id;
+    document.getElementById('editUsername').value = user.username;
+    document.getElementById('editFullName').value = userDisplayName(user);
+    document.getElementById('editPhoneNumber').value = user.phone_number || '';
+    new bootstrap.Modal(document.getElementById('editUserModal')).show();
+}
+
+async function submitEditUser() {
+    const userId = document.getElementById('editUserId').value;
+    const fullName = document.getElementById('editFullName').value.trim();
+    const phoneNumber = document.getElementById('editPhoneNumber').value.trim();
+    const data = await apiCall(`/api/users/${userId}`, {
+        method: 'PATCH',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ full_name: fullName, phone_number: phoneNumber }),
+    });
+    if (!data) return;
+    invalidateUsersCache();
+    bootstrap.Modal.getInstance(document.getElementById('editUserModal')).hide();
+    await fetchAdminData();
+    alert('Đã cập nhật thông tin tài khoản!');
 }
 
 function setExportAllStatus(message, isError = false) {
@@ -863,4 +940,19 @@ document.addEventListener("DOMContentLoaded", () => {
     if (currentToken) {
         handlePostAuthInit();
     }
+});
+
+const AUTH_GENERATED_ACTIONS = Object.freeze({
+    'mark-notification-read': trigger => markNotificationRead(Number(trigger.dataset.notificationId)),
+    'delete-user': trigger => deleteUser(Number(trigger.dataset.userId)),
+    'change-user-password': trigger => openChangePasswordModal(Number(trigger.dataset.userId), trigger.dataset.username),
+    'edit-user': trigger => openEditUserModal(Number(trigger.dataset.userId)),
+    'configure-template': trigger => openConfigModal(Number(trigger.dataset.templateId), decodeURIComponent(trigger.dataset.templateName)),
+    'delete-template': trigger => deleteTemplate(Number(trigger.dataset.templateId), decodeURIComponent(trigger.dataset.templateName)),
+});
+
+document.addEventListener('click', event => {
+    const trigger = event.target?.closest?.('[data-auth-action]');
+    const action = trigger && AUTH_GENERATED_ACTIONS[trigger.dataset.authAction];
+    if (action) action(trigger);
 });

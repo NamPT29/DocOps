@@ -1,17 +1,18 @@
 from __future__ import annotations
 
+import json
 import logging
 import logging.handlers
+import os
 import re
 import time
 import uuid
 from collections.abc import Awaitable, Callable
 from contextvars import ContextVar
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
-
-import jwt
 
 
 _MANAGED_HANDLER_ATTRIBUTE = "_scan_to_excel_managed_handler"
@@ -24,13 +25,12 @@ _BEARER_PATTERN = re.compile(r"(?i)\bbearer\s+[A-Za-z0-9._~+/=-]+")
 _STATE_CHANGING_METHODS = frozenset({"POST", "PUT", "PATCH", "DELETE"})
 _DEFAULT_CONTEXT = {
     "request_id": "-",
-    "user_id": "-",
     "method": "-",
     "path": "-",
     "status_code": "-",
     "duration_ms": "-",
-    "client_ip": "-",
     "response_bytes": "-",
+    "error_type": "-",
 }
 _request_context: ContextVar[dict[str, Any] | None] = ContextVar(
     "request_log_context",
@@ -46,15 +46,25 @@ class LogPaths:
 
 
 class RedactingFormatter(logging.Formatter):
-    """Render a log record and remove common credential representations."""
+    """Render one redacted JSON object per log record."""
 
     def format(self, record: logging.LogRecord) -> str:
-        rendered = super().format(record)
-        rendered = _SENSITIVE_ASSIGNMENT_PATTERN.sub(
+        message = _SENSITIVE_ASSIGNMENT_PATTERN.sub(
             lambda match: f"{match.group(1)}[REDACTED]",
-            rendered,
+            record.getMessage(),
         )
-        return _BEARER_PATTERN.sub("Bearer [REDACTED]", rendered)
+        message = _BEARER_PATTERN.sub("Bearer [REDACTED]", message)
+        payload = {
+            "timestamp": datetime.fromtimestamp(record.created, UTC).isoformat(),
+            "level": record.levelname,
+            "logger": record.name,
+            "message": message,
+            **{
+                name: getattr(record, name, default)
+                for name, default in _DEFAULT_CONTEXT.items()
+            },
+        }
+        return json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
 
 
 class RequestContextFilter(logging.Filter):
@@ -82,10 +92,11 @@ def _log_paths(log_dir: str | Path | None) -> LogPaths:
         if log_dir is not None
         else Path(__file__).resolve().parent.parent / "logs"
     ).resolve()
+    suffix = f".{os.getpid()}" if os.environ.get("MULTIPROCESS_LOGGING") == "1" else ""
     return LogPaths(
-        app=directory / "app.log",
-        error=directory / "error.log",
-        audit=directory / "audit.log",
+        app=directory / f"app{suffix}.log",
+        error=directory / f"error{suffix}.log",
+        audit=directory / f"audit{suffix}.log",
     )
 
 
@@ -103,7 +114,7 @@ def configure_logging(
     log_dir: str | Path | None = None,
     *,
     force: bool = False,
-    level: int = logging.INFO,
+    level: int | str = logging.INFO,
     max_bytes: int = 10 * 1024 * 1024,
     backup_count: int = 5,
 ) -> LogPaths:
@@ -122,14 +133,10 @@ def configure_logging(
         close_managed_logging_handlers()
 
     paths.app.parent.mkdir(parents=True, exist_ok=True)
-    formatter = RedactingFormatter(
-        "%(asctime)s | %(levelname)-8s | %(name)s | "
-        "request_id=%(request_id)s user_id=%(user_id)s "
-        "method=%(method)s path=%(path)s status=%(status_code)s "
-        "duration_ms=%(duration_ms)s client_ip=%(client_ip)s "
-        "bytes=%(response_bytes)s | %(message)s",
-        datefmt="%Y-%m-%d %H:%M:%S",
-    )
+    resolved_level = logging.getLevelNamesMapping().get(str(level).upper(), level)
+    if not isinstance(resolved_level, int):
+        raise ValueError(f"Unsupported logging level: {level}")
+    formatter = RedactingFormatter()
     context_filter = RequestContextFilter()
 
     app_handler = logging.handlers.RotatingFileHandler(
@@ -138,7 +145,7 @@ def configure_logging(
         backupCount=backup_count,
         encoding="utf-8",
     )
-    app_handler.setLevel(level)
+    app_handler.setLevel(resolved_level)
     app_handler.setFormatter(formatter)
     app_handler.addFilter(context_filter)
     app_handler.addFilter(_ExcludeAuditFilter())
@@ -167,7 +174,7 @@ def configure_logging(
     for handler in (app_handler, error_handler, audit_handler):
         setattr(handler, _MANAGED_HANDLER_ATTRIBUTE, True)
         root_logger.addHandler(handler)
-    root_logger.setLevel(level)
+    root_logger.setLevel(resolved_level)
     return paths
 
 
@@ -185,27 +192,10 @@ def _request_id(scope: dict[str, Any]) -> str:
     return uuid.uuid4().hex
 
 
-def _verified_user_id(scope: dict[str, Any], secret_key: str) -> str:
-    authorization = _header_value(scope, b"authorization")
-    if not authorization.startswith("Bearer "):
-        return "-"
-    try:
-        payload = jwt.decode(
-            authorization.split(" ", 1)[1].strip(),
-            secret_key,
-            algorithms=["HS256"],
-        )
-        raw_user_id = payload.get("sub", payload.get("id"))
-        user_id = str(int(raw_user_id))
-    except (jwt.PyJWTError, TypeError, ValueError):
-        return "-"
-    return user_id
-
-
 def _route_path(scope: dict[str, Any]) -> str:
     route = scope.get("route")
     route_path = getattr(route, "path", None)
-    return str(route_path or scope.get("path") or "/")[:1024]
+    return str(route_path or "<unmatched>")[:1024]
 
 
 def request_log_context(
@@ -226,9 +216,8 @@ def request_log_context(
 class RequestLoggingMiddleware:
     """Correlate HTTP requests and emit a separate mutation audit trail."""
 
-    def __init__(self, app: Callable[..., Awaitable[None]], *, secret_key: str):
+    def __init__(self, app: Callable[..., Awaitable[None]]):
         self.app = app
-        self.secret_key = secret_key
         self.request_logger = logging.getLogger("server.http")
         self.audit_logger = logging.getLogger("server.audit")
 
@@ -244,16 +233,14 @@ class RequestLoggingMiddleware:
 
         request_id = _request_id(scope)
         method = str(scope.get("method") or "HTTP").upper()
-        client = scope.get("client") or ("-", 0)
         context: dict[str, Any] = {
             "request_id": request_id,
-            "user_id": _verified_user_id(scope, self.secret_key),
             "method": method,
             "path": _route_path(scope),
             "status_code": 500,
             "duration_ms": "0.00",
-            "client_ip": str(client[0] or "-")[:64],
             "response_bytes": 0,
+            "error_type": "-",
         }
         state = scope.setdefault("state", {})
         if isinstance(state, dict):

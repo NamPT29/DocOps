@@ -166,7 +166,7 @@ def create_or_resume_upload_session(
     db.flush()
     for upload_file in upload_files:
         upload_file.staging_filename = f"{upload_file.id}-{upload_file.expected_sha256}.part"
-    project.status = "importing" if required_items else project.status
+    project.status = "in_progress" if required_items else project.status
     db.commit()
     db.refresh(session)
     return serialize_upload_session(db, session)
@@ -419,7 +419,7 @@ def finalize_upload_session(db, *, session_id):
         session.status = "completed"
         session.completed_files = session.requested_files
         session.failed_files = 0
-        project.status = "ready"
+        project.status = "in_progress"
         db.commit()
     except Exception:
         db.rollback()

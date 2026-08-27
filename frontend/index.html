@@ -8,47 +8,7 @@
     <link href="vendor/bootstrap/css/bootstrap.min.css" rel="stylesheet">
     <!-- FontAwesome for Icons -->
     <link rel="stylesheet" href="vendor/fontawesome/css/all.min.css">
-    <style>
-        #submissionsTableBody tr.table-success > * {
-            --bs-table-bg-state: #b7e4c7;
-            background-color: #b7e4c7 !important;
-            box-shadow: inset 4px 0 0 #198754;
-        }
-    </style>
-    <style>
-        body { background-color: #f8f9fa; }
-        .navbar { background-color: #0d6efd; color: white; }
-        .form-section { background: white; border-radius: 8px; padding: 20px; margin-bottom: 20px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
-        .form-section-title { color: #0d6efd; border-bottom: 2px solid #0d6efd; padding-bottom: 10px; margin-bottom: 20px; font-weight: bold; }
-        .autocomplete-items {
-            position: absolute;
-            border: 1px solid #d4d4d4;
-            border-bottom: none;
-            border-top: none;
-            z-index: 99;
-            top: 100%;
-            left: 0;
-            right: 0;
-            max-height: 200px;
-            overflow-y: auto;
-            background-color: white;
-            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
-        }
-        .autocomplete-items div {
-            padding: 10px;
-            cursor: pointer;
-            border-bottom: 1px solid #d4d4d4;
-        }
-        .autocomplete-items div:hover {
-            background-color: #e9e9e9;
-        }
-        .autocomplete-active {
-            background-color: #0d6efd !important;
-            color: #ffffff;
-        }
-        .position-relative { position: relative; }
-        #loading { text-align: center; margin-top: 50px; font-size: 1.2rem; }
-    </style>
+    <link rel="stylesheet" href="index-page.css?v=1.00">
     <link rel="stylesheet" href="windows-ui.css?v=1">
 </head>
 <body class="app-shell">
@@ -56,14 +16,14 @@
         <div class="container-fluid">
             <span class="navbar-brand mb-0 h1"><i class="fab fa-windows"></i> Số hóa All in One</span>
             <div class="d-flex">
-                <div class="ms-3 text-white d-flex align-items-center" id="userInfoDisplay" style="display:none;">
+                <div class="ms-3 text-white d-flex align-items-center" id="userInfoDisplay">
                     <span class="me-3 fs-6">
                         <i class="fas fa-user-circle"></i> <span id="userNameText" class="fw-bold"></span>
                         <span id="userRoleBadge" class="badge bg-secondary ms-1"></span>
                     </span>
-                    <button class="btn btn-sm btn-outline-light position-relative" data-bs-toggle="modal" data-bs-target="#notificationModal" onclick="loadNotifications()" title="Thông báo"><i class="fas fa-bell"></i><span id="notificationBadge" class="position-absolute top-0 start-100 translate-middle badge rounded-pill bg-warning text-dark d-none"></span></button>
+                    <button class="btn btn-sm btn-outline-light position-relative" data-bs-toggle="modal" data-bs-target="#notificationModal" data-action="loadNotifications" title="Thông báo"><i class="fas fa-bell"></i><span id="notificationBadge" class="position-absolute top-0 start-100 translate-middle badge rounded-pill bg-warning text-dark d-none"></span></button>
                     <a href="admin.html#data" id="backToAdminBtn" class="btn btn-outline-light btn-sm me-2 d-none"><i class="fas fa-arrow-left"></i> Về trang Quản trị</a>
-                    <button class="btn btn-sm btn-outline-light ms-2" onclick="doLogout()">Thoát</button>
+                    <button class="btn btn-sm btn-outline-light ms-2" data-action="doLogout">Thoát</button>
                 </div>
             </div>
         </div>
@@ -78,10 +38,10 @@
                 <button class="nav-link active fw-bold text-primary" id="form-tab" data-bs-toggle="tab" data-bs-target="#form-pane" type="button" role="tab">Nhập Hồ sơ</button>
             </li>
             <li class="nav-item" role="presentation" id="dataTabItem">
-                <button class="nav-link fw-bold" id="data-tab" data-bs-toggle="tab" data-bs-target="#data-pane" type="button" role="tab" onclick="fetchSubmissions()">Hồ sơ đã nhập</button>
+                <button class="nav-link fw-bold" id="data-tab" data-bs-toggle="tab" data-bs-target="#data-pane" type="button" role="tab" data-action="fetchSubmissions">Hồ sơ đã nhập <span id="submissionUnreadBadge" class="badge rounded-pill bg-danger ms-1 d-none" aria-live="polite"></span></button>
             </li>
             <li class="nav-item d-none" role="presentation" id="reviewTabItem">
-                <button class="nav-link fw-bold text-danger" id="employee-review-tab" data-bs-toggle="tab" data-bs-target="#employee-review-pane" type="button" role="tab" onclick="fetchReviewSubmissions()">Hồ sơ cần kiểm tra</button>
+                <button class="nav-link fw-bold text-danger" id="employee-review-tab" data-bs-toggle="tab" data-bs-target="#employee-review-pane" type="button" role="tab" data-action="fetchReviewSubmissions">Hồ sơ cần kiểm tra</button>
             </li>
         </ul>
 
@@ -95,7 +55,7 @@
                                 <label for="employeeProjectSelect" class="form-label fw-bold text-primary mb-1">
                                     <i class="fas fa-folder-tree"></i> Dự án đang nhập
                                 </label>
-                                <select id="employeeProjectSelect" class="form-select border-primary" onchange="onEmployeeProjectSelected()">
+                                <select id="employeeProjectSelect" class="form-select border-primary" data-action="onEmployeeProjectSelected">
                                     <option value="">-- Đang tải dự án được giao --</option>
                                 </select>
                             </div>
@@ -111,12 +71,12 @@
                 <div class="row mt-3">
                     <!-- LEFT COLUMN: PDF VIEWER & LIST -->
                     <div class="col-lg-8">
-                        <div class="sticky-top" style="z-index: 1;">
+                        <div class="sticky-top index-sticky-pane">
                             <div class="row">
                                 <!-- File List Sidebar -->
                                 <div class="col-md-3" id="fileSidebar">
                                     <div class="mb-3 d-flex flex-column gap-2">
-                                        <button class="btn btn-success fw-bold w-100" onclick="refreshEmployeeProjectQueue()" id="btnFetchQueue">
+                                        <button class="btn btn-success fw-bold w-100" data-action="refreshEmployeeProjectQueue" id="btnFetchQueue">
                                             <i class="fas fa-sync-alt"></i> Làm mới tài liệu
                                         </button>
                                         <label for="pdfUploadInput" id="manualPdfUploadLabel" class="form-label btn btn-outline-primary w-100 mb-0">
@@ -125,12 +85,12 @@
                                         <input class="form-control d-none" type="file" id="pdfUploadInput" accept=".pdf,.png,.jpg,.jpeg,.webp" multiple>
                                     </div>
                                     <div class="border rounded bg-light mb-2 p-1 d-flex align-items-center" id="queueExplorerBreadcrumb">
-                                        <button type="button" class="btn btn-sm btn-link text-decoration-none p-1 fw-semibold" onclick="openQueueFolder(null)" title="Về danh sách folder">
+                                        <button type="button" class="btn btn-sm btn-link text-decoration-none p-1 fw-semibold" data-action="openQueueFolder" title="Về danh sách folder">
                                             <i class="fas fa-home"></i> Tài liệu
                                         </button>
                                         <span id="queueExplorerCurrentFolder" class="small text-muted text-truncate"></span>
                                     </div>
-                                    <div style="height: 75vh; overflow-y: auto;">
+                                    <div class="index-file-queue-scroll">
                                         <div class="list-group" id="fileQueueList">
                                             <!-- Files will be dynamically inserted here -->
                                         </div>
@@ -139,9 +99,9 @@
                                 
                                 <!-- PDF Viewer -->
                                 <div class="col-md-9" id="pdfViewerCol">
-                                    <div class="border rounded bg-light d-flex align-items-center justify-content-center" id="pdfViewerContainer" style="height: 85vh; overflow: hidden;">
+                                    <div class="border rounded bg-light d-flex align-items-center justify-content-center" id="pdfViewerContainer">
                                         <p class="text-muted text-center" id="pdfPlaceholder">Chưa có tài liệu nào được tải lên.<br>Vui lòng chọn tệp PDF hoặc hình ảnh ở cột bên trái.</p>
-                                        <iframe id="pdfIframe" style="width: 100%; height: 100%; display: none;" frameborder="0" referrerpolicy="no-referrer"></iframe>
+                                        <iframe id="pdfIframe" frameborder="0" referrerpolicy="no-referrer"></iframe>
                                     </div>
                                 </div>
                             </div>
@@ -150,49 +110,57 @@
                     
                     <!-- RIGHT COLUMN: DATA FORM -->
                     <div class="col-lg-4">
-                        <div style="height: 85vh; overflow-y: auto; overflow-x: hidden; padding-right: 15px; padding-left: 5px;">
-                            <div class="mb-3" id="templateSelectContainer" style="display:none;">
+                        <div class="index-form-scroll">
+                            <div class="mb-3" id="templateSelectContainer">
                                 <label for="templateSelect" class="form-label fw-bold text-primary"><i class="fas fa-file-alt"></i> Chọn Biểu mẫu cần nhập</label>
-                                <select id="templateSelect" class="form-select border-primary" onchange="onTemplateSelected()">
+                                <select id="templateSelect" class="form-select border-primary" data-action="onTemplateSelected">
                                     <option value="">-- Đang tải danh sách biểu mẫu... --</option>
                                 </select>
                             </div>
                             
-                            <form id="dataForm" style="display: none;">
+                            <form id="dataForm">
                                 <div class="d-flex justify-content-between align-items-center mb-3 p-2 bg-light border rounded">
                                     <h5 class="text-primary mb-0"><i class="fas fa-edit"></i> Dữ liệu hồ sơ</h5>
                                     <div class="d-flex gap-1 flex-wrap justify-content-end">
                                         <span id="folderLinkBadge" class="btn btn-outline-secondary btn-sm disabled" title="Folder/hồ sơ chứa PDF đang mở">
                                             <i class="fas fa-folder"></i> <span id="folderLinkText">Chưa có folder</span>
                                         </span>
-                                        <button type="button" id="pdfLinkBtn" class="btn btn-outline-secondary btn-sm" onclick="togglePdfLink()" title="Liên kết với PDF đang hiển thị">
+                                        <button type="button" id="pdfLinkBtn" class="btn btn-outline-secondary btn-sm" data-action="togglePdfLink" title="Liên kết với PDF đang hiển thị">
                                             <i class="fas fa-link"></i> <span id="pdfLinkText">Không liên kết PDF</span>
                                         </button>
                                     </div>
                                 </div>
+                                <div id="submissionQualityLegend" class="alert alert-light border d-none py-2" role="status">
+                                    <span class="badge text-bg-danger me-2">Đỏ: người kiểm duyệt đã sửa</span>
+                                    <span class="badge text-bg-success">Xanh: bạn đã điều chỉnh</span>
+                                </div>
                                 <div id="form-container"></div>
                                 <div id="adminCheckArea" class="mt-4 p-3 bg-white border border-primary rounded d-none shadow-sm">
-                                    <div class="form-check form-switch fs-5 d-flex align-items-center">
-                                        <input class="form-check-input me-3 mt-0" type="checkbox" id="adminFormCheckToggle" onchange="toggleFormCheck()" style="cursor: pointer; transform: scale(1.3);">
-                                        <label class="form-check-label text-primary fw-bold" for="adminFormCheckToggle" style="cursor: pointer;">Xác nhận Đã Kiểm tra & Duyệt hồ sơ</label>
+                                    <div class="d-flex justify-content-between align-items-center gap-3 mb-3">
+                                        <span class="fw-semibold text-primary"><i class="fas fa-clipboard-check me-1"></i> Trạng thái kiểm duyệt</span>
+                                        <span id="reviewConfirmationStatusBadge" class="badge bg-warning text-dark">Chưa kiểm duyệt</span>
                                     </div>
-                                    <small class="text-muted ms-5">Chỉ người được phân kiểm tra hồ sơ này mới có thể duyệt hoặc đánh dấu lỗi.</small>
+                                    <div class="form-check fs-5">
+                                        <input class="form-check-input" type="checkbox" id="reviewConfirmCheckbox" data-action="confirmReviewSubmission">
+                                        <label class="form-check-label text-primary fw-bold" for="reviewConfirmCheckbox">Xác nhận kiểm duyệt</label>
+                                    </div>
+                                    <small id="reviewConfirmationHelp" class="text-muted d-block mt-2">Tích xác nhận để lưu chỉnh sửa và chuyển cho người nhập kiểm tra lại.</small>
                                 </div>
                                 <div class="d-grid gap-2 mb-5 mt-4">
                                     <div class="row g-2" id="actionButtonsRow">
                                         <div class="col-12" id="draftButtonContainer">
-                                            <button type="button" class="btn btn-secondary w-100" id="draftBtn" onclick="submitData('draft')"><i class="fas fa-save"></i> Lưu nháp</button>
+                                            <button type="button" class="btn btn-secondary w-100" id="draftBtn" data-action="submitDataDraft"><i class="fas fa-save"></i> Lưu nháp</button>
                                         </div>
                                         <div class="col-6 d-none" id="submitButtonContainer">
-                                            <button type="button" class="btn btn-primary w-100" id="submitBtn" onclick="submitData('pending_review')"><i class="fas fa-paper-plane"></i> Nộp duyệt</button>
+                                            <button type="button" class="btn btn-primary w-100" id="submitBtn" data-action="submitDataPendingReview"><i class="fas fa-paper-plane"></i> Nộp duyệt</button>
                                         </div>
                                     </div>
-                                    <div class="alert alert-info mt-2 mb-0" id="readonlyNotice" style="display: none;">
-                                        <i class="fas fa-lock"></i> Hồ sơ đang chờ duyệt / đã duyệt. (Chỉ Xem)
+                                    <div class="alert alert-info mt-2 mb-0" id="readonlyNotice">
+                                        <i class="fas fa-lock"></i> Hồ sơ đang ở bước xử lý khác. (Chỉ xem)
                                     </div>
-                                    <button type="button" class="btn btn-warning btn-sm mt-2" id="clearFormBtn" onclick="resetFormData()">Bìa mới (Xóa toàn bộ)</button>
-                                    <button type="button" class="btn btn-outline-danger btn-sm mt-2 d-none" id="cancelEditBtn" onclick="cancelEdit()">Quay lại danh sách</button>
-                                    <button type="button" class="btn btn-success mt-3 d-none" id="reviewNextButton" onclick="goToNextReviewSubmission()"><i class="fas fa-arrow-right"></i> Hồ sơ tiếp theo</button>
+                                    <button type="button" class="btn btn-warning btn-sm mt-2" id="clearFormBtn" data-action="resetFormData">Bìa mới (Xóa toàn bộ)</button>
+                                    <button type="button" class="btn btn-outline-danger btn-sm mt-2 d-none" id="cancelEditBtn" data-action="cancelEdit">Quay lại danh sách</button>
+                                    <button type="button" class="btn btn-success mt-3 d-none" id="reviewNextButton" data-action="goToNextReviewSubmission"><i class="fas fa-arrow-right"></i> Hồ sơ tiếp theo</button>
                                 </div>
                             </form>
                         </div>
@@ -204,13 +172,19 @@
             <div class="tab-pane fade" id="data-pane" role="tabpanel">
                 <div class="form-section">
                     <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
-                        <h4 class="form-section-title mb-0" style="border-bottom: none;"><i class="fas fa-database"></i> Hồ sơ bạn đã nhập</h4>
+                        <h4 class="form-section-title index-title-no-border mb-0"><i class="fas fa-database"></i> Hồ sơ bạn đã nhập</h4>
                         <div class="d-flex align-items-center flex-wrap gap-2">
-                            <button type="button" class="btn btn-outline-primary btn-sm" id="selectAllSubmissionsBtn" onclick="selectAllSubmissionsOnPage()" aria-pressed="false">Chọn tất cả</button>
-                            <button type="button" class="btn btn-outline-secondary btn-sm" id="clearSubmissionSelectionBtn" onclick="clearSubmissionSelection()" disabled>Bỏ chọn tất cả</button>
+                            <button type="button" class="btn btn-outline-primary btn-sm" id="selectAllSubmissionsBtn" data-action="selectAllSubmissionsOnPage" aria-pressed="false">Chọn tất cả</button>
+                            <button type="button" class="btn btn-outline-secondary btn-sm" id="clearSubmissionSelectionBtn" data-action="clearSubmissionSelection" disabled>Bỏ chọn tất cả</button>
                             <span class="badge bg-light text-dark border" id="selectedSubmissionsCount">Đã chọn: 0</span>
-                            <button type="button" class="btn btn-danger btn-sm" id="bulkDeleteSubmissionsBtn" onclick="bulkDeleteSelectedSubmissions()" disabled><i class="fas fa-trash"></i> Xóa</button>
-                            <select id="filterTemplateId" class="form-select me-2" onchange="fetchSubmissions()" style="display:none;">
+                            <button type="button" class="btn btn-success btn-sm" id="bulkSubmitSubmissionsBtn" data-action="bulkSubmitSelectedSubmissions" disabled title="Nộp các hồ sơ đã chọn để kiểm duyệt"><i class="fas fa-paper-plane"></i> Nộp duyệt</button>
+                            <button type="button" class="btn btn-danger btn-sm" id="bulkDeleteSubmissionsBtn" data-action="bulkDeleteSelectedSubmissions" disabled><i class="fas fa-trash"></i> Xóa</button>
+                            <label class="visually-hidden" for="filterSubmissionQuality">Lọc chất lượng hồ sơ</label>
+                            <select id="filterSubmissionQuality" class="form-select form-select-sm w-auto" data-action="fetchSubmissions" aria-label="Lọc chất lượng hồ sơ">
+                                <option value="all">Tất cả hồ sơ</option>
+                                <option value="changed">Có trường bị sửa</option>
+                            </select>
+                            <select id="filterTemplateId" class="form-select me-2" data-action="fetchSubmissions">
                                 <!-- Hidden since users likely don't need to filter by template if they are assigned one, but app.js uses it -->
                                 <option value="">-- Tất cả Biểu mẫu --</option>
                             </select>
@@ -244,18 +218,18 @@
             <div class="tab-pane fade" id="employee-review-pane" role="tabpanel">
                 <div class="form-section">
                     <div class="d-flex justify-content-between align-items-center mb-3">
-                        <h4 class="form-section-title mb-0 text-danger" style="border-bottom: none;"><i class="fas fa-user-check"></i> Hồ sơ được phân kiểm tra</h4>
+                        <h4 class="form-section-title index-title-no-border mb-0 text-danger"><i class="fas fa-user-check"></i> Hồ sơ được phân kiểm tra</h4>
                         <div class="d-flex align-items-center gap-2">
-                            <input type="checkbox" class="btn-check" id="filterReviewDuplicates" autocomplete="off" onchange="fetchReviewSubmissions()">
+                            <input type="checkbox" class="btn-check" id="filterReviewDuplicates" autocomplete="off" data-action="fetchReviewSubmissions">
                             <label class="btn btn-outline-danger text-nowrap" for="filterReviewDuplicates"><i class="fas fa-copy"></i> Báo cáo trùng</label>
-                            <button class="btn btn-secondary text-nowrap" onclick="fetchReviewSubmissions()"><i class="fas fa-sync"></i> Tải lại</button>
+                            <button class="btn btn-secondary text-nowrap" data-action="fetchReviewSubmissions"><i class="fas fa-sync"></i> Tải lại</button>
                         </div>
                     </div>
                     <div class="row g-3">
                         <div class="col-lg-4">
                             <div class="border rounded overflow-hidden">
                                 <div class="bg-light border-bottom px-3 py-2 fw-bold"><i class="fas fa-folder-tree"></i> Folder được phân kiểm tra</div>
-                                <div id="reviewFolderTree" class="list-group list-group-flush" style="max-height: 62vh; overflow-y: auto;">
+                                <div id="reviewFolderTree" class="list-group list-group-flush">
                                     <div class="text-center text-muted p-3">Đang tải folder...</div>
                                 </div>
                             </div>
@@ -282,34 +256,20 @@
         <div class="modal-dialog modal-dialog-scrollable"><div class="modal-content">
             <div class="modal-header"><h5 class="modal-title" id="notificationModalLabel"><i class="fas fa-bell"></i> Thông báo</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
             <div class="modal-body p-0"><div id="notificationList" class="list-group list-group-flush"></div></div>
-            <div class="modal-footer"><button type="button" class="btn btn-outline-secondary btn-sm" onclick="markAllNotificationsRead()">Đánh dấu đã đọc tất cả</button></div>
+            <div class="modal-footer"><button type="button" class="btn btn-outline-secondary btn-sm" data-action="markAllNotificationsRead">Đánh dấu đã đọc tất cả</button></div>
         </div></div>
     </div>
 
     <!-- Bootstrap JS Bundle -->
     <script src="vendor/bootstrap/js/bootstrap.bundle.min.js"></script>
-    <script>
-        // Immediate Auth Check to prevent flickering
-        const token = localStorage.getItem('token');
-        const userStr = localStorage.getItem('user');
-        if (!token || !userStr) {
-            window.location.href = '/login.html';
-        } else {
-            const user = JSON.parse(userStr);
-            const urlParams = new URLSearchParams(window.location.search);
-            const hasCheckId = urlParams.has('check_id');
-            if (user.role === 'admin' && !hasCheckId) {
-                window.location.href = '/admin.html';
-            }
-        }
-    </script>
+    <script src="index-page.js?v=1.00"></script>
     <script src="auth.js?v=100.01"></script>
     <script src="js/pdf_link_state.js?v=1.00"></script>
-    <script src="js/pdf_handler.js?v=100.01"></script>
-    <script src="js/form_renderer.js?v=100.01"></script>
-    <script src="js/submission.js?v=100.01"></script>
+    <script src="js/pdf_handler.js?v=100.02"></script>
+    <script src="js/form_renderer.js?v=100.02"></script>
+    <script src="js/submission.js?v=100.02"></script>
     <script src="js/project_workspace.js?v=1.00"></script>
-    <script src="js/admin_panel.js?v=202.01"></script>
+    <script src="js/admin_panel.js?v=202.03"></script>
     <script src="app.js?v=100.00"></script>
 </body>
 </html>

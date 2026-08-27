@@ -2,82 +2,92 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
 
-const formInputs = [{ name: 'col_8', value: 'Nội dung đã sửa' }];
-const errorCheckboxes = [
-    { checked: true, dataset: { field: 'col_8' } },
-    { checked: false, dataset: { field: 'col_9' } },
-];
+const reviewCheckbox = { checked: true, disabled: false };
+const statusBadge = { className: '', textContent: '' };
+const statusHelp = { textContent: '' };
 let requestedUrl = '';
 let requestedPayload = null;
 let requestStarted = false;
-let releaseErrorSave;
+let reopenedSubmissionId = null;
 
 const sandbox = {
     console,
+    URL,
+    URLSearchParams,
     window: {
+        location: { origin: 'http://localhost', pathname: '/index.html', search: '' },
         reviewEditMode: true,
-        activeTemplateId: 1,
-        reviewErrorSavePromise: new Promise(resolve => {
-            releaseErrorSave = resolve;
-        }),
+        reviewApproved: false,
     },
     currentEditingId: 71,
-    isEditingFromList: true,
-    iframeCurrentIndex: -1,
-    uploadedFilesQueue: [],
     document: {
-        querySelectorAll(selector) {
-            if (selector === '#dataForm input[type="text"], #dataForm textarea, #dataForm select') return formInputs;
-            if (selector === '.field-error-checkbox') return errorCheckboxes;
-            if (selector === '.field-error-checkbox:checked') {
-                return errorCheckboxes.filter(checkbox => checkbox.checked);
-            }
-            return [];
+        querySelectorAll() { return []; },
+        getElementById(id) {
+            if (id === 'reviewConfirmCheckbox') return reviewCheckbox;
+            if (id === 'reviewConfirmationStatusBadge') return statusBadge;
+            if (id === 'reviewConfirmationHelp') return statusHelp;
+            return null;
         },
-        getElementById() { return null; },
     },
+    collectSubmissionFormData: () => ({ col_8: 'Nội dung đã sửa' }),
     async authFetch(url, options) {
         requestStarted = true;
         requestedUrl = url;
         requestedPayload = JSON.parse(options.body);
-        return { ok: true, async json() { return { status: 'ok' }; } };
+        return {
+            ok: true,
+            async json() {
+                return { status: 'ok', submission_status: 'pending_input_confirmation', is_checked: true };
+            },
+        };
     },
     formatApiErrorDetail: value => String(value),
     alert() {},
-    async editSubmission() {},
 };
 
 vm.createContext(sandbox);
-vm.runInContext(fs.readFileSync('frontend/js/pdf_link_state.js', 'utf8'), sandbox);
-vm.runInContext(fs.readFileSync('frontend/js/submission.js', 'utf8'), sandbox);
+vm.runInContext(fs.readFileSync('frontend/js/admin_panel.js', 'utf8'), sandbox);
+sandbox.editSubmission = async id => { reopenedSubmissionId = id; };
 
 (async () => {
-    const savePromise = vm.runInContext("submitData('draft')", sandbox);
+    sandbox.updateReviewConfirmationStatus('pending', true);
+    assert.equal(statusBadge.textContent, 'Chưa kiểm duyệt');
+    assert.equal(reviewCheckbox.checked, false);
+    assert.equal(reviewCheckbox.disabled, false);
+
+    reviewCheckbox.checked = true;
+    const confirmPromise = sandbox.confirmReviewSubmission(reviewCheckbox);
     await Promise.resolve();
-    assert.equal(
-        requestStarted,
-        false,
-        'Lưu nội dung phải chờ thao tác tự lưu dấu lỗi đang chạy để tránh ghi đè dữ liệu',
-    );
+    assert.equal(requestStarted, true);
+    assert.equal(statusBadge.textContent, 'Đang lưu...');
+    await confirmPromise;
 
-    releaseErrorSave();
-    await savePromise;
-
-    assert.equal(requestedUrl, '/api/submissions/71/review-content');
+    assert.equal(requestedUrl, '/api/submissions/71/confirm-review');
     assert.deepEqual(requestedPayload, {
         data: { col_8: 'Nội dung đã sửa' },
-        wrong_fields: ['col_8'],
     });
+    assert.equal(sandbox.window.reviewApproved, true);
+    assert.equal(sandbox.window.reviewEditMode, false);
+    assert.equal(reopenedSubmissionId, 71);
 
+    sandbox.updateReviewConfirmationStatus('confirmed', false);
+    assert.equal(statusBadge.textContent, 'Đã kiểm duyệt');
+    assert.equal(reviewCheckbox.checked, true);
+    assert.equal(reviewCheckbox.disabled, true);
+
+    const indexHtml = fs.readFileSync('frontend/index.html', 'utf8');
     const panelSource = fs.readFileSync('frontend/js/admin_panel.js', 'utf8');
     const rendererSource = fs.readFileSync('frontend/js/form_renderer.js', 'utf8');
-    assert(panelSource.includes('window.reviewErrorSavePromise'));
-    assert(panelSource.includes('Lưu nội dung đã sửa'));
-    assert(rendererSource.includes('review-field-error-check'));
-    assert(rendererSource.includes('field-error-checkbox'));
-    assert(rendererSource.includes('checkbox.dataset.field = field.name'));
+    assert(indexHtml.includes('id="reviewConfirmCheckbox"'));
+    assert(indexHtml.includes('id="reviewConfirmationStatusBadge"'));
+    assert(!indexHtml.includes('id="adminFormCheckToggle"'));
+    assert(!panelSource.includes('toggleFormCheck'));
+    assert(!panelSource.includes('Lưu nội dung đã sửa'));
+    assert(!panelSource.includes('window.reviewErrorSavePromise'));
+    assert(!rendererSource.includes('review-field-error-check'));
+    assert(!rendererSource.includes('field-error-checkbox'));
     assert(!rendererSource.includes('error_cat_'), 'Không còn checkbox lỗi chung cho cả nhóm');
-    console.log('Reviewer edit self-check: OK');
+    console.log('Reviewer confirmation self-check: OK');
 })().catch(error => {
     console.error(error);
     process.exitCode = 1;

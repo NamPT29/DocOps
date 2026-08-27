@@ -62,6 +62,24 @@ class DictionaryRepository(BaseRepository[Dictionary]):
             DictionaryItem.dictionary_id == dictionary_id
         ).order_by(DictionaryItem.id).all()
 
+    def paginate_items(
+        self,
+        dictionary_id: int,
+        *,
+        page: int,
+        page_size: int,
+    ) -> tuple[list[DictionaryItem], int, int, int]:
+        query = self.session.query(DictionaryItem).filter(
+            DictionaryItem.dictionary_id == dictionary_id
+        )
+        total = query.count()
+        total_pages = max(1, (total + page_size - 1) // page_size)
+        current_page = min(page, total_pages)
+        rows = query.order_by(DictionaryItem.id).offset(
+            (current_page - 1) * page_size
+        ).limit(page_size).all()
+        return rows, total, total_pages, current_page
+
     def get_item(self, item_id: int) -> DictionaryItem | None:
         return self.session.query(DictionaryItem).filter(
             DictionaryItem.id == item_id
@@ -99,3 +117,21 @@ class DictionaryRepository(BaseRepository[Dictionary]):
         with _OPTION_MAP_CACHE_LOCK:
             _OPTION_MAP_CACHE[template_id] = _copy_option_map(options)
         return _copy_option_map(options)
+
+    def fresh_option_map_for_template(self, template_id: int) -> dict[str, list[str]]:
+        """Read current options from the database, bypassing worker-local cache."""
+        rows = self.session.query(Dictionary, DictionaryItem).outerjoin(
+            DictionaryItem,
+            DictionaryItem.dictionary_id == Dictionary.id,
+        ).filter(
+            Dictionary.template_id == template_id
+        ).order_by(Dictionary.id, DictionaryItem.id).all()
+
+        options: dict[str, list[str]] = {}
+        for dictionary, item in rows:
+            values = options.setdefault(dictionary.name, [])
+            if item is not None:
+                values.append(
+                    f"{item.code} - {item.value}" if item.code else item.value
+                )
+        return options

@@ -1,13 +1,16 @@
 import inspect
 
+import jwt
 import pytest
-from fastapi import HTTPException
+from fastapi import FastAPI, HTTPException
+from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from server.database import Base
+from server.database import Base, get_db
 from server.models import Project, ProjectMember, Submission, SubmissionReviewAssignment, Template, User
 from server.routers import projects, submissions
+from server.routers.auth import ALGORITHM, SECRET_KEY
 from server.routers.project_access import get_project_input_member
 
 
@@ -126,3 +129,62 @@ def test_assigned_reviewer_cannot_delete_employee_submission(db):
 
     assert forbidden.value.status_code == 403
     assert db.get(Submission, submission.id) is not None
+
+
+@pytest.mark.parametrize(
+    ("method", "path_template"),
+    [
+        ("GET", "/api/submissions/{submission_id}"),
+        ("PUT", "/api/submissions/{submission_id}/view"),
+    ],
+)
+def test_submission_access_routes_return_401_403_and_allow_owner(
+    db,
+    method,
+    path_template,
+):
+    owner = User(username=f"access-owner-{method}", password="hash", role="user")
+    outsider = User(username=f"access-outsider-{method}", password="hash", role="user")
+    db.add_all([owner, outsider])
+    db.flush()
+    submission = Submission(
+        data_json="{}",
+        created_by_user_id=owner.id,
+        status="draft",
+    )
+    db.add(submission)
+    db.commit()
+
+    app = FastAPI()
+    app.include_router(submissions.router)
+    app.dependency_overrides[get_db] = lambda: db
+    client = TestClient(app)
+    path = path_template.format(submission_id=submission.id)
+
+    unauthenticated = client.request(method, path)
+    assert unauthenticated.status_code == 401
+
+    outsider_token = jwt.encode(
+        {"sub": str(outsider.id)},
+        SECRET_KEY,
+        algorithm=ALGORITHM,
+    )
+    forbidden = client.request(
+        method,
+        path,
+        headers={"Authorization": f"Bearer {outsider_token}"},
+    )
+    assert forbidden.status_code == 403
+
+    owner_token = jwt.encode(
+        {"sub": str(owner.id)},
+        SECRET_KEY,
+        algorithm=ALGORITHM,
+    )
+    allowed = client.request(
+        method,
+        path,
+        headers={"Authorization": f"Bearer {owner_token}"},
+    )
+    assert allowed.status_code == 200
+    assert allowed.json()["status"] == "ok"

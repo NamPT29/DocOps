@@ -10,6 +10,8 @@ class User(Base):
     id = Column(Integer, primary_key=True, index=True)
     username = Column(String(255), unique=True, index=True, nullable=False)
     password = Column(String(255), nullable=False) # Scrypt hash; legacy values migrate on login
+    full_name = Column(String(255), nullable=False, default="")
+    phone_number = Column(String(50), nullable=True)
     role = Column(String(255), default="user") # 'admin' or 'user'
     created_at = Column(DateTime, default=get_utc_now)
 
@@ -102,8 +104,114 @@ class Submission(Base):
     # Track admin check status
     is_checked = Column(Boolean, default=False)
     
-    # Workflow status: draft, pending_review, rejected, approved
+    # Workflow status: draft, pending_review, pending_input_confirmation, completed
     status = Column(String(50), default="draft")
+
+
+class SubmissionQualityAssessment(Base):
+    """Immutable review baseline and the latest quality result for one report."""
+
+    __tablename__ = "submission_quality_assessments"
+
+    submission_id = Column(
+        Integer,
+        ForeignKey("submissions.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    input_user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    baseline_data_json = Column(Text, nullable=False)
+    visible_field_count = Column(Integer, nullable=False, default=0)
+    changed_field_count = Column(Integer, nullable=False, default=0)
+    is_error_report = Column(Boolean, nullable=False, default=False, index=True)
+    reviewer_user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
+    assessed_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, nullable=False, default=get_utc_now)
+    updated_at = Column(DateTime, nullable=False, default=get_utc_now, onupdate=get_utc_now)
+
+
+class SubmissionReviewHistory(Base):
+    """Append-only snapshots for confirmed reviews and input confirmations."""
+
+    __tablename__ = "submission_review_histories"
+
+    id = Column(Integer, primary_key=True, index=True)
+    submission_id = Column(
+        Integer,
+        ForeignKey("submissions.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    review_event_id = Column(
+        Integer,
+        ForeignKey("submission_review_histories.id", ondelete="RESTRICT"),
+        nullable=True,
+        index=True,
+    )
+    event_type = Column(String(32), nullable=False, index=True)
+    input_user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    confirmed_by_user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
+    reviewer_user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    baseline_data_json = Column(Text, nullable=False)
+    reviewer_data_json = Column(Text, nullable=False)
+    final_data_json = Column(Text, nullable=True)
+    visible_field_count = Column(Integer, nullable=False, default=0)
+    changed_field_count = Column(Integer, nullable=False, default=0)
+    reviewer_error_count = Column(Integer, nullable=False, default=0)
+    # NULL for review events. Input confirmations use a deterministic value so
+    # the database, not only the API process, enforces the one-time rule.
+    correction_token = Column(String(64), nullable=True, unique=True, index=True)
+    created_at = Column(DateTime, nullable=False, default=get_utc_now, index=True)
+
+
+class SubmissionReviewFieldHistory(Base):
+    """Immutable A/B/C values for one visible field in a history event."""
+
+    __tablename__ = "submission_review_field_histories"
+
+    id = Column(Integer, primary_key=True, index=True)
+    event_id = Column(
+        Integer,
+        ForeignKey("submission_review_histories.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    submission_id = Column(
+        Integer,
+        ForeignKey("submissions.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    field_name = Column(String(255), nullable=False, index=True)
+    baseline_value_json = Column(Text, nullable=False)
+    reviewer_value_json = Column(Text, nullable=False)
+    final_value_json = Column(Text, nullable=True)
+    reviewer_error = Column(Boolean, nullable=False, default=False, index=True)
+    created_at = Column(DateTime, nullable=False, default=get_utc_now, index=True)
+
+
+class SubmissionReviewSeen(Base):
+    """Latest immutable review event viewed by one input user."""
+
+    __tablename__ = "submission_review_seen"
+
+    submission_id = Column(
+        Integer,
+        ForeignKey("submissions.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    user_id = Column(
+        Integer,
+        ForeignKey("users.id", ondelete="CASCADE"),
+        primary_key=True,
+        index=True,
+    )
+    review_event_id = Column(
+        Integer,
+        ForeignKey("submission_review_histories.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    seen_at = Column(DateTime, nullable=False, default=get_utc_now)
 
 
 class SubmissionReviewAssignment(Base):
@@ -257,7 +365,10 @@ class Project(Base):
     case_level = Column(Integer, nullable=False)
     report_mode = Column(String(32), nullable=False)
     report_level = Column(Integer, nullable=True)
-    status = Column(String(32), nullable=False, default="configuring", index=True)
+    # Public lifecycle values. Legacy databases are normalized at startup by
+    # ``ensure_project_status_schema``; keeping this as a string avoids
+    # breaking existing rows while the migration runs.
+    status = Column(String(32), nullable=False, default="new", index=True)
     created_by_user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
     created_at = Column(DateTime, nullable=False, default=get_utc_now)
     updated_at = Column(DateTime, nullable=False, default=get_utc_now, onupdate=get_utc_now)

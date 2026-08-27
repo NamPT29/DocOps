@@ -110,7 +110,7 @@ async function initializeEmployeeProjectWorkspace() {
     const projects = (Array.isArray(response.data) ? response.data : []).filter(project =>
         Array.isArray(project.input_user_ids)
         && project.input_user_ids.map(Number).includes(currentUserId)
-        && project.status === 'ready'
+        && ['new', 'in_progress', 'completed'].includes(project.status)
     );
 
     select.replaceChildren();

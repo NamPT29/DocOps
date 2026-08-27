@@ -1,14 +1,19 @@
 from server.services.submission_helpers import COMPLETED_WITHOUT_FOLDER, _pdf_url
 from server.services.submission_metadata_service import apply_submission_metadata
+from server.services.submission_quality_service import SubmissionQualityService
+from server.repositories.submission_quality_repository import SubmissionQualityRepository
+from server.repositories.submission_review_history_repository import (
+    SubmissionReviewHistoryRepository,
+)
 
 from typing import Literal
 from fastapi import HTTPException
 import os
 import json
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 from sqlalchemy.orm import Session
 
-from server.models import Submission, AssignedDocument
+from server.models import AssignedDocument, Submission, Template
 from server.repositories import (
     DocumentRepository,
     LookupRepository,
@@ -34,6 +39,9 @@ def _load_submission_document_metadata(
     for item in metadata.values():
         item["folder_path"] = normalize_folder_path(item["folder_path"])
     return metadata
+
+
+_CONTEXT_UNSET = object()
 
 class SubmissionService:
 
@@ -102,13 +110,15 @@ class SubmissionService:
         data: dict,
         document: AssignedDocument | None,
         db: Session,
+        *,
+        document_folder_path: object = _CONTEXT_UNSET,
     ) -> None:
         folder_path = normalize_folder_path(data.get("_folder_path"))
         if not folder_path and document:
-            folder_metadata = DocumentRepository(db).get_folder(document.id)
-            folder_path = normalize_folder_path(
-                getattr(folder_metadata, "folder_group", None)
-            )
+            if document_folder_path is _CONTEXT_UNSET:
+                folder_metadata = DocumentRepository(db).get_folder(document.id)
+                document_folder_path = getattr(folder_metadata, "folder_group", None)
+            folder_path = normalize_folder_path(document_folder_path)
         apply_submission_metadata(
             submission,
             data,
@@ -120,7 +130,7 @@ class SubmissionService:
     @staticmethod
     def bulk_submission_action(
         db: Session,
-        action: Literal["delete"],
+        action: Literal["delete", "submit_for_review"],
         submission_ids: list[int],
         current_user: dict
     ) -> int:
@@ -128,35 +138,204 @@ class SubmissionService:
         selected = submission_repository.list_by_ids(submission_ids)
         if len(selected) != len(submission_ids):
             raise HTTPException(status_code=404, detail="Có hồ sơ không tồn tại")
-        if current_user["role"] != "admin" and any(
-            submission.created_by_user_id != current_user["id"]
-            for submission in selected
-        ):
-            raise HTTPException(status_code=403, detail="Bạn không có quyền xử lý một hoặc nhiều hồ sơ đã chọn")
+        if current_user["role"] != "admin":
+            active_input_user_ids = submission_repository.active_input_user_ids(selected)
+            if any(
+                active_input_user_ids.get(submission.id) != current_user["id"]
+                for submission in selected
+            ):
+                raise HTTPException(status_code=403, detail="Bạn không có quyền xử lý một hoặc nhiều hồ sơ đã chọn")
 
-        if action != "delete":
-            raise HTTPException(status_code=409, detail="Nộp duyệt hàng loạt đã bị tắt")
-        invalid = [submission.id for submission in selected if submission.status != "draft"]
-        if invalid:
-            raise HTTPException(
-                status_code=409,
-                detail="Chỉ có thể xóa hàng loạt các hồ sơ đang lưu nháp",
+        if action == "delete":
+            invalid = [submission.id for submission in selected if submission.status != "draft"]
+            if invalid:
+                raise HTTPException(
+                    status_code=409,
+                    detail="Chỉ có thể xóa hàng loạt các hồ sơ đang lưu nháp",
+                )
+            doc_ids = {s.assigned_document_id for s in selected if s.assigned_document_id}
+            ReviewRepository(db).delete_for_submissions(submission_ids)
+            for submission in selected:
+                submission_repository.delete(submission)
+            db.flush()
+
+            if doc_ids:
+                doc_repo = DocumentRepository(db)
+                submission_counts = submission_repository.counts_by_document_ids(doc_ids)
+                documents = doc_repo.map_by_ids(doc_ids)
+                for doc_id in doc_ids:
+                    other_count = submission_counts.get(doc_id, 0)
+                    if other_count == 0:
+                        document = documents.get(doc_id)
+                        if document and document.status == "completed":
+                            document.status = "pending"
+        else:
+            invalid = [
+                submission.id
+                for submission in selected
+                if submission.status != "draft"
+            ]
+            if invalid:
+                raise HTTPException(
+                    status_code=409,
+                    detail="Chỉ hồ sơ lưu nháp mới có thể nộp duyệt",
+                )
+
+            parsed_data: dict[int, dict] = {}
+            for submission in selected:
+                try:
+                    raw_data = json.loads(submission.data_json or "{}")
+                except (TypeError, ValueError, json.JSONDecodeError):
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"Hồ sơ {submission.id} chứa dữ liệu không hợp lệ",
+                    )
+                if not isinstance(raw_data, dict):
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"Hồ sơ {submission.id} chứa dữ liệu không hợp lệ",
+                    )
+                parsed_data[submission.id] = raw_data
+
+            template_ids = {
+                submission.template_id
+                for submission in selected
+                if submission.template_id is not None
+            }
+            templates = TemplateRepository(db).map_by_ids(template_ids)
+            template_configs = {
+                template_id: SubmissionService._template_config(template)
+                for template_id, template in templates.items()
+            }
+            for submission in selected:
+                SubmissionService.validate_required_fields(
+                    submission.template_id,
+                    parsed_data[submission.id],
+                    db,
+                    allow_missing_linked_path=True,
+                    template_config=template_configs.get(submission.template_id, {}),
+                )
+
+            uuid_filenames = {
+                os.path.basename(str(data["_pdf_uuid"]))
+                for data in parsed_data.values()
+                if data.get("_pdf_uuid")
+            }
+            original_filenames = {
+                str(data["_pdf_filename"])
+                for data in parsed_data.values()
+                if data.get("_pdf_filename") and not data.get("_pdf_uuid")
+            }
+            document_repository = DocumentRepository(db)
+            documents_by_uuid, documents_by_original = document_repository.reference_maps(
+                owner_id=current_user["id"],
+                uuid_filenames=uuid_filenames,
+                original_filenames=original_filenames,
             )
-        doc_ids = {s.assigned_document_id for s in selected if s.assigned_document_id}
-        ReviewRepository(db).delete_for_submissions(submission_ids)
-        for submission in selected:
-            submission_repository.delete(submission)
-        db.flush()
+            resolved_documents: dict[int, AssignedDocument | None] = {}
+            for submission in selected:
+                raw_data = parsed_data[submission.id]
+                uuid_filename = raw_data.get("_pdf_uuid")
+                if uuid_filename:
+                    document = documents_by_uuid.get(
+                        os.path.basename(str(uuid_filename))
+                    )
+                elif raw_data.get("_pdf_filename"):
+                    document = documents_by_original.get(str(raw_data["_pdf_filename"]))
+                else:
+                    document = None
+                resolved_documents[submission.id] = document
+            document_metadata = document_repository.metadata_map({
+                document.id
+                for document in resolved_documents.values()
+                if document is not None
+            })
 
-        if doc_ids:
-            doc_repo = DocumentRepository(db)
-            submission_counts = submission_repository.counts_by_document_ids(doc_ids)
-            for doc_id in doc_ids:
-                other_count = submission_counts.get(doc_id, 0)
-                if other_count == 0:
-                    document = doc_repo.get(doc_id)
-                    if document and document.status == "completed":
-                        document.status = "pending"
+            prepared_data: dict[int, dict] = {}
+            for submission in selected:
+                document = resolved_documents[submission.id]
+                metadata = document_metadata.get(document.id) if document else None
+                data_dict = SubmissionService._enrich_pdf_reference_from_context(
+                    parsed_data[submission.id],
+                    document,
+                    metadata,
+                )
+                prepared_data[submission.id] = data_dict
+                SubmissionService.sync_submission_metadata(
+                    submission,
+                    data_dict,
+                    document,
+                    db,
+                    document_folder_path=(
+                        metadata.get("folder_path") if metadata else None
+                    ),
+                )
+
+            for template_id in template_ids:
+                SubmissionService.lock_duplicate_scope(template_id, db)
+            duplicate_candidates = submission_repository.exact_duplicate_candidates_by_scope(
+                {
+                    (submission.template_id, submission.folder_path_key)
+                    for submission in selected
+                },
+                exclude_submission_ids={submission.id for submission in selected},
+            )
+            for submission in selected:
+                duplicate_count = SubmissionService.exact_duplicate_count(
+                    submission,
+                    prepared_data[submission.id],
+                    db,
+                    template_config=template_configs.get(submission.template_id, {}),
+                    candidates=duplicate_candidates.get(
+                        (submission.template_id, submission.folder_path_key),
+                        [],
+                    ),
+                )
+                if duplicate_count:
+                    raise HTTPException(
+                        status_code=409,
+                        detail={
+                            "code": "duplicate_submission",
+                            "duplicate_count": duplicate_count,
+                            "message": (
+                                f"Hồ sơ {submission.id} trùng path và nội dung với "
+                                f"{duplicate_count} báo cáo khác. Toàn bộ lô vẫn được giữ nguyên."
+                            ),
+                        },
+                    )
+
+            from server.services.review_workflow_service import ReviewWorkflowService
+            ReviewWorkflowService.assign_submission_reviewers(
+                selected,
+                db,
+                required=False,
+            )
+            quality_repository = SubmissionQualityRepository(db)
+            quality_repository.prime_for_submissions(
+                [submission.id for submission in selected]
+            )
+            quality_repository.prime_projects_for_documents({
+                submission.assigned_document_id
+                for submission in selected
+                if submission.assigned_document_id is not None
+            })
+
+            submitted_at = datetime.now(timezone.utc).replace(tzinfo=None)
+            for submission in selected:
+                data_dict = prepared_data[submission.id]
+                document = resolved_documents[submission.id]
+                data_dict.pop("_wrong_sections", None)
+                data_dict.pop("_wrong_fields", None)
+                SubmissionQualityService.ensure_baseline(
+                    submission,
+                    data_dict,
+                    db,
+                )
+                submission.data_json = json.dumps(data_dict, ensure_ascii=False)
+                submission.status = "pending_review"
+                submission.created_at = submitted_at
+                if document:
+                    document.status = "completed"
 
         db.commit()
         return len(selected)
@@ -179,8 +358,9 @@ class SubmissionService:
                 "folder_group": folder.folder_group,
                 "template_id": item.template_id,
                 "submission_id": submission_id,
+                "review_status": submission_status,
             }
-            for item, relative_path, submission_id in rows
+            for item, relative_path, submission_id, submission_status in rows
         ]
 
     @staticmethod
@@ -233,6 +413,166 @@ class SubmissionService:
         return enriched, document
 
     @staticmethod
+    def _enrich_pdf_reference_from_context(
+        data: dict,
+        document: AssignedDocument | None,
+        metadata: dict | None,
+    ) -> dict:
+        """Bulk-only, query-free equivalent of ``enrich_pdf_reference``."""
+        enriched = dict(data)
+        if document:
+            enriched["_pdf_filename"] = document.original_filename
+            enriched["_pdf_uuid"] = document.uuid_filename
+            enriched["_pdf_url"] = _pdf_url(document.uuid_filename)
+            relative_path = (metadata or {}).get("relative_path")
+            folder_group = (metadata or {}).get("folder_path")
+            if relative_path:
+                enriched["_pdf_relative_path"] = relative_path
+            else:
+                enriched.pop("_pdf_relative_path", None)
+            if folder_group and folder_group != "__ROOT__":
+                enriched["_folder_path"] = folder_group
+            else:
+                enriched.pop("_folder_path", None)
+        elif enriched.get("_pdf_uuid"):
+            raise HTTPException(status_code=400, detail="File đính kèm không thuộc người dùng")
+        elif enriched.get("_pdf_filename"):
+            raise HTTPException(status_code=400, detail="Không xác minh được file đính kèm")
+        return enriched
+
+    @staticmethod
+    def _template_config(template: Template | None) -> dict:
+        if not template or not template.config_json:
+            return {}
+        try:
+            config = json.loads(template.config_json)
+        except (TypeError, ValueError, json.JSONDecodeError):
+            return {}
+        return config if isinstance(config, dict) else {}
+
+    @staticmethod
+    def _copy_linked_path_field(template_id: int | None, db: Session) -> str | None:
+        if not template_id:
+            return None
+        template = TemplateRepository(db).get(template_id)
+        if not template or not template.config_json:
+            return None
+        try:
+            config = json.loads(template.config_json)
+        except (TypeError, ValueError, json.JSONDecodeError):
+            return None
+        linked_path_config = config.get("linked_pdf_path") or {}
+        if linked_path_config.get("enabled") is not True:
+            return None
+        try:
+            linked_path_col = int(linked_path_config.get("col"))
+        except (TypeError, ValueError):
+            return None
+        return f"col_{linked_path_col - 1}" if linked_path_col > 0 else None
+
+    @staticmethod
+    def _normalize_copy_value(value):
+        if value is None:
+            return ""
+        if isinstance(value, str):
+            return value.strip()
+        if isinstance(value, list):
+            return [SubmissionService._normalize_copy_value(item) for item in value]
+        if isinstance(value, dict):
+            return {
+                key: SubmissionService._normalize_copy_value(value[key])
+                for key in sorted(value)
+            }
+        return value
+
+    @staticmethod
+    def _copy_business_changed(
+        source_data: dict,
+        target_data: dict,
+        ignored_path_field: str | None,
+    ) -> bool:
+        keys = {
+            key
+            for key in set(source_data) | set(target_data)
+            if isinstance(key, str)
+            and not key.startswith("_")
+            and key != ignored_path_field
+        }
+        return any(
+            SubmissionService._normalize_copy_value(source_data.get(key))
+            != SubmissionService._normalize_copy_value(target_data.get(key))
+            for key in keys
+        )
+
+    @staticmethod
+    def validate_copy_submission(
+        *,
+        source_submission_id: int | None,
+        target_data: dict,
+        target_document: AssignedDocument | None,
+        template_id: int | None,
+        current_user: dict,
+        db: Session,
+    ) -> None:
+        if source_submission_id is None:
+            return
+
+        source = SubmissionRepository(db).get(source_submission_id)
+        if not source:
+            raise HTTPException(status_code=404, detail="Không tìm thấy báo cáo nguồn.")
+        if (
+            current_user["role"] != "admin"
+            and not SubmissionRepository(db).is_active_input_assignee(
+                source,
+                current_user["id"],
+            )
+        ):
+            raise HTTPException(status_code=403, detail="Bạn không có quyền nhân bản báo cáo này.")
+        if target_document is None:
+            raise HTTPException(
+                status_code=409,
+                detail={"code": "copy_scope_mismatch", "message": "Báo cáo nhân bản phải liên kết với một PDF chưa nhập."},
+            )
+        if source.template_id != template_id or target_document.template_id != template_id:
+            raise HTTPException(
+                status_code=409,
+                detail={"code": "copy_scope_mismatch", "message": "PDF đích phải dùng cùng biểu mẫu với báo cáo nguồn."},
+            )
+        if source.assigned_document_id == target_document.id:
+            raise HTTPException(
+                status_code=409,
+                detail={"code": "copy_scope_mismatch", "message": "PDF đích phải khác PDF của báo cáo nguồn."},
+            )
+
+        try:
+            source_data = json.loads(source.data_json)
+        except (TypeError, ValueError, json.JSONDecodeError):
+            source_data = {}
+        if not isinstance(source_data, dict):
+            source_data = {}
+
+        source_folder = normalize_folder_path(source.folder_path or source_data.get("_folder_path"))
+        target_folder = normalize_folder_path(target_data.get("_folder_path"))
+        if not source_folder or source_folder != target_folder:
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "code": "copy_scope_mismatch",
+                    "message": "PDF đích phải thuộc cùng dự án và cùng cấp hồ sơ với báo cáo nguồn.",
+                },
+            )
+
+        ignored_path_field = SubmissionService._copy_linked_path_field(template_id, db)
+        if not SubmissionService._copy_business_changed(source_data, target_data, ignored_path_field):
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "code": "copy_unchanged",
+                    "message": "Ngoài trường đường dẫn PDF, bạn phải sửa ít nhất một trường dữ liệu so với báo cáo nguồn.",
+                },
+            )
+
+    @staticmethod
     def delete_submission(db: Session, sub_id: int, current_user: dict) -> None:
         submission_repository = SubmissionRepository(db)
         sub = submission_repository.get(sub_id)
@@ -240,10 +580,13 @@ class SubmissionService:
             raise HTTPException(status_code=404, detail="Không tìm thấy hồ sơ.")
 
         if current_user["role"] != "admin":
-            is_creator = sub.created_by_user_id == current_user["id"]
-            if is_creator and sub.status != "draft":
+            is_active_input = submission_repository.is_active_input_assignee(
+                sub,
+                current_user["id"],
+            )
+            if is_active_input and sub.status != "draft":
                 raise HTTPException(status_code=409, detail="Nhân viên chỉ có thể xóa hồ sơ đang lưu nháp")
-            if not is_creator:
+            if not is_active_input:
                 raise HTTPException(status_code=403, detail="Bạn không có quyền xóa hồ sơ này")
 
         doc_id = sub.assigned_document_id
@@ -261,48 +604,23 @@ class SubmissionService:
         db.commit()
 
     @staticmethod
-    def copy_submission(db: Session, sub_id: int, current_user: dict) -> int:
-        from datetime import datetime, timezone
-        repository = SubmissionRepository(db)
-        sub = repository.get(sub_id)
-        if not sub:
-            raise HTTPException(status_code=404, detail="Không tìm thấy hồ sơ.")
-            
-        if current_user["role"] != "admin" and sub.created_by_user_id != current_user["id"]:
-            raise HTTPException(status_code=403, detail="Bạn không có quyền nhân bản hồ sơ này.")
-        
-        new_created_at = datetime.now(timezone.utc).replace(tzinfo=None)
-        
-        new_sub = Submission(
-            data_json=sub.data_json,
-            template_id=sub.template_id,
-            created_at=new_created_at,
-            created_by_user_id=current_user["id"],
-            assigned_document_id=sub.assigned_document_id,
-            folder_path=sub.folder_path,
-            folder_path_key=sub.folder_path_key,
-        )
-        repository.add(new_sub)
-        db.commit()
-        db.refresh(new_sub)
-        return new_sub.id
-
-    @staticmethod
     def validate_required_fields(
         template_id: int | None,
         data: dict,
         db: Session,
         *,
         allow_missing_linked_path: bool = False,
+        template_config: object = _CONTEXT_UNSET,
     ) -> None:
         if not template_id:
             return
-        template = TemplateRepository(db).get(template_id)
-        if not template or not template.config_json:
-            return
-        try:
-            config = json.loads(template.config_json)
-        except (TypeError, ValueError):
+        if template_config is _CONTEXT_UNSET:
+            config = SubmissionService._template_config(
+                TemplateRepository(db).get(template_id)
+            )
+        else:
+            config = template_config if isinstance(template_config, dict) else {}
+        if not config:
             return
         required_cols = config.get("required_cols", [])
         linked_path_config = config.get("linked_pdf_path") or {}
@@ -327,22 +645,28 @@ class SubmissionService:
             raise HTTPException(status_code=400, detail="Thiếu trường bắt buộc: " + ", ".join(missing))
 
     @staticmethod
-    def _linked_report_path(template_id: int | None, data: dict, db: Session) -> str:
+    def _linked_report_path(
+        template_id: int | None,
+        data: dict,
+        db: Session,
+        *,
+        template_config: object = _CONTEXT_UNSET,
+    ) -> str:
         path_value = data.get("_pdf_relative_path")
         if not path_value and template_id:
-            template = TemplateRepository(db).get(template_id)
-            if template and template.config_json:
-                try:
-                    config = json.loads(template.config_json)
-                except (TypeError, ValueError, json.JSONDecodeError):
-                    config = {}
-                linked_path_config = config.get("linked_pdf_path") or {}
-                try:
-                    linked_path_col = int(linked_path_config.get("col"))
-                except (TypeError, ValueError):
-                    linked_path_col = 0
-                if linked_path_col > 0:
-                    path_value = data.get(f"col_{linked_path_col - 1}")
+            if template_config is _CONTEXT_UNSET:
+                config = SubmissionService._template_config(
+                    TemplateRepository(db).get(template_id)
+                )
+            else:
+                config = template_config if isinstance(template_config, dict) else {}
+            linked_path_config = config.get("linked_pdf_path") or {}
+            try:
+                linked_path_col = int(linked_path_config.get("col"))
+            except (TypeError, ValueError):
+                linked_path_col = 0
+            if linked_path_col > 0:
+                path_value = data.get(f"col_{linked_path_col - 1}")
         return normalize_folder_path(path_value)
 
     @staticmethod
@@ -358,20 +682,29 @@ class SubmissionService:
         submission: Submission,
         data: dict,
         db: Session,
+        *,
+        template_config: object = _CONTEXT_UNSET,
+        candidates: list[Submission] | None = None,
     ) -> int:
+        if template_config is _CONTEXT_UNSET:
+            template_config = SubmissionService._template_config(
+                TemplateRepository(db).get(submission.template_id)
+            ) if submission.template_id else {}
         report_path = SubmissionService._linked_report_path(
             submission.template_id,
             data,
             db,
+            template_config=template_config,
         )
         if not report_path:
             return 0
         expected_content = SubmissionService._business_content(data)
-        candidates = SubmissionRepository(db).list_exact_duplicate_candidates(
-            template_id=submission.template_id,
-            folder_path_key_value=submission.folder_path_key,
-            exclude_submission_id=submission.id,
-        )
+        if candidates is None:
+            candidates = SubmissionRepository(db).list_exact_duplicate_candidates(
+                template_id=submission.template_id,
+                folder_path_key_value=submission.folder_path_key,
+                exclude_submission_id=submission.id,
+            )
         duplicate_count = 0
         for candidate in candidates:
             try:
@@ -384,6 +717,7 @@ class SubmissionService:
                 candidate.template_id,
                 candidate_data,
                 db,
+                template_config=template_config,
             ) != report_path:
                 continue
             if SubmissionService._business_content(candidate_data) == expected_content:
@@ -397,19 +731,7 @@ class SubmissionService:
         TemplateRepository(db).lock_for_update(template_id)
 
     @staticmethod
-    def normalize_wrong_fields(values: list[str] | None) -> list[str]:
-        normalized = []
-        for value in values or []:
-            if not isinstance(value, str):
-                continue
-            field_name = value.strip()
-            if not field_name or field_name.startswith("_") or field_name in normalized:
-                continue
-            normalized.append(field_name)
-        return normalized
-
-    @staticmethod
-    def _fetch_submission_relations(submissions: list[Submission], db: Session) -> tuple[dict, dict, dict, dict]:
+    def _fetch_submission_relations(submissions: list[Submission], db: Session) -> tuple[dict, dict, dict, dict, dict]:
         document_metadata = _load_submission_document_metadata(submissions, db)
         assignment_map = ReviewRepository(db).assignment_map(submissions)
         
@@ -431,12 +753,15 @@ class SubmissionService:
         }
         template_map = lookup_repository.template_name_map(template_ids)
         
-        return document_metadata, assignment_map, user_map, template_map
+        quality_map = SubmissionQualityRepository(db).map_for_submissions(
+            [submission.id for submission in submissions]
+        )
+        return document_metadata, assignment_map, user_map, template_map, quality_map
 
     @staticmethod
     def _build_submission_response(
         sub: Submission, index: int, current_page: int, page_size: int,
-        document_metadata: dict, assignment_map: dict, user_map: dict, template_map: dict
+        document_metadata: dict, assignment_map: dict, user_map: dict, template_map: dict, quality_map: dict
     ) -> dict:
         data_dict = json.loads(sub.data_json)
         metadata = document_metadata.get(sub.assigned_document_id)
@@ -461,6 +786,9 @@ class SubmissionService:
         template_name = template_map.get(sub.template_id, "Unknown") if sub.template_id else "Unknown"
         result_folder_path = "" if submission_folder == COMPLETED_WITHOUT_FOLDER else submission_folder
             
+        quality = quality_map.get(sub.id)
+        changed_field_count = int(getattr(quality, "changed_field_count", 0) or 0)
+        is_error_report = bool(getattr(quality, "is_error_report", False))
         return {
             "id": sub.id,
             "serial_number": (current_page - 1) * page_size + index + 1,
@@ -475,11 +803,13 @@ class SubmissionService:
             "folder_name": "Thư mục gốc" if result_folder_path == "__ROOT__" else result_folder_path.rstrip("/").rsplit("/", 1)[-1] if result_folder_path else "",
             "is_checked": sub.is_checked,
             "status": sub.status,
-            "has_errors": (
-                sub.status == "rejected"
-                or bool(data_dict.get("_wrong_sections", []))
-                or bool(data_dict.get("_wrong_fields", []))
-            ),
+            "has_errors": bool(data_dict.get("_wrong_sections", [])),
+            "quality": {
+                "has_review_changes": changed_field_count > 0,
+                "changed_field_count": changed_field_count,
+                "visible_field_count": int(getattr(quality, "visible_field_count", 0) or 0),
+                "is_error_report": is_error_report,
+            },
             "creator_name": user_map.get(sub.created_by_user_id, "Unknown"),
             "reviewer_name": user_map.get(assignment_map.get(sub.id), "Chưa phân công"),
         }
@@ -498,32 +828,58 @@ class SubmissionService:
         duplicate_only: bool = False,
     ) -> dict:
         repository = SubmissionRepository(db)
-        submissions, total, total_pages, current_page = repository.paginate(
-            owner_id=(None if current_user["role"] == "admin" else current_user["id"]),
-            status=status,
-            template_id=template_id,
-            start_date=start_date,
-            end_date=end_date,
-            folder_path=folder_path,
-            page=page,
-            page_size=page_size,
-            duplicate_only=duplicate_only,
-        )
+        if current_user["role"] == "admin":
+            submissions, total, total_pages, current_page = repository.paginate(
+                owner_id=None,
+                status=status,
+                template_id=template_id,
+                start_date=start_date,
+                end_date=end_date,
+                folder_path=folder_path,
+                page=page,
+                page_size=page_size,
+                duplicate_only=duplicate_only,
+            )
+        else:
+            submissions, total, total_pages, current_page = (
+                repository.paginate_for_input_user(
+                    user_id=current_user["id"],
+                    status=status,
+                    template_id=template_id,
+                    start_date=start_date,
+                    end_date=end_date,
+                    folder_path=folder_path,
+                    page=page,
+                    page_size=page_size,
+                    duplicate_only=duplicate_only,
+                )
+            )
 
-        document_metadata, assignment_map, user_map, template_map = SubmissionService._fetch_submission_relations(submissions, db)
+        document_metadata, assignment_map, user_map, template_map, quality_map = SubmissionService._fetch_submission_relations(submissions, db)
             
         results = [
             SubmissionService._build_submission_response(
                 sub, index, current_page, page_size,
-                document_metadata, assignment_map, user_map, template_map
+                document_metadata, assignment_map, user_map, template_map, quality_map
             )
             for index, sub in enumerate(submissions)
         ]
+
+        unread_submission_ids = (
+            SubmissionReviewHistoryRepository(db).unread_submission_ids(
+                current_user["id"]
+            )
+            if current_user["role"] != "admin"
+            else set()
+        )
+        for result in results:
+            result["quality"]["is_unread"] = result["id"] in unread_submission_ids
             
         first_item = (current_page - 1) * page_size + 1 if total else 0
         return {
             "status": "ok",
             "data": results,
+            "unread_review_count": len(unread_submission_ids),
             "pagination": {
                 "page": current_page,
                 "page_size": page_size,
