@@ -72,7 +72,7 @@ Cloudflare Tunnel -> Caddy :80 -> ScanToExcel 127.0.0.1:8000
 The Caddy site label must match the hostname sent by Cloudflare, for example:
 
 ```caddyfile
-sohoadang.aivn.net.vn {
+nhaplieu1.aivn.net.vn {
     reverse_proxy 127.0.0.1:8000
 }
 ```

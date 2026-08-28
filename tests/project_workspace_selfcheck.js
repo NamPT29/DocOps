@@ -14,6 +14,6 @@ assert(formRenderer.includes('window.activeProjectWorkspace'));
 assert(workspace.includes('/api/projects/${safeProjectId}/workspace'));
 assert(workspace.includes('window.activeTemplateId = response.data.project.template_id'));
 assert(workspace.includes("templateContainer.style.setProperty('display', 'none', 'important')"));
-assert(workspace.includes("manualUploadLabel.classList.add('d-none')"));
+assert(!workspace.includes('manualUploadLabel'));
 
 console.log('project workspace self-check passed');

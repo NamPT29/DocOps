@@ -163,66 +163,6 @@ function restoreQueue() {
     }
 }
 
-function setupPdfUpload() {
-    const uploadInput = document.getElementById('pdfUploadInput');
-    const iframe = document.getElementById('pdfIframe');
-    const placeholder = document.getElementById('pdfPlaceholder');
-    const fileQueueList = document.getElementById('fileQueueList');
-    
-    uploadInput.addEventListener('change', async function() {
-        if (!this.files || this.files.length === 0) return;
-        
-        // Disable input while uploading
-        uploadInput.disabled = true;
-        
-        for (let i = 0; i < this.files.length; i++) {
-            const file = this.files[i];
-            const formData = new FormData();
-            formData.append("file", file);
-            
-            // Show loading placeholder if this is the first file
-            if (uploadedFilesQueue.length === 0) {
-                iframe.style.display = 'none';
-                placeholder.style.display = 'block';
-                placeholder.textContent = `Đang tải ${file.name}...`;
-            }
-            
-            try {
-                const response = await authFetch('/api/upload-pdf', {
-                    method: 'POST',
-                    body: formData
-                });
-                if (!response) return;
-                const res = await response.json();
-                
-                if (res.status === 'ok') {
-                    const fileItem = {
-                        name: res.name || file.name,
-                        url: res.url,
-                        uuid: res.uuid
-                    };
-                    uploadedFilesQueue.push(fileItem);
-                    saveQueueState();
-                    renderFileQueue();
-                    
-                    // Automatically load the first uploaded file
-                    if (uploadedFilesQueue.length === 1) {
-                        selectFileFromQueue(0);
-                    }
-                } else {
-                    console.error("Lỗi tải file: " + res.message);
-                }
-            } catch (err) {
-                console.error("Lỗi kết nối: " + err);
-            }
-        }
-        
-        // Re-enable and clear input
-        uploadInput.disabled = false;
-        uploadInput.value = '';
-    });
-}
-
 function openQueueFolder(folderKey) {
     activeQueueFolderKey = folderKey || null;
     renderFileQueue();

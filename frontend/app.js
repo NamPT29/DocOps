@@ -1,7 +1,6 @@
 async function initApp() {
     // Only run form-related stuff if form-container exists (i.e. not on admin.html)
     if (document.getElementById('form-container')) {
-        setupPdfUpload();
         restoreQueue();
         // Reconcile persisted local files with the current assignment first.
         const hasCheckId = new URLSearchParams(window.location.search).has('check_id');

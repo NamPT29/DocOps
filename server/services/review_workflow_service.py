@@ -37,6 +37,8 @@ class ReviewWorkflowService:
         review_repository = ReviewRepository(db)
         lookup_repository = LookupRepository(db)
         assignment = review_repository.get_submission_assignment(submission.id)
+        if document is None and submission.assigned_document_id is not None:
+            document = DocumentRepository(db).get(submission.assigned_document_id)
         document_assignment = None
         if document:
             document_assignment = review_repository.get_document_assignment(document.id)
@@ -212,6 +214,19 @@ class ReviewWorkflowService:
         if current_user.get('role') == 'admin':
             return True
         assignment = ReviewWorkflowService.get_review_assignment(db, submission.id)
+        if (
+            assignment
+            and assignment.reviewer_user_id == current_user["id"]
+            and submission.created_by_user_id != current_user["id"]
+        ):
+            return True
+        if submission.status != "pending_review":
+            return False
+        assignment = ReviewWorkflowService.assign_submission_reviewer(
+            submission,
+            db,
+            required=False,
+        )
         return bool(
             assignment
             and assignment.reviewer_user_id == current_user["id"]
@@ -227,6 +242,12 @@ class ReviewWorkflowService:
         if current_user.get('role') == 'admin':
             return ReviewWorkflowService.get_review_assignment(db, submission.id)
         assignment = ReviewWorkflowService.get_review_assignment(db, submission.id)
+        if submission.status == "pending_review":
+            assignment = ReviewWorkflowService.assign_submission_reviewer(
+                submission,
+                db,
+                required=False,
+            )
         if (
             not assignment
             or assignment.reviewer_user_id != current_user["id"]

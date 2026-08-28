@@ -37,14 +37,27 @@ def configure_server_runtime(
     environment: MutableMapping[str, str] | None = None,
     *,
     cpu_count: int | None = None,
+    platform_name: str | None = None,
 ) -> ServerRuntimeConfig:
-    """Resolve worker count and bound default DB connections across workers."""
+    """Resolve a stable worker count and bound DB connections across workers."""
     target = environment if environment is not None else os.environ
+    platform = platform_name if platform_name is not None else os.name
+    default_workers = (
+        1
+        if platform == "nt"
+        else _default_worker_count(cpu_count if cpu_count is not None else os.cpu_count())
+    )
     worker_count = _positive_int(
         target.get("UVICORN_WORKERS"),
         name="UVICORN_WORKERS",
-        default=_default_worker_count(cpu_count if cpu_count is not None else os.cpu_count()),
+        default=default_workers,
     )
+    if platform == "nt" and worker_count != 1:
+        raise RuntimeError(
+            "UVICORN_WORKERS phai bang 1 tren Windows. "
+            "Uvicorn multi-worker co the loi khoi dong socket WinError 10022; "
+            "hay chay nhieu worker tren Linux hoac tach tac vu nang sang background worker."
+        )
     if worker_count > MAX_UVICORN_WORKERS:
         raise RuntimeError(
             f"UVICORN_WORKERS không được vượt quá {MAX_UVICORN_WORKERS}."

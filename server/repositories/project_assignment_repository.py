@@ -1,6 +1,14 @@
 from collections import Counter
 
-from server.models import Project, ProjectAssignmentHistory, ProjectCase, ProjectMember
+from sqlalchemy import func
+
+from server.models import (
+    Project,
+    ProjectAssignmentHistory,
+    ProjectCase,
+    ProjectDocumentAsset,
+    ProjectMember,
+)
 
 
 class ProjectAssignmentRepository:
@@ -56,6 +64,24 @@ class ProjectAssignmentRepository:
             if reviewer_user_id is not None:
                 reviewer_counts[reviewer_user_id] += 1
         return input_counts, reviewer_counts
+
+    def active_pdf_counts_by_case(self, project_id):
+        rows = (
+            self.session.query(
+                ProjectDocumentAsset.case_id,
+                func.count(ProjectDocumentAsset.id),
+            )
+            .filter(
+                ProjectDocumentAsset.project_id == project_id,
+                ProjectDocumentAsset.status == "active",
+            )
+            .group_by(ProjectDocumentAsset.case_id)
+            .all()
+        )
+        return {
+            case_id: int(pdf_count or 0)
+            for case_id, pdf_count in rows
+        }
 
     def add_history(
         self,

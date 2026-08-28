@@ -14,6 +14,12 @@ _ROUTE_SUMMARIES: dict[str, dict[str, str]] = {
     "/api/users": {"get": "List users", "post": "Create a user"},
     "/api/users/{user_id}": {"patch": "Update a user's profile", "delete": "Delete a user"},
     "/api/users/{user_id}/password": {"put": "Change a user's password"},
+    "/api/submissions/{sub_id}": {"put": "Update a submission"},
+    "/api/submissions/{sub_id}/view": {"put": "Claim the submission view lease"},
+    "/api/export": {"get": "Export approved submissions"},
+    "/api/export-jobs": {"post": "Start a background export job"},
+    "/api/export-jobs/{job_id}": {"get": "Get background export status"},
+    "/api/export-jobs/{job_id}/download": {"get": "Download a completed export"},
 }
 
 

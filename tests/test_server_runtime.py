@@ -6,14 +6,18 @@ import pytest
 
 import app_launcher
 import host_console
-from server.routers import documents, project_uploads, submissions
+from server.routers import documents, project_uploads
 from server.runtime_config import configure_server_runtime
 
 
 def test_runtime_uses_half_cpu_up_to_four_workers_and_bounds_db_pool():
     environment = {}
 
-    configured = configure_server_runtime(environment, cpu_count=16)
+    configured = configure_server_runtime(
+        environment,
+        cpu_count=16,
+        platform_name="posix",
+    )
 
     assert configured.workers == 4
     assert configured.db_pool_size == 5
@@ -30,7 +34,11 @@ def test_runtime_honors_explicit_worker_and_pool_configuration():
         "DB_MAX_OVERFLOW": "4",
     }
 
-    configured = configure_server_runtime(environment, cpu_count=2)
+    configured = configure_server_runtime(
+        environment,
+        cpu_count=2,
+        platform_name="posix",
+    )
 
     assert configured.workers == 3
     assert configured.db_pool_size == 7
@@ -39,16 +47,46 @@ def test_runtime_honors_explicit_worker_and_pool_configuration():
 
 def test_runtime_rejects_excessive_worker_count():
     with pytest.raises(RuntimeError, match="không được vượt quá"):
-        configure_server_runtime({"UVICORN_WORKERS": "9"}, cpu_count=16)
+        configure_server_runtime(
+            {"UVICORN_WORKERS": "9"},
+            cpu_count=16,
+            platform_name="posix",
+        )
 
 
 def test_runtime_rejects_excessive_total_database_connections():
     with pytest.raises(RuntimeError, match="Tổng kết nối database"):
-        configure_server_runtime({
-            "UVICORN_WORKERS": "4",
-            "DB_POOL_SIZE": "20",
-            "DB_MAX_OVERFLOW": "20",
-        })
+        configure_server_runtime(
+            {
+                "UVICORN_WORKERS": "4",
+                "DB_POOL_SIZE": "20",
+                "DB_MAX_OVERFLOW": "20",
+            },
+            platform_name="posix",
+        )
+
+
+def test_runtime_uses_one_worker_on_windows_to_avoid_uvicorn_socket_spawn_error():
+    environment = {}
+
+    configured = configure_server_runtime(
+        environment,
+        cpu_count=16,
+        platform_name="nt",
+    )
+
+    assert configured.workers == 1
+    assert configured.db_pool_size == 20
+    assert configured.db_max_overflow == 10
+    assert "MULTIPROCESS_LOGGING" not in environment
+
+
+def test_runtime_rejects_multiple_uvicorn_workers_on_windows():
+    with pytest.raises(RuntimeError, match="phai bang 1 tren Windows"):
+        configure_server_runtime(
+            {"UVICORN_WORKERS": "2"},
+            platform_name="nt",
+        )
 
 
 def test_app_launcher_passes_worker_count_to_uvicorn(monkeypatch, tmp_path):
@@ -86,7 +124,6 @@ def test_async_upload_routes_offload_complete_sync_units(monkeypatch):
         return {"status": "ok"}
 
     monkeypatch.setattr(documents, "run_in_threadpool", fake_run_in_threadpool)
-    monkeypatch.setattr(submissions, "run_in_threadpool", fake_run_in_threadpool)
     monkeypatch.setattr(project_uploads, "run_in_threadpool", fake_run_in_threadpool)
 
     asyncio.run(documents.upload_and_assign_documents(
@@ -97,12 +134,6 @@ def test_async_upload_routes_offload_complete_sync_units(monkeypatch):
         current_user={"id": 1},
         db=object(),
     ))
-    asyncio.run(submissions.api_upload_pdf(
-        file=object(),
-        current_user={"id": 2},
-        db=object(),
-    ))
-
     class FakeRequest:
         async def body(self):
             return b"%PDF-test"
@@ -118,7 +149,6 @@ def test_async_upload_routes_offload_complete_sync_units(monkeypatch):
 
     assert [call[0] for call in calls] == [
         documents._upload_and_assign_documents_sync,
-        submissions._upload_pdf_sync,
         project_uploads.enforce_project_upload_chunk_rate_limit,
         project_uploads.write_upload_chunk,
     ]

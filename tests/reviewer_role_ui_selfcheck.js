@@ -84,6 +84,7 @@ assert(authSource.includes("apiCall('/api/me'"));
 const assignmentSource = fs.readFileSync('frontend/js/admin_panel.js', 'utf8');
 assert(assignmentSource.includes('input_user_ids: inputUserIds'));
 assert(assignmentSource.includes('reviewer_user_ids: reviewerUserIds'));
+assert(assignmentSource.includes("usersData.data.filter(user => user.role !== 'admin')"));
 assert(assignmentSource.includes('formatApiErrorDetail(data.detail'));
 assert(assignmentSource.includes('async function revokeAssignments('));
 assert(assignmentSource.includes('/api/documents/assignments/revoke'));

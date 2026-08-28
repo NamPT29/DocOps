@@ -4,7 +4,6 @@ from sqlalchemy.orm import Session
 from typing import List, Literal, Optional
 from datetime import datetime
 import os
-import secrets
 import uuid
 from urllib.parse import quote
 from server.database import get_db, get_utc_now
@@ -183,7 +182,7 @@ def _upload_and_assign_documents_sync(
         raise HTTPException(status_code=404, detail="Biểu mẫu không tồn tại")
     user_repository = UserRepository(db)
     valid_user_ids = user_repository.input_user_ids()
-    valid_reviewer_ids = {user.id for user in user_repository.list_all()}
+    valid_reviewer_ids = user_repository.input_user_ids()
     if not set(user_id_list).issubset(valid_user_ids):
         raise HTTPException(status_code=400, detail="Danh sách nhân viên không hợp lệ")
     if not set(reviewer_id_list).issubset(valid_reviewer_ids):
@@ -195,12 +194,22 @@ def _upload_and_assign_documents_sync(
         )
     
     uploaded_count = 0
-    assigned_stats = {uid: 0 for uid in user_id_list}
     created_paths = []
     
     try:
         document_repository = DocumentRepository(db)
-        for i, file in enumerate(files):
+        document_counts = document_repository.user_document_counts()
+        input_loads = {
+            user_id: document_counts.get(user_id, {}).get("pending", 0)
+            for user_id in user_id_list
+        }
+        existing_reviewer_loads = document_repository.reviewer_reservation_counts()
+        reviewer_loads = {
+            user_id: existing_reviewer_loads.get(user_id, 0)
+            for user_id in reviewer_id_list
+        }
+
+        for file in files:
             if not file.filename:
                 continue
 
@@ -211,8 +220,10 @@ def _upload_and_assign_documents_sync(
             save_validated_upload(file, filepath, kind="document")
             created_paths.append(filepath)
                 
-            # Round-robin assignment
-            assignee_id = user_id_list[uploaded_count % len(user_id_list)]
+            assignee_id = min(
+                user_id_list,
+                key=lambda user_id: (input_loads[user_id], user_id),
+            )
             
             doc = AssignedDocument(
                 original_filename=original_filename,
@@ -226,19 +237,24 @@ def _upload_and_assign_documents_sync(
             reviewer_candidates = [
                 user_id for user_id in reviewer_id_list if user_id != assignee_id
             ]
+            reviewer_id = min(
+                reviewer_candidates,
+                key=lambda user_id: (reviewer_loads[user_id], user_id),
+            )
             document_repository.add_review_assignment(
                 AssignedDocumentReviewAssignment(
                     document_id=doc.id,
-                    reviewer_user_id=secrets.choice(reviewer_candidates),
+                    reviewer_user_id=reviewer_id,
                 )
             )
-            assigned_stats[assignee_id] += 1
+            input_loads[assignee_id] += 1
+            reviewer_loads[reviewer_id] += 1
             uploaded_count += 1
             
         db.commit()
         return {
             "status": "ok", 
-            "message": f"Đã tải lên và chia đều {uploaded_count} tài liệu cho {len(user_id_list)} nhân viên."
+            "message": f"Đã tải lên và phân {uploaded_count} tài liệu theo tải hiện có cho {len(user_id_list)} nhân viên."
         }
     except HTTPException:
         db.rollback()

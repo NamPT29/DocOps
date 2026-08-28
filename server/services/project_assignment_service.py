@@ -1,3 +1,5 @@
+from collections import Counter
+
 from server.repositories.project_assignment_repository import ProjectAssignmentRepository
 
 
@@ -16,31 +18,53 @@ def assign_unassigned_project_cases(db, *, project_id, changed_by_user_id):
     input_user_ids = repository.active_member_ids(project_id, "input")
     reviewer_user_ids = repository.active_member_ids(project_id, "reviewer")
     cases = repository.lock_cases(project_id)
-    input_counts, reviewer_counts = repository.existing_assignment_counts(project_id)
+    pdf_counts = repository.active_pdf_counts_by_case(project_id)
+    case_weights = {
+        case_row.id: max(1, pdf_counts.get(case_row.id, 0))
+        for case_row in cases
+    }
+    input_loads = Counter()
+    reviewer_loads = Counter()
+    for case_row in cases:
+        weight = case_weights[case_row.id]
+        if case_row.assigned_input_user_id is not None:
+            input_loads[case_row.assigned_input_user_id] += weight
+        if case_row.assigned_reviewer_user_id is not None:
+            reviewer_loads[case_row.assigned_reviewer_user_id] += weight
+
     input_assigned = 0
     reviewer_assigned = 0
 
-    for case_row in cases:
-        if case_row.assigned_input_user_id is None:
-            input_user_id = _least_loaded_user(input_user_ids, input_counts)
-            if input_user_id is not None:
-                case_row.assigned_input_user_id = input_user_id
-                input_counts[input_user_id] += 1
-                input_assigned += 1
-                repository.add_history(
-                    project_id=project_id,
-                    case_id=case_row.id,
-                    assignment_role="input",
-                    from_user_id=None,
-                    to_user_id=input_user_id,
-                    changed_by_user_id=changed_by_user_id,
-                    reason="initial_import",
-                )
+    unassigned_input_cases = sorted(
+        (case_row for case_row in cases if case_row.assigned_input_user_id is None),
+        key=lambda case_row: (
+            -case_weights[case_row.id],
+            case_row.case_key.casefold(),
+            case_row.id,
+        ),
+    )
+    for case_row in unassigned_input_cases:
+        input_user_id = _least_loaded_user(input_user_ids, input_loads)
+        if input_user_id is None:
+            continue
+        case_row.assigned_input_user_id = input_user_id
+        input_loads[input_user_id] += case_weights[case_row.id]
+        input_assigned += 1
+        repository.add_history(
+            project_id=project_id,
+            case_id=case_row.id,
+            assignment_role="input",
+            from_user_id=None,
+            to_user_id=input_user_id,
+            changed_by_user_id=changed_by_user_id,
+            reason="initial_import",
+        )
 
+    for case_row in cases:
         if case_row.assigned_reviewer_user_id == case_row.assigned_input_user_id:
             previous_reviewer_id = case_row.assigned_reviewer_user_id
             if previous_reviewer_id is not None:
-                reviewer_counts[previous_reviewer_id] -= 1
+                reviewer_loads[previous_reviewer_id] -= case_weights[case_row.id]
             case_row.assigned_reviewer_user_id = None
             repository.add_history(
                 project_id=project_id,
@@ -52,26 +76,35 @@ def assign_unassigned_project_cases(db, *, project_id, changed_by_user_id):
                 reason="prevent_self_review",
             )
 
-        if case_row.assigned_reviewer_user_id is None:
-            eligible_reviewers = [
-                user_id
-                for user_id in reviewer_user_ids
-                if user_id != case_row.assigned_input_user_id
-            ]
-            reviewer_user_id = _least_loaded_user(eligible_reviewers, reviewer_counts)
-            if reviewer_user_id is not None:
-                case_row.assigned_reviewer_user_id = reviewer_user_id
-                reviewer_counts[reviewer_user_id] += 1
-                reviewer_assigned += 1
-                repository.add_history(
-                    project_id=project_id,
-                    case_id=case_row.id,
-                    assignment_role="reviewer",
-                    from_user_id=None,
-                    to_user_id=reviewer_user_id,
-                    changed_by_user_id=changed_by_user_id,
-                    reason="initial_import",
-                )
+    unassigned_reviewer_cases = sorted(
+        (case_row for case_row in cases if case_row.assigned_reviewer_user_id is None),
+        key=lambda case_row: (
+            -case_weights[case_row.id],
+            case_row.case_key.casefold(),
+            case_row.id,
+        ),
+    )
+    for case_row in unassigned_reviewer_cases:
+        eligible_reviewers = [
+            user_id
+            for user_id in reviewer_user_ids
+            if user_id != case_row.assigned_input_user_id
+        ]
+        reviewer_user_id = _least_loaded_user(eligible_reviewers, reviewer_loads)
+        if reviewer_user_id is None:
+            continue
+        case_row.assigned_reviewer_user_id = reviewer_user_id
+        reviewer_loads[reviewer_user_id] += case_weights[case_row.id]
+        reviewer_assigned += 1
+        repository.add_history(
+            project_id=project_id,
+            case_id=case_row.id,
+            assignment_role="reviewer",
+            from_user_id=None,
+            to_user_id=reviewer_user_id,
+            changed_by_user_id=changed_by_user_id,
+            reason="initial_import",
+        )
 
     db.flush()
     return {

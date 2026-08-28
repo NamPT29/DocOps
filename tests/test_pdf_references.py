@@ -1,14 +1,11 @@
 import asyncio
-import inspect
 import json
-from io import BytesIO
 from types import SimpleNamespace
 
 import pytest
 from fastapi import HTTPException
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
-from starlette.datastructures import UploadFile
 
 from server.database import Base
 from server.routers import submissions
@@ -268,6 +265,51 @@ def test_admin_opening_review_also_gets_every_pdf_from_the_folder():
         test_session.close()
 
 
+def test_reviewer_opening_pending_submission_recovers_document_review_assignment():
+    engine = create_engine('sqlite:///:memory:')
+    Base.metadata.create_all(bind=engine)
+    test_session = sessionmaker(bind=engine)()
+    try:
+        test_session.add_all([
+            User(id=2, username='input', password='hash', role='user'),
+            User(id=3, username='reviewer', password='hash', role='user'),
+            AssignedDocument(
+                id=20,
+                original_filename='form.pdf',
+                uuid_filename='review-form.pdf',
+                assigned_to_user_id=2,
+                status='completed',
+            ),
+            AssignedDocumentReviewAssignment(document_id=20, reviewer_user_id=3),
+            Submission(
+                id=30,
+                assigned_document_id=20,
+                created_by_user_id=2,
+                status='pending_review',
+                data_json=json.dumps({
+                    '_pdf_filename': 'form.pdf',
+                    '_pdf_uuid': 'review-form.pdf',
+                }),
+            ),
+        ])
+        test_session.commit()
+
+        result = submissions.api_get_submission(
+            30,
+            current_user={'id': 3, 'role': 'user'},
+            db=test_session,
+        )
+
+        assignment = test_session.query(SubmissionReviewAssignment).filter_by(
+            submission_id=30,
+        ).one()
+        assert result['status'] == 'ok'
+        assert result['can_review'] is True
+        assert assignment.reviewer_user_id == 3
+    finally:
+        test_session.close()
+
+
 def test_builds_url_for_manual_upload_uuid_without_assignment():
     data, resolved = SubmissionService.enrich_pdf_reference(
         {
@@ -282,60 +324,6 @@ def test_builds_url_for_manual_upload_uuid_without_assignment():
     assert resolved is None
     assert data['_pdf_url'] == _pdf_url('uuid_Hồ sơ.pdf')
     assert data['_pdf_url'] == '/api/files/uuid_H%E1%BB%93%20s%C6%A1.pdf'
-
-
-def test_manual_upload_uses_configured_pdf_storage(monkeypatch, tmp_path):
-    monkeypatch.setattr(submissions, 'PDF_STORAGE_PATH', str(tmp_path))
-    upload = UploadFile(filename='Hồ sơ.pdf', file=BytesIO(b'%PDF-test'))
-    db = FakeDb()
-
-    result = asyncio.run(
-        submissions.api_upload_pdf(upload, current_user={'id': 2}, db=db)
-    )
-
-    assert result['status'] == 'ok'
-    assert result['name'] == 'Hồ sơ.pdf'
-    assert result['uuid'].endswith('_Hồ sơ.pdf')
-    assert result['url'].startswith('/api/files/')
-    assert (tmp_path / result['uuid']).read_bytes() == b'%PDF-test'
-    assert db.added.uuid_filename == result['uuid']
-    assert db.added.assigned_to_user_id == 2
-    assert db.committed
-
-
-def test_manual_upload_rejects_disguised_html(monkeypatch, tmp_path):
-    monkeypatch.setattr(submissions, 'PDF_STORAGE_PATH', str(tmp_path))
-    upload = UploadFile(filename='attack.pdf', file=BytesIO(b'<script>alert(1)</script>'))
-    db = FakeDb()
-
-    with pytest.raises(HTTPException, match='Nội dung file không đúng định dạng') as error:
-        asyncio.run(submissions.api_upload_pdf(upload, current_user={'id': 2}, db=db))
-
-    assert error.value.status_code == 400
-    assert db.rolled_back
-    assert list(tmp_path.iterdir()) == []
-
-
-def test_manual_upload_requires_input_capability():
-    dependency = inspect.signature(submissions.api_upload_pdf).parameters[
-        'current_user'
-    ].default
-
-    assert dependency.dependency is submissions.get_input_user
-
-
-def test_manual_upload_rejects_file_over_configured_limit(monkeypatch, tmp_path):
-    monkeypatch.setattr(submissions, 'PDF_STORAGE_PATH', str(tmp_path))
-    monkeypatch.setattr(submissions, 'DOCUMENT_UPLOAD_MAX_BYTES', 12)
-    upload = UploadFile(filename='large.pdf', file=BytesIO(b'%PDF-' + b'x' * 20))
-    db = FakeDb()
-
-    with pytest.raises(HTTPException, match='File vượt quá giới hạn') as error:
-        asyncio.run(submissions.api_upload_pdf(upload, current_user={'id': 2}, db=db))
-
-    assert error.value.status_code == 413
-    assert db.rolled_back
-    assert list(tmp_path.iterdir()) == []
 
 
 def test_file_download_rejects_another_user(tmp_path, monkeypatch):

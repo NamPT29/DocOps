@@ -1,8 +1,8 @@
 import hashlib
 import json
 import os
-import secrets
 import uuid
+from collections import Counter
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path, PurePosixPath
@@ -158,11 +158,22 @@ def scan_server_source_documents(relative_path: str = "") -> tuple[dict, list[Se
     maximum_selectable_level = max(1, max_depth)
     grouping_levels = []
     for level in range(1, maximum_selectable_level + 1):
-        groups = sorted({folder_group_for_level(item, level) for item in documents})
+        group_pdf_counts = Counter(
+            folder_group_for_level(item, level)
+            for item in documents
+        )
+        groups = sorted(group_pdf_counts)
+        pdf_counts = list(group_pdf_counts.values())
         grouping_levels.append(
             {
                 "level": level,
                 "group_count": len(groups),
+                "min_pdf_count": min(pdf_counts, default=0),
+                "max_pdf_count": max(pdf_counts, default=0),
+                "average_pdf_count": round(
+                    sum(pdf_counts) / len(pdf_counts),
+                    2,
+                ) if pdf_counts else 0,
                 "examples": groups[:5],
             }
         )
@@ -205,7 +216,7 @@ def source_document_upload_id(document: ServerSourceDocument, template_id: int) 
 def _validate_import_job(job, user_ids, reviewer_ids, db):
     user_repository = UserRepository(db)
     valid_input_ids = user_repository.input_user_ids()
-    valid_reviewer_ids = {user.id for user in user_repository.list_all()}
+    valid_reviewer_ids = user_repository.input_user_ids()
     if not set(user_ids).issubset(valid_input_ids):
         raise HTTPException(status_code=400, detail="Danh sách người nhập không hợp lệ")
     if not reviewer_ids or not set(reviewer_ids).issubset(valid_reviewer_ids):
@@ -220,24 +231,40 @@ def _validate_import_job(job, user_ids, reviewer_ids, db):
 
 
 def _prepare_group_assignments(documents, job, user_ids, reviewer_ids) -> tuple[dict, dict]:
-    groups = sorted(
-        {folder_group_for_level(document, job.grouping_level) for document in documents},
-        key=str.casefold,
+    group_weights = Counter(
+        folder_group_for_level(document, job.grouping_level)
+        for document in documents
     )
-    group_assignees = {
-        group: user_ids[index % len(user_ids)] for index, group in enumerate(groups)
-    }
-    
+    groups = sorted(
+        group_weights,
+        key=lambda group: (-group_weights[group], group.casefold()),
+    )
+    input_loads = Counter()
+    reviewer_loads = Counter()
+    group_assignees = {}
     group_reviewers = {}
-    for group, assignee_id in group_assignees.items():
+    for group in groups:
+        weight = group_weights[group]
+        assignee_id = min(
+            user_ids,
+            key=lambda user_id: (input_loads[user_id], user_id),
+        )
+        group_assignees[group] = assignee_id
+        input_loads[assignee_id] += weight
+
         reviewer_candidates = [rid for rid in reviewer_ids if rid != assignee_id]
         if not reviewer_candidates:
             raise HTTPException(
                 status_code=400,
                 detail=f"Folder {group} không có người kiểm tra khác người nhập",
             )
-        group_reviewers[group] = secrets.choice(reviewer_candidates)
-        
+        reviewer_id = min(
+            reviewer_candidates,
+            key=lambda user_id: (reviewer_loads[user_id], user_id),
+        )
+        group_reviewers[group] = reviewer_id
+        reviewer_loads[reviewer_id] += weight
+
     return group_assignees, group_reviewers
 
 def _process_existing_document(
@@ -424,7 +451,7 @@ def create_server_folder_import_job(
         
     user_repository = UserRepository(db)
     valid_input_ids = user_repository.input_user_ids()
-    valid_reviewer_ids = {user.id for user in user_repository.list_all()}
+    valid_reviewer_ids = user_repository.input_user_ids()
     if not set(input_user_ids).issubset(valid_input_ids):
         raise HTTPException(status_code=400, detail="Danh sách người nhập không hợp lệ")
     if not set(reviewer_user_ids).issubset(valid_reviewer_ids):

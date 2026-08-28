@@ -80,7 +80,6 @@ const appSandbox = {
         },
     },
     fetchSchema() {},
-    setupPdfUpload() {},
     restoreQueue() {},
     editSubmission() {},
     setTimeout(callback) { callback(); },

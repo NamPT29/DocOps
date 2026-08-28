@@ -8,7 +8,18 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from server.database import Base, get_db
-from server.models import Project, ProjectMember, Submission, SubmissionReviewAssignment, Template, User
+from server.models import (
+    AssignedDocument,
+    Project,
+    ProjectCase,
+    ProjectDocumentAsset,
+    ProjectMember,
+    ProjectReportUnit,
+    Submission,
+    SubmissionReviewAssignment,
+    Template,
+    User,
+)
 from server.routers import projects, submissions
 from server.routers.auth import ALGORITHM, SECRET_KEY
 from server.routers.project_access import get_project_input_member
@@ -188,3 +199,89 @@ def test_submission_access_routes_return_401_403_and_allow_owner(
     )
     assert allowed.status_code == 200
     assert allowed.json()["status"] == "ok"
+
+
+def test_transferred_case_revokes_original_author_and_allows_active_assignee(db):
+    _admin, original_author, _reviewer, project = _seed_project(db)
+    active_assignee = User(username="rbac-new-input", password="hash", role="user")
+    db.add(active_assignee)
+    db.flush()
+    db.add(ProjectMember(
+        project_id=project.id,
+        user_id=active_assignee.id,
+        member_role="input",
+    ))
+    case_row = ProjectCase(
+        project_id=project.id,
+        case_key="case-001",
+        display_name="Case 001",
+        assigned_input_user_id=active_assignee.id,
+    )
+    db.add(case_row)
+    db.flush()
+    report_unit = ProjectReportUnit(
+        project_id=project.id,
+        case_id=case_row.id,
+        report_key="report-001",
+        display_name="Report 001",
+    )
+    document = AssignedDocument(
+        original_filename="transferred.pdf",
+        uuid_filename="transferred.pdf",
+        assigned_to_user_id=active_assignee.id,
+        template_id=project.template_id,
+        status="assigned",
+    )
+    db.add_all([report_unit, document])
+    db.flush()
+    db.add(ProjectDocumentAsset(
+        project_id=project.id,
+        case_id=case_row.id,
+        report_unit_id=report_unit.id,
+        assigned_document_id=document.id,
+        relative_path="case-001/transferred.pdf",
+        normalized_relative_path="case-001/transferred.pdf",
+        original_filename="transferred.pdf",
+        storage_filename="transferred.pdf",
+        content_sha256="a" * 64,
+        byte_size=1,
+    ))
+    submission = Submission(
+        data_json='{"_pdf_uuid": "transferred.pdf"}',
+        template_id=project.template_id,
+        created_by_user_id=original_author.id,
+        assigned_document_id=document.id,
+        status="draft",
+    )
+    db.add(submission)
+    db.commit()
+
+    with pytest.raises(HTTPException) as update_forbidden:
+        submissions.api_update_submission(
+            submission.id,
+            submissions.SubmitRequest(data={"_pdf_uuid": document.uuid_filename}, status="draft"),
+            current_user={"id": original_author.id, "role": "user"},
+            db=db,
+        )
+    with pytest.raises(HTTPException) as view_forbidden:
+        submissions.api_claim_submission_view(
+            submission.id,
+            current_user={"id": original_author.id, "role": "user"},
+            db=db,
+        )
+
+    assert update_forbidden.value.status_code == 403
+    assert view_forbidden.value.status_code == 403
+    assert submissions.api_update_submission(
+        submission.id,
+        submissions.SubmitRequest(data={"_pdf_uuid": document.uuid_filename}, status="draft"),
+        current_user={"id": active_assignee.id, "role": "user"},
+        db=db,
+    ) == {"status": "ok"}
+    claimed = submissions.api_claim_submission_view(
+        submission.id,
+        current_user={"id": active_assignee.id, "role": "user"},
+        db=db,
+    )
+    assert claimed["viewer_is_current_user"] is True
+    assert submission.created_by_user_id == original_author.id

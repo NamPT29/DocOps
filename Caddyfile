@@ -2,7 +2,7 @@
 # Ví dụ: app.doanhnghiep.com
 # Nếu bạn chưa có tên miền và chỉ muốn chạy bằng IP cục bộ, hãy thay bằng localhost hoặc IP máy chủ kèm cổng (vd: :80)
 
-http://sohoadang.aivn.net.vn {
+http://nhaplieu1.aivn.net.vn {
     reverse_proxy 127.0.0.1:8000
 
     

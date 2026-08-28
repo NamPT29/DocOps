@@ -1,11 +1,14 @@
 import json
+from io import BytesIO
+from types import SimpleNamespace
 
 import pytest
-from fastapi import BackgroundTasks, HTTPException
+from fastapi import BackgroundTasks, HTTPException, UploadFile
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from server.database import Base
+from server.routers import documents as document_routes
 from server.models import (
     AssignedDocument,
     AssignedDocumentFolder,
@@ -92,8 +95,22 @@ def test_scan_server_folder_reports_available_assignment_levels(monkeypatch, tmp
         "001/0002/1.pdf",
     ]
     assert summary["grouping_levels"] == [
-        {"level": 1, "group_count": 1, "examples": ["001"]},
-        {"level": 2, "group_count": 2, "examples": ["001/0001", "001/0002"]},
+        {
+            "level": 1,
+            "group_count": 1,
+            "min_pdf_count": 3,
+            "max_pdf_count": 3,
+            "average_pdf_count": 3.0,
+            "examples": ["001"],
+        },
+        {
+            "level": 2,
+            "group_count": 2,
+            "min_pdf_count": 1,
+            "max_pdf_count": 2,
+            "average_pdf_count": 1.5,
+            "examples": ["001/0001", "001/0002"],
+        },
     ]
     assert folder_group_for_level(documents[0], 1) == "001"
     assert folder_group_for_level(documents[0], 2) == "001/0001"
@@ -104,6 +121,9 @@ def test_scan_server_folder_reports_available_assignment_levels(monkeypatch, tmp
         {
             "level": 1,
             "group_count": 2,
+            "min_pdf_count": 1,
+            "max_pdf_count": 2,
+            "average_pdf_count": 1.5,
             "examples": ["001/0001", "001/0002"],
         }
     ]
@@ -215,7 +235,7 @@ def test_server_folder_browser_stays_inside_configured_root(monkeypatch, tmp_pat
     assert error.value.status_code == 400
 
 
-def test_assignment_request_accepts_admin_as_reviewer_and_rejects_self_only_pool(
+def test_assignment_request_rejects_admin_as_reviewer_and_self_only_pool(
     monkeypatch, tmp_path, database_factory
 ):
     source_root = tmp_path / "source"
@@ -229,22 +249,21 @@ def test_assignment_request_accepts_admin_as_reviewer_and_rejects_self_only_pool
     db.add_all([admin, employee, template])
     db.commit()
 
-    result = start_server_folder_import(
-        ServerFolderImportRequest(
-            template_id=template.id,
-            input_user_ids=[employee.id],
-            reviewer_user_ids=[admin.id],
-            relative_path="",
-            grouping_level=1,
-        ),
-        BackgroundTasks(),
-        current_user={"id": admin.id, "role": "admin"},
-        db=db,
-    )
-
-    reviewer_row = db.query(ServerFolderImportReviewer).one()
-    assert result["status"] == "ok"
-    assert reviewer_row.reviewer_user_id == admin.id
+    with pytest.raises(HTTPException) as admin_reviewer_error:
+        start_server_folder_import(
+            ServerFolderImportRequest(
+                template_id=template.id,
+                input_user_ids=[employee.id],
+                reviewer_user_ids=[admin.id],
+                relative_path="",
+                grouping_level=1,
+            ),
+            BackgroundTasks(),
+            current_user={"id": admin.id, "role": "admin"},
+            db=db,
+        )
+    assert admin_reviewer_error.value.status_code == 400
+    assert db.query(ServerFolderImportReviewer).count() == 0
 
     with pytest.raises(HTTPException) as error:
         start_server_folder_import(
@@ -260,6 +279,74 @@ def test_assignment_request_accepts_admin_as_reviewer_and_rejects_self_only_pool
             db=db,
         )
     assert error.value.status_code == 400
+    db.close()
+
+
+def test_direct_document_assignment_rejects_admin_as_reviewer(database_factory):
+    db = database_factory()
+    admin = User(username="admin-direct", password="hash", role="admin")
+    employee = User(username="employee-direct", password="hash", role="user")
+    template = Template(name="Direct assignment", filename="direct.xlsx")
+    db.add_all([admin, employee, template])
+    db.commit()
+
+    with pytest.raises(HTTPException) as error:
+        document_routes._upload_and_assign_documents_sync(
+            template.id,
+            [employee.id],
+            [admin.id],
+            [],
+            db,
+        )
+
+    assert error.value.status_code == 400
+    assert error.value.detail == "Danh sách người kiểm tra không hợp lệ"
+    db.close()
+
+
+def test_direct_document_assignment_uses_existing_pending_load(
+    monkeypatch, tmp_path, database_factory
+):
+    db = database_factory()
+    first = User(username="direct-first", password="hash", role="user")
+    second = User(username="direct-second", password="hash", role="user")
+    reviewer = User(username="direct-reviewer", password="hash", role="user")
+    template = Template(name="Direct weighted assignment", filename="direct.xlsx")
+    db.add_all([first, second, reviewer, template])
+    db.flush()
+    db.add_all(
+        AssignedDocument(
+            original_filename=f"existing-{index}.pdf",
+            uuid_filename=f"existing-{index}.pdf",
+            assigned_to_user_id=first.id,
+            template_id=template.id,
+            status="pending",
+        )
+        for index in range(3)
+    )
+    db.commit()
+    monkeypatch.setattr(
+        document_routes,
+        "settings",
+        SimpleNamespace(pdf_storage_path=tmp_path),
+    )
+
+    result = document_routes._upload_and_assign_documents_sync(
+        template.id,
+        [first.id, second.id],
+        [first.id, second.id, reviewer.id],
+        [
+            UploadFile(filename="new-1.pdf", file=BytesIO(b"%PDF-1.4\nfirst")),
+            UploadFile(filename="new-2.pdf", file=BytesIO(b"%PDF-1.4\nsecond")),
+        ],
+        db,
+    )
+
+    new_documents = db.query(AssignedDocument).filter(
+        AssignedDocument.original_filename.in_(["new-1.pdf", "new-2.pdf"])
+    ).all()
+    assert result["status"] == "ok"
+    assert {document.assigned_to_user_id for document in new_documents} == {second.id}
     db.close()
 
 
@@ -331,18 +418,17 @@ def test_import_assigns_all_documents_in_selected_folder_level_to_same_user(
     assert assignments["001/0001/1.pdf"] == (user_1_id, "001/0001")
     assert assignments["001/0001/n2.pdf"] == (user_1_id, "001/0001")
     assert assignments["001/0002/1.pdf"] == (user_2_id, "001/0002")
-    assert assignments["002/0001/a.pdf"] == (user_1_id, "002/0001")
+    assert assignments["002/0001/a.pdf"] == (user_2_id, "002/0001")
     assert review_assignments == {user_1_id: user_2_id, user_2_id: user_1_id}
     assert len(list(storage_root.iterdir())) == 4
     assert all(path.is_file() for path in storage_root.iterdir())
 
     queue = get_my_queue(current_user={"id": user_1_id}, db=db)
     queue_files = [item for group in queue["data"] for item in group["files"]]
-    assert {item["folder_group"] for item in queue_files} == {"001/0001", "002/0001"}
+    assert {item["folder_group"] for item in queue_files} == {"001/0001"}
     assert {item["relative_path"] for item in queue_files} == {
         "001/0001/1.pdf",
         "001/0001/n2.pdf",
-        "002/0001/a.pdf",
     }
     db.close()
 

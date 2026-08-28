@@ -203,23 +203,22 @@ def test_excel_export_includes_only_approved_submissions(db, mocker):
     db.commit()
 
     export_call = mocker.patch(
-        "server.routers.submissions.run_in_threadpool",
-        new=mocker.AsyncMock(return_value=None),
+        "server.services.excel_service.export_submissions_to_excel",
     )
     mocker.patch(
         "server.routers.submissions.FileResponse",
         return_value={"status": "file-ready"},
     )
 
-    result = asyncio.run(submissions.api_export(
+    result = submissions.api_export(
         template.id,
         BackgroundTasks(),
         current_user={"id": 1, "role": "admin"},
         db=db,
-    ))
+    )
 
     assert result == {"status": "file-ready"}
-    exported_submissions = export_call.await_args.args[2]
+    exported_submissions = export_call.call_args.args[1]
     assert [submission.id for submission in exported_submissions] == [records[-1].id]
     assert {submission.status for submission in exported_submissions} == {"completed"}
 
@@ -245,8 +244,7 @@ def test_legacy_excel_export_all_is_rejected_before_heavy_processing(db, mocker)
     db.commit()
 
     export_call = mocker.patch(
-        "server.routers.submissions.run_in_threadpool",
-        new=mocker.AsyncMock(return_value=None),
+        "server.services.excel_service.export_submissions_to_excel",
     )
     mocker.patch(
         "server.routers.submissions.FileResponse",
@@ -254,17 +252,17 @@ def test_legacy_excel_export_all_is_rejected_before_heavy_processing(db, mocker)
     )
 
     with pytest.raises(HTTPException) as exc:
-        asyncio.run(submissions.api_export(
+        submissions.api_export(
             template.id,
             BackgroundTasks(),
             include_pending_review=True,
             current_user={"id": 1, "role": "admin"},
             db=db,
-        ))
+        )
 
     assert exc.value.status_code == 409
     assert "xử lý nền" in exc.value.detail
-    export_call.assert_not_awaited()
+    export_call.assert_not_called()
 
 
 def test_excel_export_rejects_template_without_approved_submissions(db, mocker):
@@ -278,21 +276,20 @@ def test_excel_export_rejects_template_without_approved_submissions(db, mocker):
     ))
     db.commit()
     export_call = mocker.patch(
-        "server.routers.submissions.run_in_threadpool",
-        new=mocker.AsyncMock(return_value=None),
+        "server.services.excel_service.export_submissions_to_excel",
     )
 
     with pytest.raises(HTTPException) as exc:
-        asyncio.run(submissions.api_export(
+        submissions.api_export(
             template.id,
             BackgroundTasks(),
             current_user={"id": 1, "role": "admin"},
             db=db,
-        ))
+        )
 
     assert exc.value.status_code == 404
     assert exc.value.detail == "Không có hồ sơ hoàn thành để xuất báo cáo cho biểu mẫu này."
-    export_call.assert_not_awaited()
+    export_call.assert_not_called()
 
 
 def test_completed_folders_filter_approved_submissions_and_excel_by_folder(db, mocker):
@@ -364,33 +361,32 @@ def test_completed_folders_filter_approved_submissions_and_excel_by_folder(db, m
     assert [item["id"] for item in selected["data"]] == [first_approved.id]
 
     export_call = mocker.patch(
-        "server.routers.submissions.run_in_threadpool",
-        new=mocker.AsyncMock(return_value=None),
+        "server.services.excel_service.export_submissions_to_excel",
     )
     mocker.patch(
         "server.routers.submissions.FileResponse",
         return_value={"status": "file-ready"},
     )
-    result = asyncio.run(submissions.api_export(
+    result = submissions.api_export(
         template.id,
         BackgroundTasks(),
         folder_path="00000000/004/0011",
         current_user={"id": 1, "role": "admin"},
         db=db,
-    ))
+    )
 
     assert result == {"status": "file-ready"}
-    assert [item.id for item in export_call.await_args.args[2]] == [first_approved.id]
+    assert [item.id for item in export_call.call_args.args[1]] == [first_approved.id]
 
-    result = asyncio.run(submissions.api_export(
+    result = submissions.api_export(
         template.id,
         BackgroundTasks(),
         current_user={"id": 1, "role": "admin"},
         db=db,
-    ))
+    )
 
     assert result == {"status": "file-ready"}
-    assert [item.id for item in export_call.await_args.args[2]] == [
+    assert [item.id for item in export_call.call_args.args[1]] == [
         first_approved.id,
         second_approved.id,
     ]
@@ -1134,12 +1130,44 @@ def test_admin_reviews_unassigned_reports_and_shows_active_viewer(db):
     assert viewed_queue['data'][0]['is_being_viewed'] is True
     assert viewed_queue['data'][0]['viewing_user_name'] == reviewer.username
 
+    admin_observed = submissions.api_claim_submission_view(
+        assigned.id,
+        current_user=current_user(admin),
+        db=db,
+    )
+    assert admin_observed['viewer_is_current_user'] is False
+    assert admin_observed['viewing_user_name'] == reviewer.username
+
     released = submissions.api_release_submission_view(
         assigned.id,
         current_user=current_user(reviewer),
         db=db,
     )
     assert released == {'status': 'ok', 'released': True}
+
+    admin_claimed = submissions.api_claim_submission_view(
+        assigned.id,
+        current_user=current_user(admin),
+        db=db,
+    )
+    assert admin_claimed['viewer_is_current_user'] is True
+
+    with pytest.raises(HTTPException) as conflict:
+        submissions.api_claim_submission_view(
+            assigned.id,
+            current_user=current_user(reviewer),
+            db=db,
+        )
+    assert conflict.value.status_code == 409
+    assert conflict.value.detail['code'] == 'submission_view_conflict'
+    assert conflict.value.detail['viewing_user_name'] == admin.username
+
+    admin_released = submissions.api_release_submission_view(
+        assigned.id,
+        current_user=current_user(admin),
+        db=db,
+    )
+    assert admin_released == {'status': 'ok', 'released': True}
 
 
 def test_admin_review_folder_submissions_are_paginated(db):

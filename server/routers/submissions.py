@@ -2,11 +2,9 @@ from server.services.review_workflow_service import ReviewWorkflowService
 import logging
 import os
 import json
-import uuid
 from typing import Literal, Optional
 from urllib.parse import quote
-from fastapi import APIRouter, Depends, BackgroundTasks, UploadFile, File
-from fastapi.concurrency import run_in_threadpool
+from fastapi import APIRouter, Depends, BackgroundTasks
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
@@ -23,7 +21,6 @@ from server.routers.auth import (
     get_input_user,
     get_reviewer_user,
 )
-from server.services.upload_service import save_validated_upload
 from server.settings import settings
 from server.repositories import (
     DocumentRepository,
@@ -58,7 +55,6 @@ from fastapi import HTTPException
 router = APIRouter(prefix="/api", tags=["submissions"])
 logger = logging.getLogger(__name__)
 PDF_STORAGE_PATH = str(settings.pdf_storage_path)
-DOCUMENT_UPLOAD_MAX_BYTES = settings.document_upload_max_bytes
 COMPLETED_WITHOUT_FOLDER = NO_FOLDER_SENTINEL
 
 
@@ -85,6 +81,34 @@ class ErrorSectionsRequest(BaseModel):
 
 class ReviewContentRequest(BaseModel):
     data: dict
+
+
+class StatusResponse(BaseModel):
+    status: str
+
+
+class SubmissionViewResponse(StatusResponse):
+    is_being_viewed: bool
+    viewing_user_id: int
+    viewing_user_name: str
+    viewer_is_current_user: bool
+
+
+class ExportJobPayload(BaseModel):
+    job_id: str
+    state: str
+    template_id: Optional[int] = None
+    project_id: Optional[int] = None
+    include_pending_review: bool = False
+    rows_total: int = 0
+    filename: Optional[str] = None
+    message: Optional[str] = None
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
+
+
+class ExportJobResponse(StatusResponse):
+    job: ExportJobPayload
 
 
 
@@ -483,6 +507,8 @@ def api_get_submission(sub_id: int, current_user: dict = Depends(get_current_use
         if not sub:
             raise HTTPException(status_code=404, detail="Không tìm thấy hồ sơ.")
         can_review = ReviewWorkflowService.can_review_submission(sub, current_user, db)
+        if current_user["role"] != "admin" and sub.status == "pending_review":
+            db.commit()
         is_active_input = (
             current_user["role"] != "admin"
             and repository.is_active_input_assignee(sub, current_user["id"])
@@ -528,23 +554,44 @@ def api_get_submission(sub_id: int, current_user: dict = Depends(get_current_use
     except Exception:
         raise
 
-@router.put('/submissions/{sub_id}/view')
+@router.put('/submissions/{sub_id}/view', response_model=SubmissionViewResponse)
 def api_claim_submission_view(
     sub_id: int,
     current_user: dict = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    submission = SubmissionRepository(db).get(sub_id)
+    repository = SubmissionRepository(db)
+    submission = repository.get(sub_id)
     if not submission:
         raise HTTPException(status_code=404, detail='Không tìm thấy hồ sơ')
     if (
         current_user.get('role') != 'admin'
-        and submission.created_by_user_id != current_user.get('id')
+        and not repository.is_active_input_assignee(
+            submission,
+            current_user.get('id'),
+        )
         and not ReviewWorkflowService.can_review_submission(submission, current_user, db)
     ):
         raise HTTPException(status_code=403, detail='Không có quyền xem hồ sơ này')
 
     presence = SubmissionViewRepository(db).claim(submission.id, current_user['id'])
+    if (
+        current_user.get('role') != 'admin'
+        and presence.viewer_user_id != current_user['id']
+    ):
+        viewer_name = LookupRepository(db).username_map({presence.viewer_user_id}).get(
+            presence.viewer_user_id,
+            'Người dùng khác',
+        )
+        raise HTTPException(
+            status_code=409,
+            detail={
+                'code': 'submission_view_conflict',
+                'message': f'{viewer_name} đang xem hồ sơ này. Vui lòng thử lại sau.',
+                'viewing_user_id': presence.viewer_user_id,
+                'viewing_user_name': viewer_name,
+            },
+        )
     db.commit()
     viewer_name = LookupRepository(db).username_map({presence.viewer_user_id}).get(
         presence.viewer_user_id,
@@ -570,14 +617,18 @@ def api_release_submission_view(
     return {'status': 'ok', 'released': removed}
 
 
-@router.put('/submissions/{sub_id}')
+@router.put('/submissions/{sub_id}', response_model=StatusResponse)
 def api_update_submission(sub_id: int, req: SubmitRequest, current_user: dict = Depends(get_input_user), db: Session = Depends(get_db)):
     try:
-        sub = SubmissionRepository(db).get(sub_id)
+        repository = SubmissionRepository(db)
+        sub = repository.get(sub_id)
         if not sub:
             raise HTTPException(status_code=404, detail="Không tìm thấy hồ sơ.")
             
-        if current_user["role"] != "admin" and sub.created_by_user_id != current_user["id"]:
+        if (
+            current_user["role"] != "admin"
+            and not repository.is_active_input_assignee(sub, current_user["id"])
+        ):
             raise HTTPException(status_code=403, detail="Bạn không có quyền sửa hồ sơ này.")
         if current_user["role"] != "admin" and sub.status not in {"draft", "rejected"}:
             raise HTTPException(
@@ -586,7 +637,9 @@ def api_update_submission(sub_id: int, req: SubmitRequest, current_user: dict = 
             )
         
         data_dict, document = SubmissionService.enrich_pdf_reference(
-            req.data, db, sub.created_by_user_id
+            req.data,
+            db,
+            None if current_user["role"] == "admin" else current_user["id"],
         )
         if req.status == "pending_review":
             SubmissionService.validate_required_fields(
@@ -894,7 +947,7 @@ def api_copy_submission(sub_id: int, current_user: dict = Depends(get_input_user
     )
 
 @router.get("/export")
-async def api_export(
+def api_export(
     template_id: int,
     background_tasks: BackgroundTasks,
     folder_path: str = None,
@@ -945,7 +998,7 @@ async def api_export(
                 status_code=404,
                 detail=f"Không có hồ sơ {export_scope} để xuất báo cáo cho biểu mẫu này.",
             )
-        await run_in_threadpool(export_submissions_to_excel, template_file_path, submissions, download_path)
+        export_submissions_to_excel(template_file_path, submissions, download_path)
         
         def remove_file(path):
             try:
@@ -962,7 +1015,7 @@ async def api_export(
         raise
 
 
-@router.post("/export-jobs", status_code=202)
+@router.post("/export-jobs", status_code=202, response_model=ExportJobResponse)
 def api_start_export_job(
     template_id: int,
     folder_path: str = None,
@@ -997,7 +1050,7 @@ def api_start_export_job(
     return {"status": "ok", "job": public_export_job(job)}
 
 
-@router.get("/export-jobs/{job_id}")
+@router.get("/export-jobs/{job_id}", response_model=ExportJobResponse)
 def api_get_export_job(
     job_id: str,
     current_user: dict = Depends(get_admin_user),
@@ -1034,59 +1087,6 @@ def api_download_export_job(
         raise HTTPException(status_code=404, detail="File xuất không còn tồn tại")
     background_tasks.add_task(cleanup_export_job, job_id)
     return FileResponse(output_path, filename=job.get("filename") or output_path.name)
-
-@router.post("/upload-pdf")
-async def api_upload_pdf(
-    file: UploadFile = File(...),
-    current_user: dict = Depends(get_input_user),
-    db: Session = Depends(get_db),
-):
-    return await run_in_threadpool(_upload_pdf_sync, file, current_user, db)
-
-
-def _upload_pdf_sync(file: UploadFile, current_user: dict, db: Session):
-    filepath = None
-    try:
-        os.makedirs(PDF_STORAGE_PATH, exist_ok=True)
-        original_filename = os.path.basename(file.filename or "")
-        if not original_filename:
-            raise HTTPException(status_code=400, detail="Tên file không hợp lệ")
-        new_filename = f"{uuid.uuid4()}_{original_filename}"
-        filepath = os.path.join(PDF_STORAGE_PATH, new_filename)
-
-        save_validated_upload(
-            file,
-            filepath,
-            kind="document",
-            max_bytes=DOCUMENT_UPLOAD_MAX_BYTES,
-        )
-        document = AssignedDocument(
-            original_filename=original_filename,
-            uuid_filename=new_filename,
-            assigned_to_user_id=current_user["id"],
-            template_id=None,
-            status="pending",
-        )
-        db.add(document)
-        db.commit()
-
-        return {
-            "status": "ok",
-            "name": original_filename,
-            "uuid": new_filename,
-            "url": _pdf_url(new_filename)
-        }
-    except HTTPException:
-        db.rollback()
-        if filepath and os.path.exists(filepath):
-            os.remove(filepath)
-        raise
-    except Exception:
-        db.rollback()
-        if filepath and os.path.exists(filepath):
-            os.remove(filepath)
-        raise HTTPException(status_code=500, detail="Không thể lưu file")
-
 
 @router.get("/files/{uuid_filename}")
 def api_get_pdf_file(

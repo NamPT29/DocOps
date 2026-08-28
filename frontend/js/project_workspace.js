@@ -76,9 +76,6 @@ async function loadEmployeeProjectWorkspace(projectId) {
     if (hiddenTemplateSelect) hiddenTemplateSelect.value = String(window.activeTemplateId);
     const templateContainer = document.getElementById('templateSelectContainer');
     if (templateContainer) templateContainer.style.setProperty('display', 'none', 'important');
-    const manualUploadLabel = document.getElementById('manualPdfUploadLabel');
-    if (manualUploadLabel) manualUploadLabel.classList.add('d-none');
-
     await fetchSchema();
     applyEmployeeProjectQueue(response.data);
     setEmployeeProjectSummary(
@@ -116,8 +113,6 @@ async function initializeEmployeeProjectWorkspace() {
     select.replaceChildren();
     if (!projects.length) {
         if (card) card.classList.add('d-none');
-        const manualUploadLabel = document.getElementById('manualPdfUploadLabel');
-        if (manualUploadLabel) manualUploadLabel.classList.remove('d-none');
         return false;
     }
 

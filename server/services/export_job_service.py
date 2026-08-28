@@ -21,6 +21,7 @@ _JOB_ID_PATTERN = re.compile(r"^[0-9a-f]{32}$")
 _ACTIVE_STATES = {"queued", "running"}
 _CLEANUP_RETRY_ATTEMPTS = 10
 _CLEANUP_RETRY_DELAY_SECONDS = 0.05
+_EXPORT_JOB_STARTUP_TIMEOUT_SECONDS = 120
 logger = logging.getLogger(__name__)
 
 
@@ -95,6 +96,42 @@ def public_export_job(payload: dict) -> dict:
     return {field: payload.get(field) for field in fields if field in payload}
 
 
+def _process_is_running(pid: object) -> bool:
+    try:
+        normalized_pid = int(pid)
+    except (TypeError, ValueError):
+        return False
+    if normalized_pid <= 0:
+        return False
+    try:
+        os.kill(normalized_pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    except OSError:
+        return False
+    return True
+
+
+def _active_export_job_is_stale(payload: dict) -> bool:
+    worker_pid = payload.get("worker_pid")
+    if worker_pid is not None:
+        return not _process_is_running(worker_pid)
+
+    timestamp = payload.get("updated_at") or payload.get("created_at")
+    if not timestamp:
+        return True
+    try:
+        updated_at = datetime.fromisoformat(str(timestamp).replace("Z", "+00:00"))
+        if updated_at.tzinfo is None:
+            updated_at = updated_at.replace(tzinfo=timezone.utc)
+    except (TypeError, ValueError):
+        return True
+    age_seconds = (datetime.now(timezone.utc) - updated_at).total_seconds()
+    return age_seconds > _EXPORT_JOB_STARTUP_TIMEOUT_SECONDS
+
+
 def _acquire_export_lock(job_id: str) -> None:
     EXPORT_SCRATCH_DIR.mkdir(parents=True, exist_ok=True)
     for _attempt in range(2):
@@ -108,9 +145,23 @@ def _acquire_export_lock(job_id: str) -> None:
                 active_job_id = EXPORT_LOCK_PATH.read_text(encoding="utf-8").strip()
             except OSError:
                 active_job_id = ""
-            active_job = read_export_job(active_job_id) if active_job_id else None
-            if not active_job or active_job.get("state") in _ACTIVE_STATES:
+            try:
+                active_job = read_export_job(active_job_id) if active_job_id else None
+            except ValueError:
+                active_job = None
+            if (
+                active_job
+                and active_job.get("state") in _ACTIVE_STATES
+                and not _active_export_job_is_stale(active_job)
+            ):
                 raise ExportJobBusyError(active_job_id or None)
+            if active_job and active_job.get("state") in _ACTIVE_STATES:
+                update_export_job(
+                    active_job_id,
+                    state="error",
+                    worker_pid=None,
+                    message="Tác vụ xuất đã dừng ngoài dự kiến; khóa đã được thu hồi",
+                )
             try:
                 EXPORT_LOCK_PATH.unlink()
             except FileNotFoundError:
@@ -194,7 +245,7 @@ def start_export_job(
     creation_flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
     try:
         with log_path.open("ab") as log_handle:
-            subprocess.Popen(
+            process = subprocess.Popen(
                 command,
                 cwd=str(PROJECT_ROOT),
                 stdout=log_handle,
@@ -202,6 +253,9 @@ def start_export_job(
                 close_fds=True,
                 creationflags=creation_flags,
             )
+        worker_pid = getattr(process, "pid", None)
+        if worker_pid:
+            payload = update_export_job(job_id, worker_pid=worker_pid)
     except Exception as exc:
         update_export_job(
             job_id,

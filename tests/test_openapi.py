@@ -2,6 +2,7 @@ from fastapi import FastAPI
 from pydantic import BaseModel
 
 from server.openapi import configure_openapi
+from server.routers import submissions
 
 
 class LoginPayload(BaseModel):
@@ -37,3 +38,23 @@ def test_openapi_documents_metadata_bearer_auth_and_safe_login_example():
     assert schema["paths"]["/api/me"]["get"]["security"] == [{"BearerAuth": []}]
     example = schema["paths"]["/api/login"]["post"]["requestBody"]["content"]["application/json"]["examples"]
     assert example["credentials"]["value"]["password"] == "replace-with-password"
+
+
+def test_openapi_exposes_submission_and_export_response_contracts():
+    app = FastAPI()
+    app.include_router(submissions.router)
+    configure_openapi(app)
+
+    schema = app.openapi()
+
+    update_operation = schema["paths"]["/api/submissions/{sub_id}"]["put"]
+    claim_operation = schema["paths"]["/api/submissions/{sub_id}/view"]["put"]
+    export_operation = schema["paths"]["/api/export-jobs"]["post"]
+    status_operation = schema["paths"]["/api/export-jobs/{job_id}"]["get"]
+    assert update_operation["summary"] == "Update a submission"
+    assert claim_operation["summary"] == "Claim the submission view lease"
+    assert export_operation["summary"] == "Start a background export job"
+    assert status_operation["summary"] == "Get background export status"
+    assert update_operation["responses"]["200"]["content"]["application/json"]["schema"]["$ref"].endswith("/StatusResponse")
+    assert claim_operation["responses"]["200"]["content"]["application/json"]["schema"]["$ref"].endswith("/SubmissionViewResponse")
+    assert export_operation["responses"]["202"]["content"]["application/json"]["schema"]["$ref"].endswith("/ExportJobResponse")

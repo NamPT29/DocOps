@@ -77,13 +77,11 @@ def test_submission_export_consumes_heavy_rate_limit_before_work(monkeypatch):
     monkeypatch.setattr(submissions, "enforce_heavy_api_rate_limit", reject_export)
 
     with pytest.raises(HTTPException) as error:
-        asyncio.run(
-            submissions.api_export(
-                template_id=1,
-                background_tasks=None,
-                current_user={"id": 17, "role": "admin"},
-                db=None,
-            )
+        submissions.api_export(
+            template_id=1,
+            background_tasks=None,
+            current_user={"id": 17, "role": "admin"},
+            db=None,
         )
 
     assert error.value.status_code == 429

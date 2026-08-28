@@ -767,15 +767,33 @@ async function renewSubmissionView(submissionId) {
 
 async function startSubmissionView(submissionId) {
     const id = Number(submissionId);
-    if (!Number.isInteger(id) || id <= 0) return;
+    if (!Number.isInteger(id) || id <= 0) return false;
     bindSubmissionViewLifecycle();
     if (activeSubmissionViewId !== id) stopSubmissionView();
     const response = await authFetch(`/api/submissions/${id}/view`, { method: 'PUT' });
-    if (!response || !response.ok) return;
-    await response.json().catch(() => ({}));
+    if (!response) return false;
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) {
+        const detail = payload.detail;
+        const message = detail && typeof detail === 'object' && detail.message
+            ? detail.message
+            : formatApiErrorDetail(detail || 'Không thể mở hồ sơ lúc này.');
+        alert(message);
+        return false;
+    }
+    if (payload.viewer_is_current_user !== true) {
+        const viewerName = payload.viewing_user_name || 'Người dùng khác';
+        if (!currentUser || currentUser.role !== 'admin') {
+            alert(`${viewerName} đang xem hồ sơ này. Vui lòng thử lại sau.`);
+            return false;
+        }
+        alert(`${viewerName} đang xem hồ sơ này. Admin vẫn có thể mở để theo dõi.`);
+        return true;
+    }
     activeSubmissionViewId = id;
     if (submissionViewHeartbeat) clearInterval(submissionViewHeartbeat);
     submissionViewHeartbeat = setInterval(() => renewSubmissionView(id), 30000);
+    return true;
 }
 
 function stopSubmissionView() {
@@ -889,7 +907,10 @@ async function editSubmission(id, isCopied = false) {
 
     // Set editing state
     currentEditingId = id;
-    startSubmissionView(id);
+    if (!await startSubmissionView(id)) {
+        cancelEdit();
+        return;
+    }
     isEditingFromList = true;
 
     // Handle readonly state
@@ -1083,7 +1104,9 @@ async function fetchDocumentStats() {
             }
         });
 
-        const reviewerUsers = usersData && usersData.status === 'ok' ? usersData.data : [];
+        const reviewerUsers = usersData && usersData.status === 'ok'
+            ? usersData.data.filter(user => user.role !== 'admin')
+            : [];
         if (reviewerContainer && reviewerUsers.length === 0) {
             reviewerContainer.innerHTML = '<span class="text-muted">Chưa có tài khoản để kiểm tra.</span>';
         }
@@ -1091,12 +1114,11 @@ async function fetchDocumentStats() {
             if (!reviewerContainer) return;
             const safeUserId = Number(user.id);
             const safeUsername = escapeHTML(user.username);
-            const roleLabel = user.role === 'admin' ? ' <span class="badge bg-danger">Admin</span>' : '';
             const div = document.createElement('div');
             div.className = 'form-check';
             div.innerHTML = `
                 <input class="form-check-input reviewer-user-checkbox" type="checkbox" value="${safeUserId}" id="chkReviewer_${safeUserId}">
-                <label class="form-check-label" for="chkReviewer_${safeUserId}">${safeUsername}${roleLabel}</label>
+                <label class="form-check-label" for="chkReviewer_${safeUserId}">${safeUsername}</label>
             `;
             reviewerContainer.appendChild(div);
         });
@@ -1536,8 +1558,14 @@ async function scanSelectedServerFolder() {
         levelSelect.replaceChildren(new Option('-- Chọn cấp folder --', ''));
         data.grouping_levels.forEach(item => {
             const examples = item.examples.length ? ` — VD: ${item.examples.join(', ')}` : '';
+            const pdfRange = item.min_pdf_count === item.max_pdf_count
+                ? `${item.min_pdf_count} PDF/nhóm`
+                : `${item.min_pdf_count}–${item.max_pdf_count} PDF/nhóm`;
             levelSelect.appendChild(
-                new Option(`Cấp ${item.level}: ${item.group_count} nhóm${examples}`, item.level)
+                new Option(
+                    `Cấp ${item.level}: ${item.group_count} nhóm; ${pdfRange}; TB ${item.average_pdf_count}${examples}`,
+                    item.level
+                )
             );
         });
         levelSelect.disabled = data.total_files === 0;
