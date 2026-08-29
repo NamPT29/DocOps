@@ -2,9 +2,10 @@ import os
 import logging
 from pathlib import Path
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse, Response
+from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
+from sqlalchemy import text
 
 # Environment-backed settings must be available before database/auth modules import.
 load_dotenv()
@@ -14,6 +15,7 @@ from server.logging_config import RequestLoggingMiddleware, configure_logging
 from server.frontend_static import PublicFrontendStaticFiles, resolve_public_frontend_file
 from server.security_headers import SecurityHeadersMiddleware
 from server.openapi import configure_openapi
+from server.release_info import APP_VERSION
 
 configure_logging(
     settings.log_dir,
@@ -44,6 +46,11 @@ ensure_submission_status_schema(engine)
 with SessionLocal() as metadata_db:
     backfill_submission_metadata(metadata_db)
 init_admin()
+from server.host_setup import HOST_CONFIG_PATH_ENV, consume_initial_admin_password
+
+host_config_path = os.environ.get(HOST_CONFIG_PATH_ENV)
+if host_config_path:
+    consume_initial_admin_password(host_config_path)
 
 # Seed the default template
 def seed_default_template():
@@ -80,7 +87,7 @@ app = FastAPI(
         "API for digitizing documents, completing structured submissions, and managing review workflows. "
         "Protected endpoints require a JWT access token in the Authorization bearer header."
     ),
-    version="1.0.0",
+    version=APP_VERSION,
     openapi_tags=OPENAPI_TAGS,
     docs_url="/docs" if settings.api_docs_enabled else None,
     redoc_url="/redoc" if settings.api_docs_enabled else None,
@@ -129,6 +136,24 @@ app.mount("/frontend", PublicFrontendStaticFiles(directory="frontend"), name="fr
 @app.get("/favicon.ico", include_in_schema=False)
 def favicon():
     return Response(status_code=204)
+
+
+@app.get("/health/live", include_in_schema=False)
+def health_live():
+    return {"status": "live", "version": APP_VERSION}
+
+
+@app.get("/health/ready", include_in_schema=False)
+def health_ready():
+    try:
+        with engine.connect() as connection:
+            connection.execute(text("SELECT 1"))
+    except Exception:
+        return JSONResponse(
+            status_code=503,
+            content={"status": "not-ready", "version": APP_VERSION},
+        )
+    return {"status": "ready", "version": APP_VERSION}
 
 @app.get("/")
 def serve_index():

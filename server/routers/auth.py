@@ -193,8 +193,9 @@ def get_reviewer_user(
         raise HTTPException(status_code=403, detail="Tài khoản không có quyền kiểm tra")
     return {**current_user, **profile}
 
-def init_admin():
+def init_admin() -> bool:
     db = SessionLocal()
+    created = False
     try:
         repository = UserRepository(db)
         admin = repository.get_by_username("admin")
@@ -213,6 +214,8 @@ def init_admin():
             )
             repository.add(admin)
             db.commit()
+            created = True
+        return created
     finally:
         db.close()
 

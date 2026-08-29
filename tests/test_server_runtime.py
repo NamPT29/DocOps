@@ -89,14 +89,20 @@ def test_runtime_rejects_multiple_uvicorn_workers_on_windows():
         )
 
 
-def test_app_launcher_passes_worker_count_to_uvicorn(monkeypatch, tmp_path):
+def test_app_launcher_runs_host_console_and_stops_managed_caddy(monkeypatch, tmp_path):
     calls = []
+    managed_caddy = object()
+    paths = type("Paths", (), {"config_path": tmp_path / "host.env"})()
+
     monkeypatch.setattr(app_launcher, "get_resource_root", lambda: tmp_path)
+    monkeypatch.setattr(app_launcher, "get_base_dir", lambda: str(tmp_path))
     monkeypatch.setattr(app_launcher.os, "chdir", lambda _path: None)
-    monkeypatch.setattr(app_launcher, "prepare_runtime_environment", lambda: None)
+    monkeypatch.setattr(app_launcher, "prepare_runtime_environment", lambda: paths)
     monkeypatch.setattr(app_launcher, "verify_database_connection", lambda: None)
     monkeypatch.setenv("HOST", "127.0.0.1")
     monkeypatch.setenv("PORT", "8123")
+    monkeypatch.setenv("OPEN_BROWSER", "false")
+    monkeypatch.setenv("PUBLIC_HOSTNAME", "")
     monkeypatch.setattr(app_launcher.threading, "Thread", lambda **_kwargs: type(
         "FakeThread",
         (),
@@ -107,13 +113,35 @@ def test_app_launcher_passes_worker_count_to_uvicorn(monkeypatch, tmp_path):
         "configure_server_runtime",
         lambda: type("Runtime", (), {"workers": 3})(),
     )
-    monkeypatch.setattr(app_launcher.uvicorn, "run", lambda *args, **kwargs: calls.append((args, kwargs)))
+    monkeypatch.setattr(
+        app_launcher,
+        "start_packaged_caddy",
+        lambda *_args: (managed_caddy, "started"),
+    )
+    monkeypatch.setattr(app_launcher, "ensure_cloudflared_service", lambda: "running")
+    monkeypatch.setattr(
+        app_launcher,
+        "stop_managed_caddy",
+        lambda process: calls.append(("stop_caddy", process)),
+    )
+    monkeypatch.setattr(
+        app_launcher,
+        "run_host_console",
+        lambda: calls.append(("host_console", None)) or 7,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        app_launcher.uvicorn,
+        "run",
+        lambda *args, **kwargs: calls.append(("uvicorn", (args, kwargs))),
+    )
 
-    assert app_launcher.main() == 0
+    assert app_launcher.main() == 7
 
-    assert calls[0][0] == ("server.main:app",)
-    assert calls[0][1]["workers"] == 3
-    assert calls[0][1]["port"] == 8123
+    assert calls == [
+        ("host_console", None),
+        ("stop_caddy", managed_caddy),
+    ]
 
 
 def test_async_upload_routes_offload_complete_sync_units(monkeypatch):

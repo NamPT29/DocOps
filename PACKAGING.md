@@ -1,47 +1,82 @@
-# Windows packaging
+# Windows packaging — version 0.1
 
-The release is an application-only package. It does not contain PostgreSQL,
-Caddy, cloudflared, `.env`, `host.env`, uploads, templates, exports, or database
-files.
+Version 0.1 is a Windows x64 package for an external PostgreSQL 18 server. It
+contains the application and Caddy reverse proxy. It does not contain
+PostgreSQL, cloudflared, Tunnel credentials, `.env`, `host.env`, uploads,
+templates, exports, or database files.
 
 ## Build machine
 
 Requirements:
 
-- Windows x64 and Python matching the supported application version.
-- Project dependencies from `requirements.txt`.
-- PyInstaller (`python -m pip install pyinstaller`).
+- Windows x64 and Python 3.12.
+- Exact dependencies from `requirements-package.lock`.
+- Caddy available on the build machine; the build copies its executable into
+  the release and records the version in `release-manifest.json`.
 - Inno Setup 6 when an installer is required.
+- A Windows code-signing certificate and Windows SDK only when `-Sign` is used.
 
-Build the application directory:
-
-```powershell
-.\scripts\build_windows_package.ps1
-```
-
-Build the application and installer:
+Install the locked build environment, then build both the portable ZIP and the
+installer:
 
 ```powershell
+python -m pip install -r requirements-package.lock
 .\scripts\build_windows_package.ps1 -BuildInstaller
 ```
 
-Outputs are written to `dist\ScanToExcelApp` and `installer-output`. The build
-script fails if it finds a bundled environment file, portable database engine,
-Caddy, or cloudflared executable.
+The default output is:
+
+```text
+D:\ScanToExcel-Releases\0.1\
+  ScanToExcelApp_0.1.zip
+  ScanToExcelHost-Setup-0.1.exe
+  release-manifest.json
+  SHA256SUMS.txt
+```
+
+The script will not overwrite an existing version directory. Choose a separate
+temporary release root while testing, or remove an obsolete test output
+manually after checking its contents.
+
+For a signed release, provide the certificate thumbprint explicitly:
+
+```powershell
+.\scripts\build_windows_package.ps1 -BuildInstaller -Sign `
+  -CertificateThumbprint "CERTIFICATE_THUMBPRINT"
+```
+
+An unsigned build is suitable for internal validation. Do not present it as a
+signed public release.
 
 ## New host machine
 
 Before launching Scan To Excel Host:
 
-1. Install PostgreSQL as a Windows service.
-2. Create an empty database (the default wizard value is `scan_data`) and a
-   database user that owns or can create objects in that database.
-3. Install the generated Scan To Excel Host installer.
+1. Install PostgreSQL 18 as a Windows service.
+2. Create an empty database (the wizard defaults to `scan_data`) and a database
+   user that owns or can create objects in that database.
+3. Install `ScanToExcelHost-Setup-0.1.exe`.
 4. Start the application and enter the PostgreSQL connection and initial admin
    password in the first-run wizard.
 
-The application creates its schema after the database connection succeeds. It
-is available locally at `127.0.0.1:8000` with the default `HOST`/`PORT` values.
+The normal Start Menu and Desktop shortcuts run
+`Start-ScanToExcelHost.cmd`. This keeps a visible console open for the full
+application lifetime and leaves startup errors visible instead of closing the
+window immediately.
+
+The wizard validates the database connection and local web port before replacing
+an existing configuration. The initial admin password is removed from
+`host.env` after the account has been created successfully.
+
+To change the database or web port later, use the Start Menu shortcut
+**Configure Scan To Excel Host**, or run:
+
+```powershell
+ScanToExcelApp.exe --configure
+```
+
+The application is available locally at `127.0.0.1:8000` by default. Liveness
+and readiness endpoints are `/health/live` and `/health/ready`.
 
 Mutable state is kept under:
 
@@ -56,14 +91,15 @@ Mutable state is kept under:
   updates\
 ```
 
-Uninstalling or upgrading the application does not delete that directory.
-Back up `host.env` securely and back up business files separately from the
-application binaries.
+Uninstalling or upgrading does not delete this directory. Back up `host.env`
+securely and back up business files and PostgreSQL separately from the binaries.
 
-## Reverse proxy and Cloudflare Tunnel
+## Caddy and Cloudflare Tunnel
 
-Caddy and Cloudflare Tunnel are installed and managed separately. The expected
-route is:
+Caddy is bundled and automatically started by the packaged launcher when port
+80 is free. It is stopped when the application exits. Cloudflare Tunnel remains
+an external Windows service because its token is a host secret and must never
+be placed in a distributable installer. The expected route is:
 
 ```text
 Cloudflare Tunnel -> Caddy :80 -> ScanToExcel 127.0.0.1:8000
@@ -77,6 +113,8 @@ nhaplieu1.aivn.net.vn {
 }
 ```
 
-Configure the Cloudflare Tunnel ingress service to reach
-`http://127.0.0.1:80`. Neither the Caddy configuration nor the tunnel token is
-part of the application installer.
+Before using the public domain on a new machine, install/register the
+`Cloudflared` Windows service with the command generated by that Tunnel in the
+Cloudflare Dashboard. Configure Public Hostname ingress to reach
+`http://127.0.0.1:80`. The packaged console reports the state of Caddy,
+Cloudflared, and the public `/health/ready` endpoint.

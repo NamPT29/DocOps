@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
 import secrets
 import tkinter as tk
@@ -10,6 +9,12 @@ from tkinter import messagebox
 from urllib.parse import quote
 
 from server.host_runtime_paths import HostRuntimePaths
+from server.host_setup import validate_and_write_host_environment
+from server.release_info import (
+    APP_VERSION,
+    DEFAULT_PUBLIC_HOSTNAME,
+    SUPPORTED_POSTGRESQL_MAJOR,
+)
 
 
 def _quote_env_value(value: object) -> str:
@@ -47,6 +52,7 @@ def build_host_environment(
         "HOST": "0.0.0.0",
         "PORT": str(web_port),
         "OPEN_BROWSER": "true",
+        "PUBLIC_HOSTNAME": DEFAULT_PUBLIC_HOSTNAME,
         "PDF_STORAGE_PATH": str(paths.uploads_dir.resolve()),
         "TEMPLATE_STORAGE_PATH": str(paths.templates_dir.resolve()),
         "DOCUMENT_SOURCE_ROOT": str(paths.source_documents_dir.resolve()),
@@ -70,7 +76,7 @@ def run_setup_wizard(
     saved = False
 
     root = tk.Tk()
-    root.title("ScanToExcel - Thiet lap lan dau")
+    root.title(f"ScanToExcel {APP_VERSION} - Thiet lap")
     root.geometry("480x620")
     root.resizable(False, False)
 
@@ -78,7 +84,7 @@ def run_setup_wizard(
     tk.Label(
         root,
         text=(
-            "PostgreSQL phai duoc cai va dang chay tren may nay.\n"
+            f"PostgreSQL {SUPPORTED_POSTGRESQL_MAJOR} phai duoc cai va dang chay.\n"
             "Nhap thong tin database da tao cho ung dung."
         ),
         justify="center",
@@ -138,10 +144,15 @@ def run_setup_wizard(
             admin_password=admin_password,
             web_port=web_port,
         )
-        runtime_paths.ensure_directories()
-        temporary_path = target_path.with_suffix(target_path.suffix + ".tmp")
-        temporary_path.write_text(content, encoding="utf-8")
-        os.replace(temporary_path, target_path)
+        try:
+            validate_and_write_host_environment(
+                target_path,
+                content,
+                web_port=web_port,
+            )
+        except RuntimeError as exc:
+            messagebox.showerror("Khong the luu cau hinh", str(exc))
+            return
         saved = True
         messagebox.showinfo(
             "Thanh cong",
