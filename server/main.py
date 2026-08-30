@@ -4,7 +4,6 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse, JSONResponse, Response
-from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
 from sqlalchemy import text
 
@@ -12,9 +11,9 @@ from sqlalchemy import text
 load_dotenv()
 from server.settings import settings
 from server.api_errors import API_ERROR_RESPONSES, register_exception_handlers
-from server.logging_config import RequestLoggingMiddleware, configure_logging
+from server.logging_config import configure_logging
 from server.frontend_static import PublicFrontendStaticFiles, resolve_public_frontend_file
-from server.security_headers import SecurityHeadersMiddleware
+from server.http_middleware import configure_http_middleware
 from server.openapi import configure_openapi
 from server.release_info import APP_VERSION
 from server.services.export_job_service import cleanup_stale_export_jobs
@@ -121,17 +120,7 @@ app = FastAPI(
 )
 register_exception_handlers(app)
 
-cors_origins = list(settings.cors_origins)
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=cors_origins,
-    allow_credentials=False,
-    allow_methods=["*"],
-    allow_headers=["*"],
-    expose_headers=["X-Request-ID"],
-)
-app.add_middleware(SecurityHeadersMiddleware)
-app.add_middleware(RequestLoggingMiddleware)
+configure_http_middleware(app, settings.cors_origins)
 
 # Include routers
 from server.routers import auth, templates, tasks, submissions, documents, processing, dictionaries, notifications, projects, project_uploads
