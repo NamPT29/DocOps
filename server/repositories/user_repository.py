@@ -22,6 +22,7 @@ from server.models import (
     Task,
     User,
     UserCapability,
+    UserLoginSession,
 )
 from server.repositories.base import BaseRepository
 
@@ -170,6 +171,9 @@ class UserRepository(BaseRepository[User]):
 
     def detach_references_and_delete(self, user: User) -> None:
         user_id = user.id
+        self.session.query(UserLoginSession).filter(
+            UserLoginSession.user_id == user_id
+        ).delete(synchronize_session=False)
         self.session.query(NotificationRecipient).filter(
             NotificationRecipient.user_id == user_id
         ).delete(synchronize_session=False)

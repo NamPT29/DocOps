@@ -12,7 +12,7 @@ assert.doesNotMatch(html, /\bon[a-z]+\s*=/i, 'Admin page must not contain inline
 assert.doesNotMatch(html, /<style\b/i, 'Admin page must not contain inline style elements.');
 assert.doesNotMatch(html, /\bstyle\s*=/i, 'Admin page must not contain inline style attributes.');
 assert.match(html, /href="admin-page\.css\?v=1"/i, 'Admin page must load its external stylesheet.');
-assert.match(html, /src="admin-page\.js\?v=1"/i, 'Admin page must load its external behavior script.');
+assert.match(html, /src="admin-page\.js\?v=2"/i, 'Admin page must load its external behavior script.');
 
 const actionNames = [...html.matchAll(/data-admin-action="([^"]+)"/g)].map(match => match[1]);
 const changeNames = [...html.matchAll(/data-admin-change="([^"]+)"/g)].map(match => match[1]);

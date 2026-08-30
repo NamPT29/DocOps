@@ -2,6 +2,16 @@ let currentUser = null;
 let currentToken = null;
 let adminUserData = [];
 
+function getOrCreateBrowserId() {
+    const storageKey = 'scanToExcelBrowserId';
+    let browserId = localStorage.getItem(storageKey);
+    if (browserId) return browserId;
+    browserId = window.crypto?.randomUUID?.()
+        || `browser-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    localStorage.setItem(storageKey, browserId);
+    return browserId;
+}
+
 function userDisplayName(user) {
     return String(user?.full_name || '').trim() || user?.username || '';
 }
@@ -189,7 +199,11 @@ async function doLogin() {
         const res = await fetch('/api/login', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({username: user, password: pass})
+            body: JSON.stringify({
+                username: user,
+                password: pass,
+                browser_id: getOrCreateBrowserId(),
+            })
         });
         const data = await res.json();
         
@@ -212,6 +226,14 @@ async function doLogin() {
 }
 
 function doLogout() {
+    const tokenToRevoke = currentToken || localStorage.getItem('token');
+    if (tokenToRevoke) {
+        fetch('/api/logout', {
+            method: 'POST',
+            headers: { Authorization: `Bearer ${tokenToRevoke}` },
+            keepalive: true,
+        }).catch(() => undefined);
+    }
     try {
         const storedUser = currentUser || JSON.parse(localStorage.getItem('user') || 'null');
         if (storedUser) {
@@ -352,9 +374,14 @@ async function fetchAdminData() {
             if (u.can_input) badges.push('<span class="badge bg-primary">Nhập liệu</span>');
             if (u.can_review) badges.push('<span class="badge bg-warning text-dark">Kiểm tra</span>');
             if (badges.length === 0) badges.push('<span class="badge bg-secondary">Chưa phân công</span>');
+            const activeSessions = Number(u.active_session_count) || 0;
+            const sessionLimit = Number(u.max_concurrent_sessions) || 1;
             let deleteBtn = safeId === currentUser.id ? '' : `<button class="btn btn-sm btn-danger" data-auth-action="delete-user" data-user-id="${safeId}"><i class="fas fa-trash"></i> Xóa</button>`;
             let changePwdBtn = `<button class="btn btn-sm btn-warning ms-1" data-auth-action="change-user-password" data-user-id="${safeId}" data-username="${safeUsername}"><i class="fas fa-key"></i> Đổi MK</button>`;
             let editBtn = `<button class="btn btn-sm btn-outline-primary ms-1" data-auth-action="edit-user" data-user-id="${safeId}"><i class="fas fa-user-pen"></i> Sửa</button>`;
+            let revokeSessionsBtn = activeSessions > 0
+                ? `<button class="btn btn-sm btn-outline-danger ms-1" data-auth-action="revoke-user-sessions" data-user-id="${safeId}" data-username="${safeUsername}"><i class="fas fa-right-from-bracket"></i> Giải phóng phiên</button>`
+                : '';
             tbody.innerHTML += `
                 <tr>
                     <td>${safeId}</td>
@@ -362,7 +389,8 @@ async function fetchAdminData() {
                     <td>${safeFullName}</td>
                     <td>${safePhoneNumber}</td>
                     <td><div class="d-flex flex-wrap gap-1">${badges.join('')}</div></td>
-                    <td>${deleteBtn}${changePwdBtn}${editBtn}</td>
+                    <td class="text-center"><span class="badge ${activeSessions >= sessionLimit ? 'bg-warning text-dark' : 'bg-light text-dark border'}">${activeSessions}/${sessionLimit}</span></td>
+                    <td>${deleteBtn}${changePwdBtn}${editBtn}${revokeSessionsBtn}</td>
                 </tr>
             `;
         });
@@ -535,6 +563,9 @@ function formatDashboardDateTimeLabel(value) {
 async function fetchDashboardStats() {
     if (!currentUser || currentUser.role !== 'admin') return;
 
+    const dashboardStatus = document.getElementById('dashboardStatus');
+    if (dashboardStatus) dashboardStatus.textContent = 'Đang cập nhật dữ liệu...';
+
     const periodFilter = document.getElementById('dashboardPeriodFilter');
     const referenceInput = document.getElementById('dashboardReferenceDate');
     const referenceGroup = document.getElementById('dashboardReferenceDateGroup');
@@ -653,6 +684,13 @@ async function fetchDashboardStats() {
 
     // Also load templates dropdown so export/filter works
     await populateTemplatesDropdown('filterTemplateId', true);
+    if (dashboardStatus) {
+        dashboardStatus.textContent = `Đã cập nhật lúc ${new Intl.DateTimeFormat('vi-VN', {
+            timeZone: 'Asia/Ho_Chi_Minh',
+            hour: '2-digit',
+            minute: '2-digit',
+        }).format(new Date())}`;
+    }
 }
 
 async function populateTemplatesDropdown(elementId, keepDefault = false) {
@@ -743,6 +781,7 @@ async function createUser() {
     const p = document.getElementById('newPassword').value.trim();
     const fullName = document.getElementById('newFullName').value.trim();
     const phoneNumber = document.getElementById('newPhoneNumber').value.trim();
+    const maxConcurrentSessions = Number(document.getElementById('newMaxConcurrentSessions').value) || 1;
     if (!u || !p) return alert("Vui lòng nhập tên và mật khẩu");
     if (p.length < 8) return alert("Mật khẩu phải có ít nhất 8 ký tự");
     const data = await apiCall('/api/users', {
@@ -753,6 +792,7 @@ async function createUser() {
             password: p,
             full_name: fullName,
             phone_number: phoneNumber,
+            max_concurrent_sessions: maxConcurrentSessions,
         })
     });
     
@@ -763,6 +803,7 @@ async function createUser() {
         document.getElementById('newPassword').value = '';
         document.getElementById('newFullName').value = '';
         document.getElementById('newPhoneNumber').value = '';
+        document.getElementById('newMaxConcurrentSessions').value = '1';
         fetchAdminData();
     }
 }
@@ -796,6 +837,7 @@ function openEditUserModal(userId) {
     document.getElementById('editUsername').value = user.username;
     document.getElementById('editFullName').value = userDisplayName(user);
     document.getElementById('editPhoneNumber').value = user.phone_number || '';
+    document.getElementById('editMaxConcurrentSessions').value = Number(user.max_concurrent_sessions) || 1;
     new bootstrap.Modal(document.getElementById('editUserModal')).show();
 }
 
@@ -803,16 +845,30 @@ async function submitEditUser() {
     const userId = document.getElementById('editUserId').value;
     const fullName = document.getElementById('editFullName').value.trim();
     const phoneNumber = document.getElementById('editPhoneNumber').value.trim();
+    const maxConcurrentSessions = Number(document.getElementById('editMaxConcurrentSessions').value) || 1;
     const data = await apiCall(`/api/users/${userId}`, {
         method: 'PATCH',
         headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({ full_name: fullName, phone_number: phoneNumber }),
+        body: JSON.stringify({
+            full_name: fullName,
+            phone_number: phoneNumber,
+            max_concurrent_sessions: maxConcurrentSessions,
+        }),
     });
     if (!data) return;
     invalidateUsersCache();
     bootstrap.Modal.getInstance(document.getElementById('editUserModal')).hide();
     await fetchAdminData();
     alert('Đã cập nhật thông tin tài khoản!');
+}
+
+async function revokeUserSessions(userId, username) {
+    if (!confirm(`Giải phóng các phiên đăng nhập của ${username}? Các trình duyệt đó sẽ phải đăng nhập lại.`)) return;
+    const data = await apiCall(`/api/users/${userId}/sessions`, { method: 'DELETE' });
+    if (!data) return;
+    invalidateUsersCache();
+    await fetchAdminData();
+    alert(`Đã giải phóng ${Number(data.revoked_sessions) || 0} phiên đăng nhập.`);
 }
 
 function setExportAllStatus(message, isError = false) {
@@ -947,6 +1003,7 @@ const AUTH_GENERATED_ACTIONS = Object.freeze({
     'delete-user': trigger => deleteUser(Number(trigger.dataset.userId)),
     'change-user-password': trigger => openChangePasswordModal(Number(trigger.dataset.userId), trigger.dataset.username),
     'edit-user': trigger => openEditUserModal(Number(trigger.dataset.userId)),
+    'revoke-user-sessions': trigger => revokeUserSessions(Number(trigger.dataset.userId), trigger.dataset.username),
     'configure-template': trigger => openConfigModal(Number(trigger.dataset.templateId), decodeURIComponent(trigger.dataset.templateName)),
     'delete-template': trigger => deleteTemplate(Number(trigger.dataset.templateId), decodeURIComponent(trigger.dataset.templateName)),
 });

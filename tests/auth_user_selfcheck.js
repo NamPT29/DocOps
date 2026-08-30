@@ -10,6 +10,7 @@ const fields = {
     newPassword: { value: '123' },
     newFullName: { value: '' },
     newPhoneNumber: { value: '' },
+    newMaxConcurrentSessions: { value: '1' },
 };
 const sandbox = {
     console,

@@ -1,5 +1,6 @@
 import os
 import logging
+from contextlib import asynccontextmanager
 from pathlib import Path
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse, JSONResponse, Response
@@ -16,6 +17,7 @@ from server.frontend_static import PublicFrontendStaticFiles, resolve_public_fro
 from server.security_headers import SecurityHeadersMiddleware
 from server.openapi import configure_openapi
 from server.release_info import APP_VERSION
+from server.services.export_job_service import cleanup_stale_export_jobs
 
 configure_logging(
     settings.log_dir,
@@ -24,6 +26,26 @@ configure_logging(
     backup_count=settings.log_backup_count,
 )
 logger = logging.getLogger("server")
+
+
+def run_startup_maintenance() -> None:
+    try:
+        result = cleanup_stale_export_jobs()
+    except Exception:
+        logger.warning("Không thể dọn tác vụ xuất cũ khi khởi động", exc_info=True)
+        return
+    logger.info(
+        "Dọn tác vụ xuất khi khởi động: cleaned=%d skipped=%d errors=%d",
+        result["cleaned"],
+        result["skipped"],
+        result["errors"],
+    )
+
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    run_startup_maintenance()
+    yield
 
 # Initialize database
 from server.database import Base, engine
@@ -37,8 +59,10 @@ from server.services.submission_metadata_service import (
 from server.services.project_status_service import ensure_project_status_schema
 from server.services.submission_status_service import ensure_submission_status_schema
 from server.services.user_profile_service import ensure_user_profile_schema
+from server.repositories.submission_view_repository import ensure_submission_view_schema
 
 Base.metadata.create_all(bind=engine)
+ensure_submission_view_schema(engine)
 ensure_user_profile_schema(engine)
 ensure_submission_metadata_schema(engine)
 ensure_project_status_schema(engine)
@@ -93,6 +117,7 @@ app = FastAPI(
     redoc_url="/redoc" if settings.api_docs_enabled else None,
     openapi_url="/openapi.json" if settings.api_docs_enabled else None,
     responses=API_ERROR_RESPONSES,
+    lifespan=lifespan,
 )
 register_exception_handlers(app)
 

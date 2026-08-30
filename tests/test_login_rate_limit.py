@@ -1,7 +1,8 @@
 from types import SimpleNamespace
 
 import pytest
-from fastapi import HTTPException
+from fastapi import HTTPException, Response
+from fakeredis import FakeRedis
 
 from server.routers import auth
 from server.services.login_rate_limit_service import (
@@ -11,32 +12,6 @@ from server.services.login_rate_limit_service import (
     RedisLoginRateLimiter,
 )
 from server.services.api_rate_limit_service import DatabaseRateLimiter
-
-
-class FakeRedis:
-    def __init__(self):
-        self.values = {}
-        self.expirations = {}
-
-    def incrby(self, name, amount=1):
-        self.values[name] = self.values.get(name, 0) + amount
-        return self.values[name]
-
-    def expire(self, name, seconds):
-        self.expirations[name] = seconds
-        return True
-
-    def ttl(self, name):
-        return self.expirations.get(name, -2) if name in self.values else -2
-
-    def get(self, name):
-        return self.values.get(name)
-
-    def delete(self, *names):
-        for name in names:
-            self.values.pop(name, None)
-            self.expirations.pop(name, None)
-        return 1
 
 
 class MissingUserDb:
@@ -78,7 +53,7 @@ def test_login_rate_limiter_reset_clears_failures():
 
 
 def test_redis_login_rate_limiter_shares_failure_counter_and_resets():
-    redis = FakeRedis()
+    redis = FakeRedis(decode_responses=True)
     limiter = RedisLoginRateLimiter(2, 60, redis_client=redis)
     second_worker = RedisLoginRateLimiter(2, 60, redis_client=redis)
 
@@ -137,9 +112,9 @@ def test_login_endpoint_returns_429_with_existing_error_contract(monkeypatch):
     credentials = auth.LoginRequest(username='member', password='wrong')
 
     with pytest.raises(HTTPException) as first:
-        auth.api_login(credentials, request=request, db=MissingUserDb())
+        auth.api_login(credentials, request=request, response=Response(), db=MissingUserDb())
     with pytest.raises(HTTPException) as second:
-        auth.api_login(credentials, request=request, db=MissingUserDb())
+        auth.api_login(credentials, request=request, response=Response(), db=MissingUserDb())
 
     assert first.value.status_code == 401
     assert first.value.detail == 'Sai tên đăng nhập hoặc mật khẩu'

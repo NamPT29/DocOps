@@ -9,6 +9,8 @@ let requestedUrl = '';
 let requestedPayload = null;
 let requestStarted = false;
 let reopenedSubmissionId = null;
+let nextSubmissionStatus = 'pending_input_confirmation';
+const alerts = [];
 
 const sandbox = {
     console,
@@ -37,12 +39,12 @@ const sandbox = {
         return {
             ok: true,
             async json() {
-                return { status: 'ok', submission_status: 'pending_input_confirmation', is_checked: true };
+                return { status: 'ok', submission_status: nextSubmissionStatus, is_checked: true };
             },
         };
     },
     formatApiErrorDetail: value => String(value),
-    alert() {},
+    alert(message) { alerts.push(message); },
 };
 
 vm.createContext(sandbox);
@@ -69,11 +71,19 @@ sandbox.editSubmission = async id => { reopenedSubmissionId = id; };
     assert.equal(sandbox.window.reviewApproved, true);
     assert.equal(sandbox.window.reviewEditMode, false);
     assert.equal(reopenedSubmissionId, 71);
+    assert.match(alerts.at(-1), /chuyển cho người nhập xác nhận/);
 
     sandbox.updateReviewConfirmationStatus('confirmed', false);
     assert.equal(statusBadge.textContent, 'Đã kiểm duyệt');
     assert.equal(reviewCheckbox.checked, true);
     assert.equal(reviewCheckbox.disabled, true);
+
+    nextSubmissionStatus = 'completed';
+    reviewCheckbox.checked = true;
+    await sandbox.confirmReviewSubmission(reviewCheckbox);
+    assert.equal(statusBadge.textContent, 'Hoàn thành');
+    assert.match(statusHelp.textContent, /không thay đổi nội dung/);
+    assert.match(alerts.at(-1), /không có thay đổi và đã hoàn thành/);
 
     const indexHtml = fs.readFileSync('frontend/index.html', 'utf8');
     const panelSource = fs.readFileSync('frontend/js/admin_panel.js', 'utf8');

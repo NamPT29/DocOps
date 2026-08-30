@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, Header, Request
+from fastapi import APIRouter, Depends, HTTPException, Header, Request, Response
 from pydantic import BaseModel, Field
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -9,8 +9,8 @@ import logging
 import os
 import secrets
 from typing import Literal
-from datetime import datetime, timedelta, timezone
-from server.database import get_db, SessionLocal
+from datetime import timedelta
+from server.database import get_db, SessionLocal, get_utc_now
 from server.models import User
 from server.repositories import UserRepository
 from server.services.login_rate_limit_service import (
@@ -20,6 +20,16 @@ from server.services.login_rate_limit_service import (
     RedisLoginRateLimiter,
 )
 from server.services.personnel_statistics_service import get_personnel_statistics
+from server.services.auth_session_service import (
+    ConcurrentSessionLimitReached,
+    active_session_counts,
+    create_login_session,
+    enforce_session_limit,
+    get_authenticated_user,
+    normalize_session_limit,
+    revoke_session,
+    revoke_user_sessions,
+)
 from server.settings import settings
 
 router = APIRouter(prefix="/api", tags=["auth"])
@@ -109,10 +119,21 @@ def get_current_user(
     except (jwt.InvalidTokenError, TypeError, ValueError):
         raise HTTPException(status_code=401, detail="Invalid token")
 
-    user = UserRepository(db).get(user_id)
-    if not user:
+    session_id = payload.get("sid")
+    user = get_authenticated_user(db, user_id=user_id, session_id=session_id)
+    if not user and not UserRepository(db).get(user_id):
         raise HTTPException(status_code=401, detail="User no longer exists")
-    return {"id": user.id, "username": user.username, "role": user.role}
+    if not user:
+        raise HTTPException(
+            status_code=401,
+            detail="Phiên đăng nhập không còn hiệu lực",
+        )
+    return {
+        "id": user.id,
+        "username": user.username,
+        "role": user.role,
+        "session_id": session_id,
+    }
 
 def get_admin_user(current_user: dict = Depends(get_current_user)):
     if current_user.get("role") != "admin":
@@ -152,6 +173,7 @@ def build_user_payload(
     db: Session,
     *,
     capability_flags: tuple[bool, bool] | None = None,
+    active_session_count: int | None = None,
 ) -> dict:
     full_name = str(getattr(user, "full_name", "") or "").strip()
     if capability_flags is None:
@@ -162,14 +184,20 @@ def build_user_payload(
             can_input=capability_flags[0],
             can_review=capability_flags[1],
         )
-    return {
+    payload = {
         "id": user.id,
         "username": user.username,
         "full_name": full_name or user.username,
         "phone_number": getattr(user, "phone_number", None),
         "role": user.role,
+        "max_concurrent_sessions": normalize_session_limit(
+            getattr(user, "max_concurrent_sessions", 1)
+        ),
         **capability_profile,
     }
+    if active_session_count is not None:
+        payload["active_session_count"] = max(0, int(active_session_count))
+    return payload
 
 
 def get_input_user(
@@ -222,11 +250,13 @@ def init_admin() -> bool:
 class LoginRequest(BaseModel):
     username: str
     password: str = Field(max_length=128)
+    browser_id: str | None = Field(default=None, max_length=128)
 
 @router.post("/login")
 def api_login(
     req: LoginRequest,
     request: Request,
+    response: Response,
     db: Session = Depends(get_db),
 ):
     client_host = request.client.host if request.client else "unknown"
@@ -272,20 +302,66 @@ def api_login(
 
     if not user.password.startswith("scrypt$"):
         user.password = hash_password(req.password)
-        db.commit()
-    
-    user_data = build_user_payload(user, db)
-    expire = datetime.now(timezone.utc) + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+
+    expire = get_utc_now() + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    request_cookies = getattr(request, "cookies", {}) or {}
+    browser_id = req.browser_id or request_cookies.get("scanToExcelBrowserId")
+    try:
+        login_session = create_login_session(
+            db,
+            user=user,
+            browser_id=browser_id,
+            expires_at=expire,
+        )
+    except ConcurrentSessionLimitReached as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"Tài khoản đang sử dụng đủ {exc.limit} trình duyệt được phép. "
+                "Hãy đăng xuất ở trình duyệt khác hoặc liên hệ admin để giải phóng phiên."
+            ),
+        ) from exc
+
+    active_count = active_session_counts(db, {user.id})[user.id]
+    user_data = build_user_payload(
+        user,
+        db,
+        active_session_count=active_count,
+    )
     to_encode = {
         "sub": str(user.id),
         "id": user.id,
         "username": user.username,
         "role": user.role,
+        "sid": login_session.session_id,
         "exp": expire,
     }
     token = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
-    
+    db.commit()
+    response.set_cookie(
+        key="scanToExcelBrowserId",
+        value=login_session.browser_id,
+        max_age=ACCESS_TOKEN_EXPIRE_MINUTES * 60,
+        httponly=True,
+        samesite="lax",
+    )
+
     return {"status": "ok", "token": token, "user": user_data}
+
+
+@router.post("/logout")
+def api_logout(
+    current_user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    revoke_session(
+        db,
+        user_id=current_user["id"],
+        session_id=current_user.get("session_id"),
+    )
+    db.commit()
+    return {"status": "ok"}
 
 class CreateUserRequest(BaseModel):
     username: str
@@ -293,6 +369,7 @@ class CreateUserRequest(BaseModel):
     full_name: str | None = Field(default=None, max_length=255)
     phone_number: str | None = Field(default=None, max_length=50)
     role: Literal["admin", "user"] = "user"
+    max_concurrent_sessions: int = Field(default=1, ge=1, le=20)
 
 @router.post("/users")
 def api_create_user(req: CreateUserRequest, current_user: dict = Depends(get_admin_user), db: Session = Depends(get_db)):
@@ -305,6 +382,7 @@ def api_create_user(req: CreateUserRequest, current_user: dict = Depends(get_adm
         full_name=(req.full_name or "").strip() or req.username,
         phone_number=(req.phone_number or "").strip() or None,
         role=req.role,
+        max_concurrent_sessions=req.max_concurrent_sessions,
     )
     repository.add(user)
     db.commit()
@@ -352,6 +430,7 @@ class ChangePasswordRequest(BaseModel):
 class UpdateUserProfileRequest(BaseModel):
     full_name: str | None = Field(default=None, max_length=255)
     phone_number: str | None = Field(default=None, max_length=50)
+    max_concurrent_sessions: int | None = Field(default=None, ge=1, le=20)
 
 @router.put("/users/{user_id}/password")
 def api_change_user_password(
@@ -366,6 +445,15 @@ def api_change_user_password(
         raise HTTPException(status_code=404, detail="Không tìm thấy người dùng")
     
     user.password = hash_password(req.new_password)
+    revoke_user_sessions(
+        db,
+        user_id=user.id,
+        except_session_id=(
+            current_user.get("session_id")
+            if current_user["id"] == user.id
+            else None
+        ),
+    )
     db.commit()
     return {"status": "ok"}
 
@@ -384,14 +472,33 @@ def api_update_user_profile(
 
     user.full_name = (req.full_name or "").strip() or user.username
     user.phone_number = (req.phone_number or "").strip() or None
+    revoked_sessions = 0
+    if req.max_concurrent_sessions is not None:
+        user.max_concurrent_sessions = req.max_concurrent_sessions
+        revoked_sessions = enforce_session_limit(
+            db,
+            user_id=user.id,
+            limit=req.max_concurrent_sessions,
+        )
     db.commit()
-    return {"status": "ok", "user": build_user_payload(user, db)}
+    active_count = active_session_counts(db, {user.id})[user.id]
+    return {
+        "status": "ok",
+        "user": build_user_payload(
+            user,
+            db,
+            active_session_count=active_count,
+        ),
+        "revoked_sessions": revoked_sessions,
+    }
 
 @router.get("/users")
 def api_get_users(current_user: dict = Depends(get_admin_user), db: Session = Depends(get_db)):
     repository = UserRepository(db)
     users = repository.list_all()
-    capability_flags = repository.capability_flags_map({user.id for user in users})
+    user_ids = {user.id for user in users}
+    capability_flags = repository.capability_flags_map(user_ids)
+    session_counts = active_session_counts(db, user_ids)
     return {
         "status": "ok",
         "data": [
@@ -399,10 +506,32 @@ def api_get_users(current_user: dict = Depends(get_admin_user), db: Session = De
                 user,
                 db,
                 capability_flags=capability_flags[user.id],
+                active_session_count=session_counts[user.id],
             )
             for user in users
         ],
     }
+
+
+@router.delete("/users/{user_id}/sessions")
+def api_revoke_user_sessions(
+    user_id: int,
+    current_user: dict = Depends(get_admin_user),
+    db: Session = Depends(get_db),
+):
+    user = UserRepository(db).get(user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="Không tìm thấy người dùng")
+    keep_session_id = (
+        current_user.get("session_id") if current_user["id"] == user_id else None
+    )
+    revoked = revoke_user_sessions(
+        db,
+        user_id=user_id,
+        except_session_id=keep_session_id,
+    )
+    db.commit()
+    return {"status": "ok", "revoked_sessions": revoked}
 
 
 @router.get("/users/personnel-stats")

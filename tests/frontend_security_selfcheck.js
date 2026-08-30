@@ -36,18 +36,21 @@ const sandbox = {
 };
 vm.createContext(sandbox);
 vm.runInContext(fs.readFileSync('frontend/js/form_renderer.js', 'utf8'), sandbox);
-const adminPanelSource = fs.readFileSync('frontend/js/admin_panel.js', 'utf8');
+const adminPanelSource = [
+    fs.readFileSync('frontend/js/admin_operations.js', 'utf8'),
+    fs.readFileSync('frontend/js/admin_panel.js', 'utf8'),
+].join('\n');
 vm.runInContext(adminPanelSource, sandbox);
 
 assert(adminPanelSource.includes('const safeUsername = escapeHTML(u.username);'));
 assert(!adminPanelSource.includes('<td>${u.username}</td>'));
 assert(!adminPanelSource.includes('${u.username} <span class="text-muted small">'));
 
-assert.equal(sandbox.getDraftStorageKey(), 'formDraft_2_11');
+assert.equal(sandbox.getDraftStorageKey(), 'formDraft_2_none_11_none');
 sandbox.window.activeTemplateId = 12;
-assert.equal(sandbox.getDraftStorageKey(), 'formDraft_2_12');
+assert.equal(sandbox.getDraftStorageKey(), 'formDraft_2_none_12_none');
 sandbox.removeCurrentFormDraft();
-assert.deepEqual(removedKeys, ['formDraft_2_12']);
+assert.deepEqual(removedKeys, ['formDraft_2_none_12_none']);
 
 sandbox.renderAdminSubmissionsTable([{
     id: 4,

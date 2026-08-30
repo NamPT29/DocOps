@@ -1,4 +1,5 @@
 import inspect
+from datetime import timedelta
 
 import jwt
 import pytest
@@ -7,7 +8,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from server.database import Base, get_db
+from server.database import Base, get_db, get_utc_now
 from server.models import (
     AssignedDocument,
     Project,
@@ -19,10 +20,27 @@ from server.models import (
     SubmissionReviewAssignment,
     Template,
     User,
+    UserLoginSession,
 )
 from server.routers import projects, submissions
 from server.routers.auth import ALGORITHM, SECRET_KEY
 from server.routers.project_access import get_project_input_member
+
+
+def _auth_token(db, user, browser_id):
+    login_session = UserLoginSession(
+        session_id=f"session-{browser_id}",
+        user_id=user.id,
+        browser_id=browser_id,
+        expires_at=get_utc_now() + timedelta(minutes=10),
+    )
+    db.add(login_session)
+    db.commit()
+    return jwt.encode(
+        {"sub": str(user.id), "sid": login_session.session_id},
+        SECRET_KEY,
+        algorithm=ALGORITHM,
+    )
 
 
 @pytest.fixture()
@@ -175,11 +193,7 @@ def test_submission_access_routes_return_401_403_and_allow_owner(
     unauthenticated = client.request(method, path)
     assert unauthenticated.status_code == 401
 
-    outsider_token = jwt.encode(
-        {"sub": str(outsider.id)},
-        SECRET_KEY,
-        algorithm=ALGORITHM,
-    )
+    outsider_token = _auth_token(db, outsider, f"outsider-{method}")
     forbidden = client.request(
         method,
         path,
@@ -187,11 +201,7 @@ def test_submission_access_routes_return_401_403_and_allow_owner(
     )
     assert forbidden.status_code == 403
 
-    owner_token = jwt.encode(
-        {"sub": str(owner.id)},
-        SECRET_KEY,
-        algorithm=ALGORITHM,
-    )
+    owner_token = _auth_token(db, owner, f"owner-{method}")
     allowed = client.request(
         method,
         path,
@@ -272,9 +282,15 @@ def test_transferred_case_revokes_original_author_and_allows_active_assignee(db)
 
     assert update_forbidden.value.status_code == 403
     assert view_forbidden.value.status_code == 403
+    lease_token = submissions.api_claim_submission_view(
+        submission.id,
+        current_user={"id": active_assignee.id, "role": "user"},
+        db=db,
+    )["lease_token"]
     assert submissions.api_update_submission(
         submission.id,
         submissions.SubmitRequest(data={"_pdf_uuid": document.uuid_filename}, status="draft"),
+        lease_token=lease_token,
         current_user={"id": active_assignee.id, "role": "user"},
         db=db,
     ) == {"status": "ok"}

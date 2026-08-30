@@ -1,26 +1,11 @@
 import pytest
+from fakeredis import FakeRedis
 
 from server.services.template_cache_service import TemplateArtifactCache
 
 
-class FakeRedis:
-    def __init__(self):
-        self.values = {}
-
-    def get(self, key):
-        return self.values.get(key)
-
-    def setex(self, key, _ttl, value):
-        self.values[key] = value
-
-    def incr(self, key):
-        value = int(self.values.get(key, 0)) + 1
-        self.values[key] = str(value)
-        return value
-
-
 def test_shared_cache_hits_across_workers_and_invalidates_by_revision():
-    redis = FakeRedis()
+    redis = FakeRedis(decode_responses=True)
     first_worker = TemplateArtifactCache(redis_client=redis, ttl_seconds=60)
     second_worker = TemplateArtifactCache(redis_client=redis, ttl_seconds=60)
     calls = []

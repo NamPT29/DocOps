@@ -4,6 +4,7 @@ from sqlalchemy import inspect, text
 _USER_PROFILE_COLUMNS = {
     "full_name": "VARCHAR(255) NULL",
     "phone_number": "VARCHAR(50) NULL",
+    "max_concurrent_sessions": "INTEGER NOT NULL DEFAULT 1",
 }
 
 
@@ -25,4 +26,8 @@ def ensure_user_profile_schema(engine) -> None:
         connection.execute(text(
             "UPDATE users SET full_name = username "
             "WHERE full_name IS NULL OR TRIM(full_name) = ''"
+        ))
+        connection.execute(text(
+            "UPDATE users SET max_concurrent_sessions = 1 "
+            "WHERE max_concurrent_sessions IS NULL OR max_concurrent_sessions < 1"
         ))

@@ -219,6 +219,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0 if configured else 1
 
     managed_caddy = None
+    public_hostname = ""
     try:
         paths = prepare_runtime_environment()
         if paths is not None:
@@ -226,12 +227,15 @@ def main(argv: list[str] | None = None) -> int:
         verify_database_connection()
         host = os.environ.get("HOST", "0.0.0.0")
         port = int(os.environ.get("PORT", "8000"))
+        public_hostname = os.environ.get("PUBLIC_HOSTNAME", "").strip()
         if paths is not None:
-            managed_caddy, _caddy_status = start_packaged_caddy(
+            managed_caddy, caddy_status = start_packaged_caddy(
                 Path(get_base_dir()),
                 resource_root,
             )
-            ensure_cloudflared_service()
+            cloudflared_status = ensure_cloudflared_service()
+            print(f"Caddy: {caddy_status}")
+            print(f"Cloudflared: {cloudflared_status}")
     except Exception as exc:
         stop_managed_caddy(managed_caddy)
         print("=" * 60)
@@ -247,6 +251,12 @@ def main(argv: list[str] | None = None) -> int:
         threading.Thread(
             target=open_browser_when_ready,
             args=(health_url, browser_url),
+            daemon=True,
+        ).start()
+    if paths is not None and public_hostname:
+        threading.Thread(
+            target=report_public_domain_when_ready,
+            args=(f"https://{public_hostname}/health/ready",),
             daemon=True,
         ).start()
 

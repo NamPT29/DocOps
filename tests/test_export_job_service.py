@@ -1,5 +1,6 @@
 from pathlib import Path
 from types import SimpleNamespace
+from datetime import datetime, timedelta, timezone
 
 import pytest
 from fastapi import BackgroundTasks, HTTPException
@@ -170,6 +171,63 @@ def test_cleanup_export_job_keeps_locked_log_without_raising(
     assert result["retained"] == [str(log_path)]
     assert log_path.is_file()
     assert not output_path.exists()
+
+
+def test_cleanup_stale_export_jobs_removes_only_old_terminal_jobs(
+    isolated_export_jobs,
+):
+    old_job_id = "1" * 32
+    recent_job_id = "2" * 32
+    running_job_id = "3" * 32
+    now = datetime.now(timezone.utc)
+
+    export_job_service.write_export_job(old_job_id, {
+        "job_id": old_job_id,
+        "state": "completed",
+        "extension": ".xlsx",
+        "updated_at": (now - timedelta(hours=25)).isoformat(),
+    })
+    export_job_service.export_job_output_path(old_job_id, ".xlsx").write_bytes(b"old")
+    export_job_service.write_export_job(recent_job_id, {
+        "job_id": recent_job_id,
+        "state": "error",
+        "updated_at": (now - timedelta(hours=23)).isoformat(),
+    })
+    export_job_service.write_export_job(running_job_id, {
+        "job_id": running_job_id,
+        "state": "running",
+        "updated_at": (now - timedelta(days=7)).isoformat(),
+    })
+
+    result = export_job_service.cleanup_stale_export_jobs(max_age_hours=24)
+
+    assert result == {"cleaned": 1, "skipped": 2, "errors": 0}
+    assert export_job_service.read_export_job(old_job_id) is None
+    assert export_job_service.read_export_job(recent_job_id) is not None
+    assert export_job_service.read_export_job(running_job_id) is not None
+
+
+def test_cleanup_stale_export_jobs_keeps_terminal_job_with_invalid_timestamp(
+    isolated_export_jobs,
+):
+    job_id = "4" * 32
+    export_job_service.write_export_job(job_id, {
+        "job_id": job_id,
+        "state": "completed",
+        "updated_at": "not-a-timestamp",
+    })
+
+    result = export_job_service.cleanup_stale_export_jobs(max_age_hours=24)
+
+    assert result == {"cleaned": 0, "skipped": 0, "errors": 1}
+    assert export_job_service.read_export_job(job_id) is not None
+
+
+def test_cleanup_stale_export_jobs_rejects_non_positive_retention(
+    isolated_export_jobs,
+):
+    with pytest.raises(ValueError, match="lớn hơn 0 giờ"):
+        export_job_service.cleanup_stale_export_jobs(max_age_hours=0)
 
 
 def test_start_export_job_recovers_lock_from_dead_worker(

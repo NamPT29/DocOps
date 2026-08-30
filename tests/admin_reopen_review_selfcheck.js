@@ -79,6 +79,15 @@ const approvedSubmission = [{
     assert.match(tableBody.children[0].innerHTML, /data-submission-id="41"/);
 
     tableBody.children.length = 0;
+    sandbox.renderAdminSubmissionsTable(
+        [{ ...approvedSubmission[0], status: 'pending_input_confirmation' }],
+        'submissionsTableBody',
+        false,
+        { page: 1, total: 1, total_pages: 1, from: 1, to: 1 },
+    );
+    assert.doesNotMatch(tableBody.children[0].innerHTML, /Về chờ duyệt/);
+
+    tableBody.children.length = 0;
     sandbox.currentUser = { id: 2, role: 'user' };
     sandbox.renderAdminSubmissionsTable(
         approvedSubmission,

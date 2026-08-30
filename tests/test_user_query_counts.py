@@ -1,15 +1,17 @@
 import pytest
+from datetime import timedelta
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, event
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from server.database import Base
+from server.database import Base, get_utc_now
 from server.models import (
     AssignedDocument,
     AssignedDocumentReviewAssignment,
     User,
+    UserLoginSession,
 )
 from server.routers import auth
 
@@ -53,7 +55,15 @@ def test_get_users_query_count_is_bounded_and_payload_is_unchanged(user_count):
                 )
             )
         admin_id = users[0].id
+        login_session = UserLoginSession(
+            session_id=f"query-count-session-{user_count}",
+            user_id=admin_id,
+            browser_id=f"query-count-browser-{user_count}",
+            expires_at=get_utc_now() + timedelta(minutes=10),
+        )
+        setup_db.add(login_session)
         setup_db.commit()
+        login_session_id = login_session.session_id
 
     app = FastAPI()
     app.include_router(auth.router)
@@ -67,7 +77,7 @@ def test_get_users_query_count_is_bounded_and_payload_is_unchanged(user_count):
 
     app.dependency_overrides[auth.get_db] = override_get_db
     token = auth.jwt.encode(
-        {"sub": str(admin_id)},
+        {"sub": str(admin_id), "sid": login_session_id},
         auth.SECRET_KEY,
         algorithm=auth.ALGORITHM,
     )
@@ -92,7 +102,7 @@ def test_get_users_query_count_is_bounded_and_payload_is_unchanged(user_count):
     payload = response.json()
     assert payload["status"] == "ok"
     assert len(payload["data"]) == user_count
-    assert len(select_statements) == 3
+    assert len(select_statements) == 4
 
     users_by_name = {user["username"]: user for user in payload["data"]}
     assert users_by_name["admin"] == {
@@ -101,6 +111,8 @@ def test_get_users_query_count_is_bounded_and_payload_is_unchanged(user_count):
         "full_name": "Administrator",
         "phone_number": None,
         "role": "admin",
+        "max_concurrent_sessions": 1,
+        "active_session_count": 1,
         "can_input": True,
         "can_review": True,
         "roles": ["admin", "input", "reviewer"],

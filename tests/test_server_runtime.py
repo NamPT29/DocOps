@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import time
+from pathlib import Path
 
 import pytest
 
@@ -141,6 +142,50 @@ def test_app_launcher_runs_host_console_and_stops_managed_caddy(monkeypatch, tmp
     assert calls == [
         ("host_console", None),
         ("stop_caddy", managed_caddy),
+    ]
+
+
+def test_packaged_launcher_reports_service_state_and_checks_public_readiness(
+    monkeypatch, tmp_path
+):
+    managed_caddy = object()
+    paths = type("Paths", (), {"config_path": tmp_path / "host.env"})()
+    started_threads = []
+
+    monkeypatch.setattr(app_launcher, "get_resource_root", lambda: tmp_path)
+    monkeypatch.setattr(app_launcher, "get_base_dir", lambda: str(tmp_path))
+    monkeypatch.setattr(app_launcher.os, "chdir", lambda _path: None)
+    monkeypatch.setattr(app_launcher, "prepare_runtime_environment", lambda: paths)
+    monkeypatch.setattr(app_launcher, "verify_database_connection", lambda: None)
+    monkeypatch.setattr(
+        app_launcher,
+        "start_packaged_caddy",
+        lambda *_args: (managed_caddy, "started"),
+    )
+    monkeypatch.setattr(app_launcher, "ensure_cloudflared_service", lambda: "running")
+    monkeypatch.setattr(app_launcher, "run_host_console", lambda: 0)
+    monkeypatch.setattr(app_launcher, "stop_managed_caddy", lambda _process: None)
+    monkeypatch.setenv("HOST", "127.0.0.1")
+    monkeypatch.setenv("PORT", "8123")
+    monkeypatch.setenv("OPEN_BROWSER", "false")
+    monkeypatch.setenv("PUBLIC_HOSTNAME", "nhaplieu1.aivn.net.vn")
+
+    class FakeThread:
+        def __init__(self, **kwargs):
+            self.kwargs = kwargs
+
+        def start(self):
+            started_threads.append(self.kwargs)
+
+    monkeypatch.setattr(app_launcher.threading, "Thread", FakeThread)
+
+    assert app_launcher.main() == 0
+    assert started_threads == [
+        {
+            "target": app_launcher.report_public_domain_when_ready,
+            "args": ("https://nhaplieu1.aivn.net.vn/health/ready",),
+            "daemon": True,
+        }
     ]
 
 
@@ -302,3 +347,11 @@ def test_host_console_uses_public_multiworker_supervisor(monkeypatch):
     assert host_console.main() == 0
     assert calls[0][0] == ("server.main:app",)
     assert calls[0][1]["workers"] == 3
+
+
+def test_server_lifespan_runs_stale_export_cleanup():
+    source = Path("server/main.py").read_text(encoding="utf-8")
+
+    assert "from server.services.export_job_service import cleanup_stale_export_jobs" in source
+    assert "result = cleanup_stale_export_jobs()" in source
+    assert "lifespan=lifespan" in source

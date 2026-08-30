@@ -211,6 +211,8 @@ class ReviewWorkflowService:
 
     @staticmethod
     def can_review_submission(submission: Submission, current_user: dict, db: Session) -> bool:
+        if submission.created_by_user_id == current_user.get("id"):
+            return False
         if current_user.get('role') == 'admin':
             return True
         assignment = ReviewWorkflowService.get_review_assignment(db, submission.id)
@@ -238,7 +240,12 @@ class ReviewWorkflowService:
         submission: Submission,
         current_user: dict,
         db: Session,
-    ) -> SubmissionReviewAssignment:
+    ) -> SubmissionReviewAssignment | None:
+        if submission.created_by_user_id == current_user.get("id"):
+            raise HTTPException(
+                status_code=403,
+                detail="Không được tự kiểm tra hồ sơ do chính bạn nhập",
+            )
         if current_user.get('role') == 'admin':
             return ReviewWorkflowService.get_review_assignment(db, submission.id)
         assignment = ReviewWorkflowService.get_review_assignment(db, submission.id)
@@ -257,12 +264,81 @@ class ReviewWorkflowService:
         return assignment
 
     @staticmethod
+    def _view_conflict_detail(presence, db: Session) -> dict:
+        viewer_name = LookupRepository(db).username_map({
+            presence.viewer_user_id,
+        }).get(presence.viewer_user_id, "Người dùng khác")
+        return {
+            "code": "submission_view_conflict",
+            "message": f"{viewer_name} đang mở hồ sơ này. Vui lòng thử lại sau.",
+            "viewing_user_id": presence.viewer_user_id,
+            "viewing_user_name": viewer_name,
+        }
+
+    @staticmethod
+    def require_active_submission_lease(
+        submission: Submission,
+        current_user: dict,
+        lease_token: object,
+        db: Session,
+    ):
+        status, presence = SubmissionViewRepository(db).refresh_lease(
+            submission.id,
+            current_user["id"],
+            lease_token,
+        )
+        if status == "ok":
+            return presence
+        if status == "conflict" and presence is not None:
+            raise HTTPException(
+                status_code=409,
+                detail=ReviewWorkflowService._view_conflict_detail(presence, db),
+            )
+        messages = {
+            "missing": (
+                "submission_lease_required",
+                "Thiếu mã khóa chỉnh sửa. Hãy mở lại hồ sơ trước khi lưu.",
+            ),
+            "invalid": (
+                "submission_lease_invalid",
+                "Mã khóa chỉnh sửa không hợp lệ. Hãy mở lại hồ sơ.",
+            ),
+            "expired": (
+                "submission_lease_expired",
+                "Khóa chỉnh sửa đã hết hạn. Hãy mở lại hồ sơ.",
+            ),
+        }
+        code, message = messages[status]
+        raise HTTPException(
+            status_code=409,
+            detail={"code": code, "message": message},
+        )
+
+    @staticmethod
+    def require_no_other_active_view(
+        submission: Submission,
+        current_user: dict,
+        db: Session,
+    ):
+        presence = SubmissionViewRepository(db).active_presence(submission.id)
+        if (
+            presence is not None
+            and presence.viewer_user_id != current_user["id"]
+        ):
+            raise HTTPException(
+                status_code=409,
+                detail=ReviewWorkflowService._view_conflict_detail(presence, db),
+            )
+        return presence
+
+    @staticmethod
     def review_submission_payload(
         submission: Submission,
         document_metadata: dict | None,
         user_map: dict[int, str],
         template_map: dict[int, str],
         viewer_map: dict[int, dict] | None = None,
+        reviewer_user_id: int | None = None,
     ) -> dict:
         data_dict = json.loads(submission.data_json)
         viewer = (viewer_map or {}).get(submission.id)
@@ -296,6 +372,10 @@ class ReviewWorkflowService:
             "status": submission.status,
             "has_errors": bool(data_dict.get("_wrong_sections", [])),
             "creator_name": user_map.get(submission.created_by_user_id, "Unknown"),
+            "reviewer_user_id": reviewer_user_id,
+            "reviewer_name": user_map.get(reviewer_user_id, "Chưa phân công"),
+            "reviewer_assigned": reviewer_user_id is not None,
+            "is_reviewer_assigned": reviewer_user_id is not None,
         }
 
     @staticmethod

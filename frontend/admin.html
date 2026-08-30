@@ -7,12 +7,12 @@
     <link href="vendor/bootstrap/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="vendor/fontawesome/css/all.min.css">
     <link rel="stylesheet" href="admin-page.css?v=1">
-    <link rel="stylesheet" href="windows-ui.css?v=1">
+    <link rel="stylesheet" href="windows-ui.css?v=10">
 </head>
 <body class="app-shell">
     <nav class="navbar navbar-expand-lg navbar-dark shadow-sm">
         <div class="container-fluid">
-            <span class="navbar-brand mb-0 h1"><i class="fab fa-windows"></i> Quản trị Số hóa All in One</span>
+            <span class="navbar-brand mb-0 h1"><i class="fas fa-shield-alt" aria-hidden="true"></i> Quản trị Số hóa All in One</span>
             <div class="d-flex align-items-center">
                 <div class="text-white d-flex align-items-center">
                     <i class="fas fa-user-shield me-1"></i> <span id="userNameText">Admin</span>
@@ -23,24 +23,24 @@
     </nav>
 
     <div class="container-fluid mt-4 px-4">
-        <ul class="nav nav-tabs mb-4" id="adminTabs" role="tablist">
+        <ul class="nav nav-tabs mb-4" id="adminTabs" role="tablist" aria-label="Khu vực quản trị">
             <li class="nav-item" role="presentation">
-                <button class="nav-link active fw-bold text-success" id="dashboard-tab" data-bs-toggle="tab" data-bs-target="#dashboard-pane" data-admin-action="fetch-dashboard" type="button" role="tab">Dashboard</button>
+                <button class="nav-link active fw-bold text-success" id="dashboard-tab" data-bs-toggle="tab" data-bs-target="#dashboard-pane" data-admin-action="fetch-dashboard" type="button" role="tab" aria-controls="dashboard-pane" aria-selected="true">Tổng quan</button>
             </li>
             <li class="nav-item" role="presentation">
-                <button class="nav-link fw-bold text-danger" id="kpi-tab" data-bs-toggle="tab" data-bs-target="#kpi-pane" data-admin-action="fetch-admin-data" type="button" role="tab">Quản lý Tài khoản</button>
+                <button class="nav-link fw-bold text-danger" id="kpi-tab" data-bs-toggle="tab" data-bs-target="#kpi-pane" data-admin-action="fetch-admin-data" type="button" role="tab" aria-controls="kpi-pane" aria-selected="false">Nhân sự</button>
             </li>
             <li class="nav-item" role="presentation">
-                <button class="nav-link fw-bold text-primary" id="projects-tab" data-bs-toggle="tab" data-bs-target="#projects-pane" data-admin-action="initialize-projects" type="button" role="tab">Quản lý Dự án</button>
+                <button class="nav-link fw-bold text-primary" id="projects-tab" data-bs-toggle="tab" data-bs-target="#projects-pane" data-admin-action="initialize-projects" type="button" role="tab" aria-controls="projects-pane" aria-selected="false">Dự án</button>
             </li>
             <li class="nav-item" role="presentation">
-                <button class="nav-link fw-bold" id="templates-tab" data-bs-toggle="tab" data-bs-target="#templates-pane" data-admin-action="fetch-templates" type="button" role="tab">Quản lý Biểu mẫu (Templates)</button>
+                <button class="nav-link fw-bold" id="templates-tab" data-bs-toggle="tab" data-bs-target="#templates-pane" data-admin-action="fetch-templates" type="button" role="tab" aria-controls="templates-pane" aria-selected="false">Biểu mẫu</button>
             </li>
         </ul>
 
         <div class="tab-content">
             <!-- TAB DASHBOARD -->
-            <div class="tab-pane fade show active" id="dashboard-pane" role="tabpanel">
+            <div class="tab-pane fade show active" id="dashboard-pane" role="tabpanel" aria-labelledby="dashboard-tab">
                 <div class="card border-0 shadow-sm mb-3">
                     <div class="card-body">
                         <div class="row g-3 align-items-end">
@@ -75,56 +75,125 @@
                         </div>
                     </div>
                 </div>
+                <div class="d-flex justify-content-between align-items-center mb-3 admin-dashboard-heading">
+                    <div>
+                        <h1 class="h4 mb-1">Tổng quan vận hành</h1>
+                        <p class="text-muted small mb-0">Ưu tiên các hồ sơ cần xử lý trước, sau đó theo dõi tiến độ chung.</p>
+                    </div>
+                    <span id="dashboardStatus" class="small text-muted" role="status" aria-live="polite">Chưa cập nhật</span>
+                </div>
                 <div class="row g-3">
-                    <div class="col-md-6 col-xl-4">
+                    <div class="col-sm-6 col-xl-3">
                         <div class="card text-white bg-primary mb-3 shadow-sm admin-dashboard-card">
                             <div class="card-body">
                                 <div class="d-flex justify-content-between align-items-center">
                                     <div>
                                         <h5 class="card-title text-uppercase mb-1 admin-dashboard-title">Tổng số Hồ sơ</h5>
-                                        <h2 class="display-4 fw-bold mb-0" id="dashTotalDocs">0</h2>
+                                        <div class="display-4 fw-bold mb-0" id="dashTotalDocs">0</div>
+                                        <div class="small mt-1 admin-dashboard-detail">Tổng hồ sơ trong hệ thống</div>
                                     </div>
-                                    <i class="fas fa-file-alt fa-3x admin-dashboard-icon"></i>
+                                    <i class="fas fa-file-alt fa-2x admin-dashboard-icon"></i>
                                 </div>
                             </div>
                         </div>
                     </div>
-                    <div class="col-md-6 col-xl-4">
+                    <div class="col-sm-6 col-xl-3">
                         <div class="card text-white bg-success mb-3 shadow-sm admin-dashboard-card">
                             <div class="card-body">
                                 <div class="d-flex justify-content-between align-items-center">
                                     <div>
                                         <h5 class="card-title text-uppercase mb-1 admin-dashboard-title" id="dashPeriodTitle">Hồ sơ nhập trong ngày</h5>
-                                        <h2 class="display-4 fw-bold mb-0" id="dashPeriodDocs" aria-live="polite">0</h2>
-                                        <div class="small mt-1 admin-dashboard-range" id="dashPeriodRange"></div>
+                                        <div class="display-4 fw-bold mb-0" id="dashPeriodDocs" aria-live="polite">0</div>
+                                        <div class="small mt-1 admin-dashboard-detail" id="dashPeriodRange"></div>
                                     </div>
-                                    <i class="fas fa-chart-line fa-3x admin-dashboard-icon"></i>
+                                    <i class="fas fa-chart-line fa-2x admin-dashboard-icon"></i>
                                 </div>
                             </div>
                         </div>
+                    </div>
+                    <div class="col-sm-6 col-xl-3">
+                        <button type="button" class="card admin-dashboard-card admin-attention-card w-100 text-start" data-admin-dashboard-target="projects-tab">
+                            <div class="card-body">
+                                <div class="d-flex justify-content-between align-items-center">
+                                    <div>
+                                        <h5 class="card-title text-uppercase mb-1 admin-dashboard-title">Chờ kiểm duyệt</h5>
+                                        <div class="display-4 fw-bold mb-0" id="dashPendingReview" aria-live="polite">0</div>
+                                        <div class="small mt-1 admin-dashboard-detail">Mở danh sách dự án để xử lý</div>
+                                    </div>
+                                    <i class="fas fa-clipboard-check fa-2x" aria-hidden="true"></i>
+                                </div>
+                            </div>
+                        </button>
+                    </div>
+                    <div class="col-sm-6 col-xl-3">
+                        <button type="button" class="card admin-dashboard-card admin-attention-card w-100 text-start" data-admin-dashboard-target="projects-tab">
+                            <div class="card-body">
+                                <div class="d-flex justify-content-between align-items-center">
+                                    <div>
+                                        <h5 class="card-title text-uppercase mb-1 admin-dashboard-title">Đã hoàn thành</h5>
+                                        <div class="display-4 fw-bold mb-0" id="dashApproved" aria-live="polite">0</div>
+                                        <div class="small mt-1 admin-dashboard-detail">Mở dự án để xuất báo cáo</div>
+                                    </div>
+                                    <i class="fas fa-check-circle fa-2x" aria-hidden="true"></i>
+                                </div>
+                            </div>
+                        </button>
+                    </div>
+                </div>
+                <div class="form-section admin-dashboard-worklist">
+                    <div class="d-flex justify-content-between align-items-center gap-3 mb-3">
+                        <div>
+                            <h2 class="form-section-title mb-1"><i class="fas fa-users" aria-hidden="true"></i> Tải công việc theo nhân sự</h2>
+                            <p class="text-muted small mb-0">Dùng bảng này để nhận ra chỗ chờ duyệt hoặc tải việc bị lệch.</p>
+                        </div>
+                        <button type="button" class="btn btn-outline-secondary btn-sm text-nowrap" data-admin-dashboard-target="kpi-tab">Xem nhân sự</button>
+                    </div>
+                    <div class="table-responsive">
+                        <table class="table table-hover align-middle mb-0">
+                            <thead>
+                                <tr>
+                                    <th>Nhân sự</th>
+                                    <th class="text-center">Đang nhập</th>
+                                    <th class="text-center">Hoàn thành</th>
+                                    <th class="text-center">Bản nháp</th>
+                                    <th class="text-center">Chờ duyệt</th>
+                                    <th class="text-center">Đã duyệt</th>
+                                    <th class="text-center">Tổng</th>
+                                </tr>
+                            </thead>
+                            <tbody id="dashUserDetailBody" aria-live="polite">
+                                <tr><td colspan="7" class="text-center text-muted py-3">Đang tải dữ liệu vận hành...</td></tr>
+                            </tbody>
+                        </table>
                     </div>
                 </div>
             </div>
 
             <!-- TAB TÀI KHOẢN -->
-            <div class="tab-pane fade" id="kpi-pane" role="tabpanel">
+            <div class="tab-pane fade" id="kpi-pane" role="tabpanel" aria-labelledby="kpi-tab">
                 <div class="row g-3">
                     <!-- Tạo tài khoản -->
                     <div class="col-12">
-                        <div class="d-flex justify-content-end">
+                        <div class="admin-tab-toolbar d-flex justify-content-end">
                             <button type="button" class="btn btn-primary" data-bs-toggle="collapse" data-bs-target="#createUserPanel" aria-expanded="false" aria-controls="createUserPanel">
                                 <i class="fas fa-user-plus"></i> Tạo tài khoản mới
                             </button>
                         </div>
                     </div>
                     <div class="col-12 collapse" id="createUserPanel">
-                        <div class="form-section">
+                            <div class="form-section admin-create-panel">
                             <h5 class="text-primary"><i class="fas fa-user-plus"></i> Tạo tài khoản mới</h5>
                             <div class="mb-4">
-                                <input type="text" id="newUsername" class="form-control mb-2" placeholder="Tên đăng nhập">
-                                <input type="password" id="newPassword" class="form-control mb-2" placeholder="Mật khẩu (ít nhất 8 ký tự)" minlength="8" maxlength="128" autocomplete="new-password">
-                                <input type="text" id="newFullName" class="form-control mb-2" placeholder="Họ và tên (không bắt buộc)" maxlength="255">
-                                <input type="tel" id="newPhoneNumber" class="form-control mb-2" placeholder="Số điện thoại (không bắt buộc)" maxlength="50">
+                                <label class="form-label fw-semibold mb-1" for="newUsername">Tên đăng nhập</label>
+                                <input type="text" id="newUsername" class="form-control mb-3" placeholder="Ví dụ: nguyenvana" autocomplete="username">
+                                <label class="form-label fw-semibold mb-1" for="newPassword">Mật khẩu</label>
+                                <input type="password" id="newPassword" class="form-control mb-3" placeholder="Ít nhất 8 ký tự" minlength="8" maxlength="128" autocomplete="new-password">
+                                <label class="form-label fw-semibold mb-1" for="newFullName">Họ và tên <span class="text-muted fw-normal">(không bắt buộc)</span></label>
+                                <input type="text" id="newFullName" class="form-control mb-3" placeholder="Nguyễn Văn A" maxlength="255" autocomplete="name">
+                                <label class="form-label fw-semibold mb-1" for="newPhoneNumber">Số điện thoại <span class="text-muted fw-normal">(không bắt buộc)</span></label>
+                                <input type="tel" id="newPhoneNumber" class="form-control mb-3" placeholder="0900 000 000" maxlength="50" autocomplete="tel">
+                                <label class="form-label fw-semibold mb-1" for="newMaxConcurrentSessions">Số trình duyệt được đăng nhập đồng thời</label>
+                                <input type="number" id="newMaxConcurrentSessions" class="form-control mb-3" value="1" min="1" max="20" inputmode="numeric">
                                 <div class="form-text mb-2">Tài khoản mới chưa có vai trò cố định. Quyền nhập và kiểm tra phát sinh khi admin phân nhân sự trong <strong>Quản lý Dự án</strong>.</div>
                                 <button type="button" class="btn btn-primary w-100" data-admin-action="create-user">Tạo tài khoản</button>
                             </div>
@@ -133,9 +202,10 @@
                     
                     <!-- Bảng Danh sách Tài khoản -->
                     <div class="col-12">
-                        <div class="form-section">
+                        <div class="form-section admin-table-section">
                             <h4 class="form-section-title"><i class="fas fa-users"></i> Danh sách Nhân viên</h4>
-                            <table class="table table-bordered table-hover">
+                            <div class="table-responsive">
+                            <table class="table table-bordered table-hover align-middle">
                                 <thead class="table-light">
                                     <tr>
                                         <th>ID</th>
@@ -143,13 +213,15 @@
                                         <th>Họ và tên</th>
                                         <th>Số điện thoại</th>
                                         <th>Vai trò theo phân công</th>
+                                        <th class="text-center">Phiên/giới hạn</th>
                                         <th>Thao tác</th>
                                     </tr>
                                 </thead>
                                 <tbody id="adminUsersTableBody">
-                                    <tr><td colspan="6" class="text-center">Đang tải...</td></tr>
+                                    <tr><td colspan="7" class="text-center">Đang tải...</td></tr>
                                 </tbody>
                             </table>
+                            </div>
                         </div>
                     </div>
                     <div class="col-12">
@@ -179,18 +251,23 @@
             </div>
 
             <!-- TAB QUẢN LÝ DỰ ÁN -->
-            <div class="tab-pane fade" id="projects-pane" role="tabpanel">
+            <div class="tab-pane fade" id="projects-pane" role="tabpanel" aria-labelledby="projects-tab">
                 <div class="row g-3">
                     <div class="col-12">
-                        <div class="d-flex justify-content-end">
+                        <div class="admin-tab-toolbar d-flex justify-content-end">
                             <button type="button" class="btn btn-primary" data-bs-toggle="collapse" data-bs-target="#projectCreatePanel" aria-expanded="false" aria-controls="projectCreatePanel">
                                 <i class="fas fa-folder-plus"></i> Thêm dự án
                             </button>
                         </div>
                     </div>
                     <div class="col-12 collapse" id="projectCreatePanel">
-                        <div class="form-section">
+                        <div class="form-section admin-create-panel">
                             <h4 class="form-section-title"><i class="fas fa-folder-plus"></i> Thêm dự án</h4>
+                            <ol class="admin-project-steps small mb-4">
+                                <li><strong>Nguồn PDF</strong><span>Chọn folder gốc trên máy quản trị.</span></li>
+                                <li><strong>Quy tắc báo cáo</strong><span>Chọn biểu mẫu, cấp hồ sơ và cách tạo báo cáo.</span></li>
+                                <li><strong>Nhân sự</strong><span>Phân công người nhập/kiểm tra rồi xác nhận tải lên.</span></li>
+                            </ol>
                             <div class="mb-3">
                                 <label for="projectFolderPicker" class="form-label fw-semibold">1. Chọn folder trên máy admin</label>
                                 <input type="file" id="projectFolderPicker" class="form-control" accept=".pdf,application/pdf" webkitdirectory directory multiple data-admin-change="handle-project-folder">
@@ -258,7 +335,7 @@
                         </div>
                     </div>
                     <div class="col-12">
-                        <div class="form-section">
+                        <div class="form-section admin-table-section">
                             <div class="d-flex justify-content-between align-items-center mb-3">
                                 <h4 class="form-section-title mb-0"><i class="fas fa-diagram-project"></i> Danh sách dự án</h4>
                                 <button type="button" class="btn btn-sm btn-outline-secondary" data-admin-action="load-project-list"><i class="fas fa-sync"></i> Tải lại</button>
@@ -268,15 +345,13 @@
                                     <thead class="table-dark">
                                         <tr>
                                             <th>Dự án / biểu mẫu</th>
-                                            <th>Phân công hồ sơ</th>
-                                            <th>PDF</th>
-                                            <th>Đã nhập</th>
-                                            <th>Hoàn thành</th>
+                                            <th>Phân công</th>
+                                            <th>Tiến độ</th>
                                             <th>Trạng thái</th>
                                             <th>Thao tác</th>
                                         </tr>
                                     </thead>
-                                    <tbody id="projectListBody"><tr><td colspan="7" class="text-center text-muted">Chưa tải danh sách dự án.</td></tr></tbody>
+                                    <tbody id="projectListBody"><tr><td colspan="5" class="text-center text-muted">Chưa tải danh sách dự án.</td></tr></tbody>
                                 </table>
                             </div>
                             <div id="projectExportStatus" class="small text-muted mt-2" aria-live="polite"></div>
@@ -286,7 +361,7 @@
             </div>
 
             <!-- TAB QUẢN LÝ BIỂU MẪU -->
-            <div class="tab-pane fade" id="templates-pane" role="tabpanel">
+            <div class="tab-pane fade" id="templates-pane" role="tabpanel" aria-labelledby="templates-tab">
                 <div class="form-section">
                     <h4 class="form-section-title"><i class="fas fa-file-excel"></i> Danh sách Biểu mẫu</h4>
                     <div class="row mb-3">
@@ -297,7 +372,8 @@
                             </div>
                         </div>
                     </div>
-                    <table class="table table-striped table-hover">
+                    <div class="table-responsive">
+                    <table class="table table-striped table-hover mb-0">
                         <thead class="table-dark">
                             <tr>
                                 <th>ID</th>
@@ -310,6 +386,7 @@
                             <tr><td colspan="3" class="text-center">Đang tải dữ liệu...</td></tr>
                         </tbody>
                     </table>
+                    </div>
                 </div>
             </div>
         </div>
@@ -477,7 +554,26 @@
                             </div>
                         </div>
                     </div>
-                    
+
+                    <div class="card shadow-sm mb-3">
+                        <div class="card-header fw-bold"><i class="fas fa-chart-line me-1"></i> Ngưỡng cảnh báo lỗi</div>
+                        <div class="card-body">
+                            <div class="row align-items-center g-3">
+                                <div class="col-md-8">
+                                    <label for="errorReportThresholdPercent" class="form-label fw-semibold mb-1">Tỷ lệ lỗi tối đa của biểu mẫu</label>
+                                    <div class="form-text mt-0">Một hồ sơ được tính là lỗi khi giá trị cuối cùng khác dữ liệu người nhập ban đầu. Báo cáo cảnh báo khi tỷ lệ lỗi đạt ngưỡng này.</div>
+                                </div>
+                                <div class="col-md-4">
+                                    <div class="input-group">
+                                        <input type="number" min="1" max="100" step="1" value="5" id="errorReportThresholdPercent" class="form-control" aria-describedby="errorReportThresholdUnit">
+                                        <span class="input-group-text" id="errorReportThresholdUnit">%</span>
+                                    </div>
+                                    <div class="form-text">Cho phép từ 1% đến 100%; mặc định 5%.</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
                     <div class="card shadow-sm mb-3 border-success">
                         <div class="card-header bg-success text-white fw-bold"><i class="fas fa-sitemap"></i> Đồng bộ Bìa (Cover Sync)</div>
                         <div class="card-body">
@@ -752,7 +848,10 @@
           <label class="form-label fw-bold" for="editFullName">Họ và tên</label>
           <input type="text" id="editFullName" class="form-control mb-3" maxlength="255">
           <label class="form-label fw-bold" for="editPhoneNumber">Số điện thoại</label>
-          <input type="tel" id="editPhoneNumber" class="form-control" maxlength="50">
+          <input type="tel" id="editPhoneNumber" class="form-control mb-3" maxlength="50">
+          <label class="form-label fw-bold" for="editMaxConcurrentSessions">Số trình duyệt được đăng nhập đồng thời</label>
+          <input type="number" id="editMaxConcurrentSessions" class="form-control" min="1" max="20" inputmode="numeric">
+          <div class="form-text">Giảm giới hạn sẽ tự đăng xuất các phiên cũ vượt quá giới hạn mới.</div>
         </div>
         <div class="modal-footer">
           <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Hủy</button>
@@ -763,15 +862,16 @@
 
     <!-- JS -->
     <script src="vendor/bootstrap/js/bootstrap.bundle.min.js"></script>
-    <script src="auth.js?v=100.01"></script>
+    <script src="auth.js?v=101.00"></script>
     <script src="js/pdf_link_state.js?v=1.00"></script>
     <script src="js/pdf_handler.js?v=100.02"></script>
-    <script src="js/form_renderer.js?v=100.02"></script>
-    <script src="js/submission.js?v=100.02"></script>
-    <script src="js/admin_panel.js?v=202.03"></script>
-    <script src="js/project_management.js?v=2.03"></script>
-    <script src="js/template_config.js?v=99.99"></script>
+    <script src="js/form_renderer.js?v=100.03"></script>
+    <script src="js/submission.js?v=100.03"></script>
+    <script src="js/admin_operations.js?v=1.00"></script>
+    <script src="js/admin_panel.js?v=203.03"></script>
+    <script src="js/project_management.js?v=2.05"></script>
+    <script src="js/template_config.js?v=100.00"></script>
     <script src="app.js?v=100.00"></script>
-    <script src="admin-page.js?v=1"></script>
+    <script src="admin-page.js?v=2"></script>
 </body>
 </html>

@@ -300,3 +300,85 @@ def cleanup_export_job(job_id: str) -> dict:
         else:
             retained.append(str(path))
     return {"removed": removed, "retained": retained}
+
+
+def cleanup_stale_export_jobs(*, max_age_hours: int = 24) -> dict:
+    """Remove export job artifacts whose terminal state is older than *max_age_hours*.
+
+    Scans ``EXPORT_SCRATCH_DIR`` for ``export_job_*.json`` status files.
+    A job is eligible for cleanup when its state is ``completed`` or ``error``
+    **and** its ``updated_at`` timestamp is older than *max_age_hours*.
+
+    Jobs in ``queued`` or ``running`` state are **never** touched.
+    """
+    if max_age_hours <= 0:
+        raise ValueError("Thời gian lưu tác vụ xuất phải lớn hơn 0 giờ")
+    if not EXPORT_SCRATCH_DIR.is_dir():
+        return {"cleaned": 0, "skipped": 0, "errors": 0}
+
+    terminal_states = {"completed", "error"}
+    cleaned = 0
+    skipped = 0
+    errors = 0
+
+    for status_file in EXPORT_SCRATCH_DIR.glob("export_job_*.json"):
+        raw_job_id = status_file.stem.removeprefix("export_job_")
+        if not _JOB_ID_PATTERN.fullmatch(raw_job_id):
+            continue
+
+        try:
+            payload = read_export_job(raw_job_id)
+        except Exception:
+            errors += 1
+            continue
+
+        if not payload:
+            skipped += 1
+            continue
+
+        state = payload.get("state")
+        if state not in terminal_states:
+            skipped += 1
+            continue
+
+        timestamp = payload.get("updated_at") or payload.get("created_at")
+        try:
+            updated_at = datetime.fromisoformat(
+                str(timestamp).replace("Z", "+00:00")
+            )
+            if updated_at.tzinfo is None:
+                updated_at = updated_at.replace(tzinfo=timezone.utc)
+        except (AttributeError, TypeError, ValueError):
+            logger.warning(
+                "Bỏ qua export job %s vì timestamp không hợp lệ", raw_job_id
+            )
+            errors += 1
+            continue
+
+        age_hours = (
+            datetime.now(timezone.utc) - updated_at
+        ).total_seconds() / 3600
+        if age_hours < max_age_hours:
+            skipped += 1
+            continue
+
+        try:
+            result = cleanup_export_job(raw_job_id)
+            if result["retained"]:
+                errors += 1
+            else:
+                cleaned += 1
+        except Exception:
+            logger.warning(
+                "Không thể dọn export job cũ %s", raw_job_id, exc_info=True
+            )
+            errors += 1
+
+    if cleaned:
+        logger.info(
+            "Startup cleanup: đã dọn %d export job cũ (bỏ qua %d, lỗi %d)",
+            cleaned,
+            skipped,
+            errors,
+        )
+    return {"cleaned": cleaned, "skipped": skipped, "errors": errors}

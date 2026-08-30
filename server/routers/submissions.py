@@ -4,7 +4,7 @@ import os
 import json
 from typing import Literal, Optional
 from urllib.parse import quote
-from fastapi import APIRouter, Depends, BackgroundTasks
+from fastapi import APIRouter, Depends, BackgroundTasks, Header
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
@@ -31,6 +31,9 @@ from server.repositories import (
     TemplateRepository,
 )
 from server.repositories.project_reporting_repository import ProjectReportingRepository
+from server.repositories.submission_view_repository import (
+    VIEWER_PRESENCE_TIMEOUT_SECONDS,
+)
 from server.services.submission_metadata_service import (
     apply_submission_metadata,
     backfill_submission_metadata,
@@ -92,6 +95,8 @@ class SubmissionViewResponse(StatusResponse):
     viewing_user_id: int
     viewing_user_name: str
     viewer_is_current_user: bool
+    lease_token: str
+    expires_in_seconds: int
 
 
 class ExportJobPayload(BaseModel):
@@ -385,10 +390,15 @@ def api_get_review_folder_submissions(
         )
 
     document_metadata = _load_submission_document_metadata(submissions_in_folder, db)
+    assignment_map = review_repository.assignment_map(submissions_in_folder)
     user_ids = {
         submission.created_by_user_id
         for submission in submissions_in_folder
         if submission.created_by_user_id is not None
+    } | {
+        reviewer_user_id
+        for reviewer_user_id in assignment_map.values()
+        if reviewer_user_id is not None
     }
     template_ids = {
         submission.template_id
@@ -411,6 +421,7 @@ def api_get_review_folder_submissions(
                 user_map,
                 template_map,
                 viewer_map,
+                assignment_map.get(submission.id),
             )
             for submission in submissions_in_folder
         ],
@@ -575,22 +586,10 @@ def api_claim_submission_view(
         raise HTTPException(status_code=403, detail='Không có quyền xem hồ sơ này')
 
     presence = SubmissionViewRepository(db).claim(submission.id, current_user['id'])
-    if (
-        current_user.get('role') != 'admin'
-        and presence.viewer_user_id != current_user['id']
-    ):
-        viewer_name = LookupRepository(db).username_map({presence.viewer_user_id}).get(
-            presence.viewer_user_id,
-            'Người dùng khác',
-        )
+    if presence.viewer_user_id != current_user['id']:
         raise HTTPException(
             status_code=409,
-            detail={
-                'code': 'submission_view_conflict',
-                'message': f'{viewer_name} đang xem hồ sơ này. Vui lòng thử lại sau.',
-                'viewing_user_id': presence.viewer_user_id,
-                'viewing_user_name': viewer_name,
-            },
+            detail=ReviewWorkflowService._view_conflict_detail(presence, db),
         )
     db.commit()
     viewer_name = LookupRepository(db).username_map({presence.viewer_user_id}).get(
@@ -603,6 +602,8 @@ def api_claim_submission_view(
         'viewing_user_id': presence.viewer_user_id,
         'viewing_user_name': viewer_name,
         'viewer_is_current_user': presence.viewer_user_id == current_user['id'],
+        'lease_token': presence.lease_token,
+        'expires_in_seconds': VIEWER_PRESENCE_TIMEOUT_SECONDS,
     }
 
 
@@ -618,7 +619,13 @@ def api_release_submission_view(
 
 
 @router.put('/submissions/{sub_id}', response_model=StatusResponse)
-def api_update_submission(sub_id: int, req: SubmitRequest, current_user: dict = Depends(get_input_user), db: Session = Depends(get_db)):
+def api_update_submission(
+    sub_id: int,
+    req: SubmitRequest,
+    lease_token: str | None = Header(default=None, alias="X-Submission-Lease-Token"),
+    current_user: dict = Depends(get_input_user),
+    db: Session = Depends(get_db),
+):
     try:
         repository = SubmissionRepository(db)
         sub = repository.get(sub_id)
@@ -635,6 +642,12 @@ def api_update_submission(sub_id: int, req: SubmitRequest, current_user: dict = 
                 status_code=409,
                 detail="Hồ sơ đã nộp duyệt nên không thể chỉnh sửa",
             )
+        ReviewWorkflowService.require_active_submission_lease(
+            sub,
+            current_user,
+            lease_token,
+            db,
+        )
         
         data_dict, document = SubmissionService.enrich_pdf_reference(
             req.data,
@@ -680,6 +693,7 @@ def api_update_submission(sub_id: int, req: SubmitRequest, current_user: dict = 
             if "_wrong_sections" in data_dict:
                 data_dict["_wrong_sections"] = []
                 sub.data_json = json.dumps(data_dict, ensure_ascii=False)
+            SubmissionQualityService.ensure_baseline(sub, data_dict, db)
                 
         if req.sync_cover:
             SubmissionService.sync_cover_data(sub, req.template_id or sub.template_id, data_dict, db)
@@ -698,6 +712,7 @@ def api_update_submission(sub_id: int, req: SubmitRequest, current_user: dict = 
 def api_update_review_content(
     sub_id: int,
     req: ReviewContentRequest,
+    lease_token: str | None = Header(default=None, alias="X-Submission-Lease-Token"),
     current_user: dict = Depends(get_reviewer_user),
     db: Session = Depends(get_db),
 ):
@@ -708,8 +723,15 @@ def api_update_review_content(
         ReviewWorkflowService.require_assigned_reviewer(submission, current_user, db)
         if submission.status not in {"pending_review", "rejected"}:
             raise HTTPException(status_code=409, detail="Hồ sơ không còn ở bước kiểm tra")
+        ReviewWorkflowService.require_active_submission_lease(
+            submission,
+            current_user,
+            lease_token,
+            db,
+        )
 
         stored_data = json.loads(submission.data_json)
+        SubmissionQualityService.ensure_baseline(submission, stored_data, db)
         for key, value in req.data.items():
             if not key.startswith("_"):
                 stored_data[key] = value
@@ -733,17 +755,23 @@ def api_update_review_content(
         db.rollback()
         raise
 
-def _confirm_review_content(submission, data, current_user, db):
+def _confirm_review_content(submission, data, current_user, lease_token, db):
     ReviewWorkflowService.require_assigned_reviewer(submission, current_user, db)
     if submission.status != "pending_review":
         raise HTTPException(status_code=409, detail="Hồ sơ không ở trạng thái chờ duyệt")
+    ReviewWorkflowService.require_active_submission_lease(
+        submission,
+        current_user,
+        lease_token,
+        db,
+    )
 
     stored_data = json.loads(submission.data_json)
     for key, value in data.items():
         if not key.startswith("_"):
             stored_data[key] = value
     stored_data.pop("_wrong_fields", None)
-    SubmissionQualityService.assess_confirmed_review(
+    assessment = SubmissionQualityService.assess_confirmed_review(
         submission,
         stored_data,
         current_user["id"],
@@ -751,13 +779,18 @@ def _confirm_review_content(submission, data, current_user, db):
     )
     submission.data_json = json.dumps(stored_data, ensure_ascii=False)
     submission.is_checked = True
-    submission.status = "pending_input_confirmation"
+    submission.status = (
+        "completed"
+        if assessment is not None and assessment.changed_field_count == 0
+        else "pending_input_confirmation"
+    )
 
 
 @router.put("/submissions/{sub_id}/confirm-review")
 def api_confirm_submission_review(
     sub_id: int,
     req: ReviewContentRequest,
+    lease_token: str | None = Header(default=None, alias="X-Submission-Lease-Token"),
     current_user: dict = Depends(get_reviewer_user),
     db: Session = Depends(get_db),
 ):
@@ -765,7 +798,13 @@ def api_confirm_submission_review(
         submission = SubmissionRepository(db).get(sub_id)
         if not submission:
             raise HTTPException(status_code=404, detail="Không tìm thấy hồ sơ.")
-        _confirm_review_content(submission, req.data, current_user, db)
+        _confirm_review_content(
+            submission,
+            req.data,
+            current_user,
+            lease_token,
+            db,
+        )
         db.commit()
         return {
             "status": "ok",
@@ -781,12 +820,17 @@ def api_confirm_submission_review(
 
 
 @router.put("/submissions/{sub_id}/toggle_check")
-def api_toggle_check(sub_id: int, current_user: dict = Depends(get_reviewer_user), db: Session = Depends(get_db)):
+def api_toggle_check(
+    sub_id: int,
+    lease_token: str | None = Header(default=None, alias="X-Submission-Lease-Token"),
+    current_user: dict = Depends(get_reviewer_user),
+    db: Session = Depends(get_db),
+):
     try:
         submission = SubmissionRepository(db).get(sub_id)
         if not submission:
             raise HTTPException(status_code=404, detail="Không tìm thấy hồ sơ.")
-        _confirm_review_content(submission, {}, current_user, db)
+        _confirm_review_content(submission, {}, current_user, lease_token, db)
         db.commit()
         return {
             "status": "ok",
@@ -816,11 +860,16 @@ def api_reopen_submission_review(
     submission = SubmissionRepository(db).get(sub_id)
     if not submission:
         raise HTTPException(status_code=404, detail="Không tìm thấy hồ sơ")
-    if submission.status not in {"approved", "completed"}:
+    if submission.status != "completed":
         raise HTTPException(
             status_code=409,
             detail="Chỉ hồ sơ đã duyệt mới có thể chuyển về chờ duyệt",
         )
+    ReviewWorkflowService.require_no_other_active_view(
+        submission,
+        current_user,
+        db,
+    )
 
     submission.status = "pending_review"
     submission.is_checked = False
@@ -836,6 +885,7 @@ def api_reopen_submission_review(
 def api_confirm_input_correction(
     sub_id: int,
     req: ReviewContentRequest,
+    lease_token: str | None = Header(default=None, alias="X-Submission-Lease-Token"),
     current_user: dict = Depends(get_input_user),
     db: Session = Depends(get_db),
 ):
@@ -843,6 +893,20 @@ def api_confirm_input_correction(
         submission = SubmissionRepository(db).get(sub_id)
         if not submission:
             raise HTTPException(status_code=404, detail="Không tìm thấy hồ sơ.")
+        if not SubmissionRepository(db).is_active_input_assignee(
+            submission,
+            current_user["id"],
+        ):
+            raise HTTPException(
+                status_code=403,
+                detail="Chỉ nhân viên đang được phân công hồ sơ mới được sửa lại",
+            )
+        ReviewWorkflowService.require_active_submission_lease(
+            submission,
+            current_user,
+            lease_token,
+            db,
+        )
         SubmissionQualityService.apply_input_correction(
             submission,
             req.data,
@@ -863,7 +927,13 @@ def api_confirm_input_correction(
         raise
 
 @router.put("/submissions/{sub_id}/errors")
-def api_update_errors(sub_id: int, req: ErrorSectionsRequest, current_user: dict = Depends(get_reviewer_user), db: Session = Depends(get_db)):
+def api_update_errors(
+    sub_id: int,
+    req: ErrorSectionsRequest,
+    lease_token: str | None = Header(default=None, alias="X-Submission-Lease-Token"),
+    current_user: dict = Depends(get_reviewer_user),
+    db: Session = Depends(get_db),
+):
     try:
         sub = SubmissionRepository(db).get(sub_id)
         if not sub:
@@ -871,6 +941,12 @@ def api_update_errors(sub_id: int, req: ErrorSectionsRequest, current_user: dict
         ReviewWorkflowService.require_assigned_reviewer(sub, current_user, db)
         if sub.status not in {"pending_review", "rejected"}:
             raise HTTPException(status_code=409, detail="Hồ sơ không ở trạng thái kiểm tra")
+        ReviewWorkflowService.require_active_submission_lease(
+            sub,
+            current_user,
+            lease_token,
+            db,
+        )
             
         data_dict = json.loads(sub.data_json)
         data_dict["_wrong_sections"] = req.wrong_sections
@@ -899,7 +975,12 @@ def api_delete_submission(sub_id: int, current_user: dict = Depends(get_input_us
         sub = SubmissionRepository(db).get(sub_id)
         if not sub:
             raise HTTPException(status_code=404, detail="Không tìm thấy hồ sơ.")
-            
+        ReviewWorkflowService.require_no_other_active_view(
+            sub,
+            current_user,
+            db,
+        )
+        SubmissionViewRepository(db).release(sub_id, current_user["id"])
         SubmissionService.delete_submission(db, sub_id, current_user)
         return {"status": "ok"}
     except HTTPException:

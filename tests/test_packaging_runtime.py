@@ -147,6 +147,13 @@ def test_package_manifest_excludes_embedded_services_and_secrets():
     assert "D:\\version" not in installer
 
 
+def test_caddyfile_uses_the_configured_public_hostname():
+    project_root = Path(__file__).parents[1]
+    caddyfile = (project_root / "Caddyfile").read_text(encoding="utf-8")
+
+    assert "{$PUBLIC_HOSTNAME:nhaplieu1.aivn.net.vn}" in caddyfile
+
+
 def test_release_contract_is_version_0_1_for_postgresql_18():
     from server.release_info import (
         APP_VERSION,
@@ -294,8 +301,16 @@ def test_release_files_share_version_and_reconfiguration_contract():
     assert '#define MyAppVersion "0.1"' in setup
     assert 'Parameters: "--configure"' in setup
     assert 'Start-ScanToExcelHost.cmd' in setup
-    assert "shellexec nowait postinstall" in setup
+    assert "shellexec nowait postinstall" not in setup
+    assert "function InitializeSetup(): Boolean;" in setup
+    assert "DisplayVersion" in setup
+    assert "Co (Yes): Sua/cai lai ung dung" in setup
+    assert "Co (Yes): Cap nhat tai cho" in setup
+    assert "RemoveExistingInstall" in setup
     assert 'ScanToExcelApp.exe' in launcher
+    assert 'pause >nul' not in launcher.split('ScanToExcelApp.exe', 1)[0]
+    assert "start " not in launcher.lower()
+    assert "console=True" in spec
     assert "D:\\ScanToExcel-Releases" in build
     assert '"caddy.exe"' in build
     assert "Caddyfile" in spec

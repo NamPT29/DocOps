@@ -162,6 +162,42 @@ def test_quality_uses_visible_fields_at_or_above_five_percent_and_final_values(q
     assert assessment.input_user_id == input_user.id
 
 
+def test_custom_error_threshold_is_shared_by_review_and_input_confirmation(quality_case):
+    db, submission, baseline, input_user, reviewer = quality_case
+    template = db.get(Template, submission.template_id)
+    template.config_json = json.dumps({
+        "hidden_cols": [21],
+        "error_report_threshold_percent": 10,
+    })
+    db.commit()
+
+    reviewed = {
+        **baseline,
+        "col_0": "reviewed-0",
+        "col_1": "reviewed-1",
+    }
+    assessment = SubmissionQualityService.assess_confirmed_review(
+        submission,
+        reviewed,
+        reviewer.id,
+        db,
+    )
+    assert assessment.visible_field_count == 20
+    assert assessment.changed_field_count == 2
+    assert assessment.is_error_report is True
+
+    submission.data_json = json.dumps(reviewed)
+    submission.status = "pending_input_confirmation"
+    SubmissionQualityService.apply_input_correction(
+        submission,
+        {"col_0": baseline["col_0"]},
+        input_user.id,
+        db,
+    )
+    assert assessment.changed_field_count == 1
+    assert assessment.is_error_report is False
+
+
 def test_manual_wrong_field_payload_is_not_part_of_review_contract():
     request = submissions.ReviewContentRequest(
         data={},
@@ -435,10 +471,26 @@ def test_input_confirmation_endpoint_completes_review_cycle(quality_case):
     submission.data_json = json.dumps(reviewed)
     submission.status = "pending_input_confirmation"
     db.commit()
+    with pytest.raises(Exception) as missing_lease:
+        submissions.api_confirm_input_correction(
+            submission.id,
+            submissions.ReviewContentRequest(data={"col_0": baseline["col_0"]}),
+            lease_token=None,
+            current_user={"id": input_user.id, "role": "user"},
+            db=db,
+        )
+    assert missing_lease.value.status_code == 409
+    assert missing_lease.value.detail["code"] == "submission_lease_required"
+    lease_token = submissions.api_claim_submission_view(
+        submission.id,
+        current_user={"id": input_user.id, "role": "user"},
+        db=db,
+    )["lease_token"]
 
     result = submissions.api_confirm_input_correction(
         submission.id,
         submissions.ReviewContentRequest(data={"col_0": baseline["col_0"]}),
+        lease_token=lease_token,
         current_user={"id": input_user.id, "role": "user"},
         db=db,
     )

@@ -13,6 +13,9 @@ from server.services.excel_service import (
     get_ma_xa_mapping,
 )
 from server.services.upload_service import save_validated_upload
+from server.services.submission_quality_service import (
+    validate_error_report_threshold_percent,
+)
 from server.services.template_cache_service import (
     template_artifact_cache,
     template_file_version,
@@ -181,6 +184,11 @@ def save_template_config(template_id: int, data: dict, current_user: dict = Depe
     if not template:
         raise HTTPException(status_code=404, detail="Template not found")
         
+    try:
+        validate_error_report_threshold_percent(data)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
     import json
     template.config_json = json.dumps(data, ensure_ascii=False)
     db.commit()

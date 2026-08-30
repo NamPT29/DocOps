@@ -5,6 +5,16 @@ function showLoginError(message) {
     error.hidden = false;
 }
 
+function getOrCreateBrowserId() {
+    const storageKey = 'scanToExcelBrowserId';
+    let browserId = localStorage.getItem(storageKey);
+    if (browserId) return browserId;
+    browserId = window.crypto?.randomUUID?.()
+        || `browser-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    localStorage.setItem(storageKey, browserId);
+    return browserId;
+}
+
 async function doLogin() {
     const user = document.getElementById('loginUsername').value.trim();
     const pass = document.getElementById('loginPassword').value.trim();
@@ -14,7 +24,11 @@ async function doLogin() {
         const response = await fetch('/api/login', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ username: user, password: pass }),
+            body: JSON.stringify({
+                username: user,
+                password: pass,
+                browser_id: getOrCreateBrowserId(),
+            }),
         });
         const data = await response.json();
 
@@ -24,7 +38,7 @@ async function doLogin() {
             window.location.href = data.user.role === 'admin' ? '/admin.html' : '/index.html';
             return;
         }
-        showLoginError(data.message);
+        showLoginError(data.message || data.detail || 'Không thể đăng nhập');
     } catch (error) {
         showLoginError('Lỗi kết nối máy chủ');
     }

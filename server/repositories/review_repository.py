@@ -148,11 +148,19 @@ class ReviewRepository(BaseRepository[SubmissionReviewAssignment]):
         if not submissions:
             return {}
         submission_ids = [submission.id for submission in submissions]
-        reviewer_by_submission = {
+        explicit_reviewers = {
             assignment.submission_id: assignment.reviewer_user_id
             for assignment in self.session.query(SubmissionReviewAssignment).filter(
                 SubmissionReviewAssignment.submission_id.in_(submission_ids)
             ).all()
+        }
+        reviewer_by_submission = {
+            submission.id: (
+                explicit_reviewers.get(submission.id)
+                if explicit_reviewers.get(submission.id) != submission.created_by_user_id
+                else None
+            )
+            for submission in submissions
         }
         document_ids = {
             submission.assigned_document_id
@@ -170,7 +178,10 @@ class ReviewRepository(BaseRepository[SubmissionReviewAssignment]):
             if reviewer_by_submission.get(submission.id) is not None:
                 continue
             reviewer_id = reviewer_by_document.get(submission.assigned_document_id)
-            if reviewer_id is not None:
+            if (
+                reviewer_id is not None
+                and reviewer_id != submission.created_by_user_id
+            ):
                 reviewer_by_submission[submission.id] = reviewer_id
         return reviewer_by_submission
 

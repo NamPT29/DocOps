@@ -1,6 +1,6 @@
 @echo off
 chcp 65001 >nul
-title Scan To Excel Host 0.1
+title Scan To Excel Host
 cd /d "%~dp0"
 ScanToExcelApp.exe
 set "APP_EXIT_CODE=%ERRORLEVEL%"

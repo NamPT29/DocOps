@@ -198,32 +198,8 @@ function resetVisualUi() {
     document.getElementById('dictRulesBody').innerHTML = '<tr><td colspan="4" class="text-center text-muted">Chưa có luật nào</td></tr>';
     document.getElementById('syncRulesList').innerHTML = '';
     document.getElementById('concatRulesList').innerHTML = '';
-}
-
-function clearCheckboxes(panelId) {
-    const el = document.getElementById(panelId);
-    if (el) el.querySelectorAll('input[type=checkbox]').forEach(cb => cb.checked = false);
-}
-
-function getFieldName(colIdx) {
-    const f = templateFields.find(x => x.col == colIdx);
-    return f ? f.label : `[Cột ${colIdx}]`;
-}
-
-// ---------------- UI -> JSON ----------------
-function buildConfigFromUI() {
-    // Basic cols
-    // Basic cols - read from unified table
-    const getMultiValsByClass = (className) => {
-        return Array.from(document.querySelectorAll(`.${className}:checked`)).map(cb => parseInt(cb.value, 10));
-    };
-    currentConfigObj.readonly_cols = getMultiValsByClass('unified-chk-ro');
-    currentConfigObj.date_cols = getMultiValsByClass('unified-chk-date');
-    document.querySelectorAll('.placeholder-rule-text').forEach(input => input.value = '');
-    
-    document.getElementById('dictRulesBody').innerHTML = '<tr><td colspan="4" class="text-center text-muted">Chưa có luật nào</td></tr>';
-    document.getElementById('syncRulesList').innerHTML = '';
-    document.getElementById('concatRulesList').innerHTML = '';
+    const errorThresholdInput = document.getElementById('errorReportThresholdPercent');
+    if (errorThresholdInput) errorThresholdInput.value = '5';
 }
 
 function clearCheckboxes(panelId) {
@@ -249,6 +225,14 @@ function buildConfigFromUI() {
     currentConfigObj.hidden_cols = getMultiValsByClass('unified-chk-hidden');
     currentConfigObj.cover_cols = getMultiValsByClass('unified-chk-cover');
     currentConfigObj.required_cols = getMultiValsByClass('unified-chk-required');
+
+    const errorThresholdInput = document.getElementById('errorReportThresholdPercent');
+    const parsedErrorThreshold = Number.parseInt(errorThresholdInput?.value || '5', 10);
+    const errorReportThreshold = Number.isInteger(parsedErrorThreshold)
+        ? Math.min(100, Math.max(1, parsedErrorThreshold))
+        : 5;
+    currentConfigObj.error_report_threshold_percent = errorReportThreshold;
+    if (errorThresholdInput) errorThresholdInput.value = String(errorReportThreshold);
     
     currentConfigObj.placeholder_rules = Array.from(document.querySelectorAll('.placeholder-rule-text'))
         .map(input => {
@@ -292,6 +276,14 @@ function renderVisualUiFromJSON() {
     setMultiValsByClass('unified-chk-hidden', obj.hidden_cols);
     setMultiValsByClass('unified-chk-cover', obj.cover_cols);
     setMultiValsByClass('unified-chk-required', obj.required_cols);
+
+    const configuredErrorThreshold = Number(obj.error_report_threshold_percent);
+    const errorReportThreshold = Number.isInteger(configuredErrorThreshold)
+        ? Math.min(100, Math.max(1, configuredErrorThreshold))
+        : 5;
+    obj.error_report_threshold_percent = errorReportThreshold;
+    const errorThresholdInput = document.getElementById('errorReportThresholdPercent');
+    if (errorThresholdInput) errorThresholdInput.value = String(errorReportThreshold);
 
     const coverLevels = document.getElementById('coverFolderLevels');
     if (coverLevels) {
@@ -445,6 +437,7 @@ function formatConfigJson() {
 
 function generateDefaultConfig() {
     currentConfigObj = {
+        "error_report_threshold_percent": 5,
         "readonly_cols": [2, 19, 36, 21, 38, 93, 105],
         "date_cols": [10, 27],
         "year_cols": [11, 28],

@@ -185,7 +185,11 @@ async function submitData(targetStatus = 'draft') {
         // saving corrected content so two writes cannot overwrite data_json.
         const response = await authFetch(url, {
             method: method,
-            headers: {
+            headers: typeof submissionLeaseHeaders === 'function'
+                ? submissionLeaseHeaders({
+                    'Content-Type': 'application/json'
+                })
+                : {
                 'Content-Type': 'application/json'
             },
             body: JSON.stringify(payload)
@@ -435,7 +439,9 @@ async function submitInputCorrection() {
     try {
         const response = await authFetch(`/api/submissions/${submissionId}/input-confirmation`, {
             method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
+            headers: typeof submissionLeaseHeaders === 'function'
+                ? submissionLeaseHeaders({ 'Content-Type': 'application/json' })
+                : { 'Content-Type': 'application/json' },
             body: JSON.stringify({ data }),
         });
         if (!response) return;

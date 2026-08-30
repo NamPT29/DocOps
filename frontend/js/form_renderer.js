@@ -12,10 +12,97 @@ function escapeHTML(str) {
     });
 }
 
-function getDraftStorageKey() {
-    const userKey = currentUser && (currentUser.id || currentUser.username);
-    const templateKey = window.activeTemplateId || 'none';
-    return `formDraft_${userKey || 'anonymous'}_${templateKey}`;
+function draftStoragePart(value, fallback) {
+    const text = String(value ?? '').trim();
+    return encodeURIComponent(text || fallback);
+}
+
+function getActiveDraftFile() {
+    if (window.activePdfDraftFile) return window.activePdfDraftFile;
+    if (typeof uploadedFilesQueue === 'undefined' || typeof iframeCurrentIndex === 'undefined') return null;
+    return uploadedFilesQueue[iframeCurrentIndex] || null;
+}
+
+function getPdfDraftIdentity(file = getActiveDraftFile()) {
+    if (!file) return 'none';
+    const identity = file.uuid || file.relative_path || file.url
+        || [file.folder_group, file.name].filter(Boolean).join('::');
+    return draftStoragePart(identity, 'none');
+}
+
+function setActivePdfDraftFile(file) {
+    window.activePdfDraftFile = file || null;
+    window.activePdfDraftProjectId = file?.project_id || window.activeProjectId || null;
+    window.activePdfDraftIdentity = getPdfDraftIdentity(file);
+    return window.activePdfDraftIdentity;
+}
+
+function getDraftStorageKey(file = null) {
+    const user = typeof currentUser !== 'undefined' ? currentUser : null;
+    const userKey = user && (user.id || user.username);
+    const activeFile = file || getActiveDraftFile();
+    const workspaceProjectId = window.activeProjectWorkspace?.project?.id;
+    const projectKey = window.activeProjectId || activeFile?.project_id || workspaceProjectId;
+    const templateKey = activeFile?.template_id || window.activeTemplateId || 'none';
+    return `formDraft_${draftStoragePart(userKey, 'anonymous')}_${draftStoragePart(projectKey, 'none')}_${draftStoragePart(templateKey, 'none')}_${getPdfDraftIdentity(activeFile)}`;
+}
+
+function readFormDraft(file = null) {
+    try {
+        const stored = localStorage.getItem(getDraftStorageKey(file));
+        const parsed = stored ? JSON.parse(stored) : {};
+        return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+    } catch (e) {
+        return {};
+    }
+}
+
+function getCoverColumnNumbers() {
+    const coverCols = window.activeTemplateConfig?.cover_cols;
+    return new Set(
+        (Array.isArray(coverCols) ? coverCols : [])
+            .map(Number)
+            .filter(col => Number.isInteger(col) && col > 0),
+    );
+}
+
+function applyDraftForActivePdf() {
+    if (typeof currentEditingId !== 'undefined' && currentEditingId !== null) return false;
+    const identity = window.activePdfDraftIdentity || getPdfDraftIdentity();
+    if (window.lastAppliedPdfDraftIdentity === identity) return false;
+
+    const dataForm = document.getElementById('dataForm');
+    if (!dataForm) return false;
+    const inputs = dataForm.querySelectorAll('input[type="text"], textarea, select');
+    const draftData = readFormDraft();
+    const hasDraft = Object.keys(draftData).length > 0;
+    const coverCols = getCoverColumnNumbers();
+    const preservedCover = {};
+    if (!hasDraft) {
+        inputs.forEach(input => {
+            const match = input.name ? input.name.match(/^col_(\d+)$/) : null;
+            const colIndex = match ? Number(match[1]) + 1 : -1;
+            if (coverCols.has(colIndex)) preservedCover[input.name] = input.value;
+        });
+    }
+    inputs.forEach(input => {
+        if (hasDraft && Object.prototype.hasOwnProperty.call(draftData, input.name)) {
+            input.value = draftData[input.name];
+        } else if (hasDraft || !coverCols.has(Number(input.name?.match(/^col_(\d+)$/)?.[1]) + 1)) {
+            input.value = '';
+        }
+    });
+    if (!hasDraft) {
+        inputs.forEach(input => {
+            if (Object.prototype.hasOwnProperty.call(preservedCover, input.name)) {
+                input.value = preservedCover[input.name];
+            }
+        });
+    }
+    window.lastAppliedPdfDraftIdentity = identity;
+    if (typeof resizeDynamicFormInputs === 'function') resizeDynamicFormInputs(dataForm);
+    if (typeof saveFormDraft === 'function') saveFormDraft();
+    return true;
 }
 
 function removeCurrentFormDraft() {
@@ -108,6 +195,19 @@ async function fetchSchema() {
     if (dataForm) dataForm.style.display = 'none';
     
     const activeWorkspace = window.activeProjectWorkspace;
+    if (activeWorkspace
+        && Number(activeWorkspace.project?.id) === Number(window.activeProjectId)
+        && (!window.activePdfDraftFile
+            || Number(window.activePdfDraftProjectId) !== Number(activeWorkspace.project.id))) {
+        const firstFile = Array.isArray(activeWorkspace.files) ? activeWorkspace.files[0] : null;
+        if (firstFile && typeof setActivePdfDraftFile === 'function') {
+            setActivePdfDraftFile({
+                ...firstFile,
+                project_id: activeWorkspace.project.id,
+                template_id: activeWorkspace.project.template_id,
+            });
+        }
+    }
     const data = activeWorkspace
         && Number(activeWorkspace.project?.id) === Number(window.activeProjectId)
         ? {
@@ -181,11 +281,9 @@ function renderForm(schema, config = {}) {
     container.innerHTML = '';
     
     // Load draft from localStorage
-    let draftData = {};
-    try {
-        const stored = localStorage.getItem(getDraftStorageKey());
-        if (stored) draftData = JSON.parse(stored);
-    } catch (e) {}
+    const draftData = typeof currentEditingId !== 'undefined' && currentEditingId !== null
+        ? {}
+        : readFormDraft();
     
     getVisibleFormSchema(schema, config).forEach((category, index) => {
         const section = _buildCategorySection(category, index, schema, config, draftData);
@@ -398,7 +496,8 @@ function _buildFieldGroup(field, config, draftData) {
     input.name = field.name;
     input.id = field.name;
     input.rows = 1;
-    input.setAttribute('autocomplete', 'off');
+    const hasCustomDropdown = field.type === 'dropdown' && Array.isArray(field.options);
+    input.setAttribute('autocomplete', hasCustomDropdown ? 'off' : 'on');
     input.style.width = '100%';
     input.style.resize = 'none';
     input.style.overflowY = 'hidden';
@@ -496,7 +595,7 @@ function _buildFieldGroup(field, config, draftData) {
     }
     col.appendChild(formGroup);
     
-    if (field.type === 'dropdown' && field.options) {
+    if (hasCustomDropdown) {
         autocomplete(input, field.options, field.extract_mode);
     }
     
@@ -670,7 +769,7 @@ function saveFormDraft() {
     // Do not save draft if we are editing an existing record
     if (currentEditingId !== null) return;
     
-    const inputs = document.querySelectorAll('#dataForm input[type="text"], #dataForm textarea');
+    const inputs = document.querySelectorAll('#dataForm input[type="text"], #dataForm textarea, #dataForm select');
     const data = {};
     inputs.forEach(input => {
         data[input.name] = input.value;

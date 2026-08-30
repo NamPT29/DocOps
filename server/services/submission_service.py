@@ -19,6 +19,7 @@ from server.repositories import (
     LookupRepository,
     ReviewRepository,
     SubmissionRepository,
+    SubmissionViewRepository,
     TemplateRepository,
 )
 from server.utils.folder_utils import (
@@ -145,6 +146,32 @@ class SubmissionService:
                 for submission in selected
             ):
                 raise HTTPException(status_code=403, detail="Bạn không có quyền xử lý một hoặc nhiều hồ sơ đã chọn")
+
+        view_repository = SubmissionViewRepository(db)
+        active_viewers = view_repository.active_map(submission_ids)
+        conflict = next(
+            (
+                viewer
+                for viewer in active_viewers.values()
+                if viewer.get("user_id") != current_user["id"]
+            ),
+            None,
+        )
+        if conflict:
+            viewer_name = conflict.get("username") or "Người dùng khác"
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "code": "submission_view_conflict",
+                    "message": f"{viewer_name} đang mở một hồ sơ đã chọn. Vui lòng thử lại sau.",
+                    "viewing_user_id": conflict.get("user_id"),
+                    "viewing_user_name": viewer_name,
+                },
+            )
+        # A bulk action intentionally supersedes this user's own open tabs.
+        # Releasing in the same transaction also prevents stale presences from
+        # blocking the newly assigned reviewer after a bulk submit.
+        view_repository.release_owned(submission_ids, current_user["id"])
 
         if action == "delete":
             invalid = [submission.id for submission in selected if submission.status != "draft"]
@@ -811,7 +838,10 @@ class SubmissionService:
                 "is_error_report": is_error_report,
             },
             "creator_name": user_map.get(sub.created_by_user_id, "Unknown"),
+            "reviewer_user_id": assignment_map.get(sub.id),
             "reviewer_name": user_map.get(assignment_map.get(sub.id), "Chưa phân công"),
+            "reviewer_assigned": assignment_map.get(sub.id) is not None,
+            "is_reviewer_assigned": assignment_map.get(sub.id) is not None,
         }
 
     @staticmethod

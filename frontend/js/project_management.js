@@ -222,13 +222,13 @@ async function updateProjectStatus(project, status, select) {
 
 async function loadProjectList() {
     const body = document.getElementById('projectListBody');
-    if (body) body.innerHTML = '<tr><td colspan="7" class="text-center text-muted">Đang tải...</td></tr>';
+    if (body) body.innerHTML = '<tr><td colspan="5" class="text-center text-muted">Đang tải...</td></tr>';
     const data = await apiCall('/api/projects', { cache: 'no-store' });
     if (!data || !body) return;
     projectManagementProjects = Array.isArray(data.data) ? data.data : [];
     body.replaceChildren();
     if (!projectManagementProjects.length) {
-        body.innerHTML = '<tr><td colspan="7" class="text-center text-muted">Chưa có dự án.</td></tr>';
+        body.innerHTML = '<tr><td colspan="5" class="text-center text-muted">Chưa có dự án.</td></tr>';
         return;
     }
     projectManagementProjects.forEach(project => {
@@ -238,16 +238,15 @@ async function loadProjectList() {
         const strong = document.createElement('strong');
         strong.textContent = project.name;
         const detail = document.createElement('div');
-        detail.className = 'text-muted';
+        detail.className = 'small text-muted mt-1';
         detail.textContent = project.template_name;
         nameCell.append(strong, detail);
-        appendProjectCell(
-            row,
-            `Nhập ${metrics.input_assigned_cases || 0}/${metrics.total_cases || 0}; kiểm ${metrics.reviewer_assigned_cases || 0}/${metrics.total_cases || 0}`,
-        );
-        appendProjectCell(row, `${metrics.total_pdfs || 0} (lỗi ${metrics.error_pdfs || 0})`);
-        appendProjectCell(row, `${metrics.entered_reports || 0}/${metrics.required_reports || 0}`);
-        appendProjectCell(row, `${metrics.approved_reports || 0}/${metrics.entered_reports || 0}`);
+        const assignmentCell = appendProjectCell(row, '');
+        assignmentCell.className = 'admin-project-metrics';
+        assignmentCell.innerHTML = `<div><span>Nhập</span><strong>${metrics.input_assigned_cases || 0}/${metrics.total_cases || 0}</strong></div><div><span>Kiểm</span><strong>${metrics.reviewer_assigned_cases || 0}/${metrics.total_cases || 0}</strong></div>`;
+        const progressCell = appendProjectCell(row, '');
+        progressCell.className = 'admin-project-metrics';
+        progressCell.innerHTML = `<div><span>Nhập</span><strong>${metrics.entered_reports || 0}/${metrics.required_reports || 0}</strong></div><div><span>Duyệt</span><strong>${metrics.approved_reports || 0}/${metrics.entered_reports || 0}</strong></div><div class="text-muted"><span>PDF</span><strong>${metrics.total_pdfs || 0}</strong>${metrics.error_pdfs ? ` · lỗi ${metrics.error_pdfs}` : ''}</div>`;
         const statusCell = appendProjectCell(row, '');
         const statusSelect = document.createElement('select');
         statusSelect.className = `form-select form-select-sm ${PROJECT_STATUS_CLASSES[project.status] || ''}`.trim();
@@ -268,12 +267,7 @@ async function loadProjectList() {
         });
         statusCell.appendChild(statusSelect);
         const actionCell = appendProjectCell(row, '');
-        actionCell.className = 'text-nowrap';
-        const membersButton = document.createElement('button');
-        membersButton.type = 'button';
-        membersButton.className = 'btn btn-sm btn-outline-primary me-1';
-        membersButton.innerHTML = '<i class="fas fa-users"></i> Nhân sự';
-        membersButton.addEventListener('click', () => openProjectMembers(project.id));
+        actionCell.className = 'text-nowrap admin-project-actions';
         const buildActionDropdown = (label, icon, buttonClass, actions) => {
             const dropdown = document.createElement('div');
             dropdown.className = 'dropdown d-inline-block ms-1';
@@ -282,6 +276,7 @@ async function loadProjectList() {
             toggle.className = `btn btn-sm ${buttonClass} dropdown-toggle`;
             toggle.dataset.bsToggle = 'dropdown';
             toggle.setAttribute('aria-expanded', 'false');
+            toggle.setAttribute('aria-label', `${label} cho dự án ${project.name}`);
             toggle.innerHTML = `<i class="fas ${icon}"></i> ${label}`;
             const menu = document.createElement('ul');
             menu.className = 'dropdown-menu dropdown-menu-end';
@@ -305,11 +300,17 @@ async function loadProjectList() {
             dropdown.append(toggle, menu);
             return dropdown;
         };
-        const documentActions = buildActionDropdown(
-            'Cập nhật tài liệu',
-            'fa-file-circle-plus',
-            'btn-outline-warning',
+        const projectActions = buildActionDropdown(
+            'Thao tác',
+            'fa-ellipsis',
+            'btn-outline-primary',
             [
+                {
+                    label: 'Quản lý nhân sự',
+                    icon: 'fa-users',
+                    handler: () => openProjectMembers(project.id),
+                },
+                {divider: true},
                 {
                     label: 'Thêm / cập nhật PDF',
                     icon: 'fa-sync-alt',
@@ -327,13 +328,7 @@ async function loadProjectList() {
                     handler: () => deleteProject(project),
                     className: 'text-danger fw-bold',
                 },
-            ],
-        );
-        const reviewActions = buildActionDropdown(
-            'Kiểm duyệt',
-            'fa-clipboard-check',
-            'btn-success',
-            [
+                {divider: true},
                 {
                     label: 'Hồ sơ hoàn chỉnh',
                     icon: 'fa-check-circle',
@@ -344,13 +339,7 @@ async function loadProjectList() {
                     icon: 'fa-search',
                     handler: () => openProjectReports(project.id, 'review'),
                 },
-            ],
-        );
-        const exportActions = buildActionDropdown(
-            'Xuất bản',
-            'fa-file-export',
-            'btn-outline-success',
-            [
+                {divider: true},
                 {
                     label: 'Xuất toàn bộ',
                     icon: 'fa-box-archive',
@@ -366,7 +355,7 @@ async function loadProjectList() {
                 },
             ],
         );
-        actionCell.append(membersButton, documentActions, reviewActions, exportActions);
+        actionCell.append(projectActions);
         body.appendChild(row);
     });
 }
@@ -878,7 +867,13 @@ async function reloadProjectReports() {
 }
 
 async function approveProjectSubmission(submissionId) {
-    const response = await apiCall(`/api/submissions/${Number(submissionId)}/toggle_check`, {method: 'PUT'});
+    const performApproval = () => apiCall(`/api/submissions/${Number(submissionId)}/toggle_check`, {
+        method: 'PUT',
+        headers: typeof submissionLeaseHeaders === 'function' ? submissionLeaseHeaders() : {},
+    });
+    const response = typeof withSubmissionViewLease === 'function'
+        ? await withSubmissionViewLease(submissionId, performApproval)
+        : await performApproval();
     if (!response || response.status !== 'ok') return;
     await Promise.all([reloadProjectReports(), loadProjectList()]);
 }

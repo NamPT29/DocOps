@@ -65,9 +65,11 @@ assert(!adminHtml.includes('id="assignReviewerCheckboxes"'));
 assert(!adminHtml.includes('id="assignmentRevocationTableBody"'));
 assert(!adminHtml.includes('id="reassignReviewerCheckboxes"'));
 assert(!adminHtml.includes('id="reviewerFolderReassignmentPreview"'));
-assert(adminHtml.includes('auth.js?v=100.01'));
-assert(adminHtml.includes('js/admin_panel.js?v=202.03'));
-assert(employeeHtml.includes('js/admin_panel.js?v=202.03'));
+assert(adminHtml.includes('auth.js?v=100.02'));
+assert(adminHtml.includes('js/admin_operations.js?v=1.00'));
+assert(employeeHtml.includes('js/admin_operations.js?v=1.00'));
+assert(adminHtml.includes('js/admin_panel.js?v=203.03'));
+assert(employeeHtml.includes('js/admin_panel.js?v=203.03'));
 assert(!adminHtml.includes('id="reviewFolderTree"'));
 assert(employeeHtml.includes('id="reviewFolderTree"'));
 assert(!adminHtml.includes('id="newUserCanReview"'));
@@ -81,7 +83,10 @@ assert(!authSource.includes('async function fetchAssignmentPermissions()'));
 assert(!authSource.includes('/capabilities'));
 assert(authSource.includes("apiCall('/api/me'"));
 
-const assignmentSource = fs.readFileSync('frontend/js/admin_panel.js', 'utf8');
+const assignmentSource = [
+    fs.readFileSync('frontend/js/admin_operations.js', 'utf8'),
+    fs.readFileSync('frontend/js/admin_panel.js', 'utf8'),
+].join('\n');
 assert(assignmentSource.includes('input_user_ids: inputUserIds'));
 assert(assignmentSource.includes('reviewer_user_ids: reviewerUserIds'));
 assert(assignmentSource.includes("usersData.data.filter(user => user.role !== 'admin')"));

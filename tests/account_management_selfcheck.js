@@ -10,6 +10,7 @@ const fields = {
     newPassword: { value: 'password123' },
     newFullName: { value: '' },
     newPhoneNumber: { value: '0909' },
+    newMaxConcurrentSessions: { value: '2' },
 };
 const requests = [];
 const sandbox = {
@@ -52,12 +53,15 @@ sandbox.checkAuth();
         password: 'password123',
         full_name: '',
         phone_number: '0909',
+        max_concurrent_sessions: 2,
     });
 
     assert.ok(adminHtml.includes('class="col-12 collapse" id="createUserPanel"'));
     assert.ok(adminHtml.includes('id="changePasswordModal"'));
     assert.ok(adminHtml.includes('id="editUserModal"'));
     assert.ok(adminHtml.includes('<th>Họ và tên</th>'));
+    assert.ok(adminHtml.includes('id="newMaxConcurrentSessions"'));
+    assert.ok(adminHtml.includes('id="editMaxConcurrentSessions"'));
     assert.ok(indexHtml.includes('id="userNameText"'));
     console.log('Account management self-check: OK');
 })().catch(error => {

@@ -104,6 +104,7 @@ function saveQueueState() {
 
 function showEmptyPdfQueueState(message = 'Chưa có tài liệu trong hàng chờ.') {
     iframeCurrentIndex = -1;
+    if (typeof setActivePdfDraftFile === 'function') setActivePdfDraftFile(null);
     activeDocumentRelativePath = null;
     activeDocumentFolderPath = null;
     activeQueueFolderKey = null;
@@ -345,10 +346,16 @@ function updatePdfLinkUI() {
 
 async function selectFileFromQueue(index, { allowSubmissionNavigation = true } = {}) {
     if (index < 0 || index >= uploadedFilesQueue.length) return;
-    
+    const previousFile = uploadedFilesQueue[iframeCurrentIndex] || null;
+    if (previousFile && typeof setActivePdfDraftFile === 'function') setActivePdfDraftFile(previousFile);
+    if (previousFile && typeof saveFormDraft === 'function') saveFormDraft();
+    const file = uploadedFilesQueue[index];
+    const previousDraftIdentity = window.activePdfDraftIdentity || (typeof getPdfDraftIdentity === 'function'
+        ? getPdfDraftIdentity(previousFile)
+        : null);
+    if (typeof setActivePdfDraftFile === 'function') setActivePdfDraftFile(file);
     iframeCurrentIndex = index;
     saveQueueState();
-    const file = uploadedFilesQueue[index];
     activeQueueFolderKey = getQueueFolderKey(file);
     activeDocumentFolderPath = file.folder_group && file.folder_group !== '__ROOT__'
         ? normalizeQueuePath(file.folder_group)
@@ -391,7 +398,13 @@ async function selectFileFromQueue(index, { allowSubmissionNavigation = true } =
         }
     }
     
-    // Switching the reference PDF must not erase in-progress form data.
+    // Switch the draft scope together with the reference PDF. A same-PDF
+    // selection is intentionally a no-op so an in-progress form stays intact.
+    if (previousDraftIdentity !== window.activePdfDraftIdentity
+        && !templateChanged
+        && typeof applyDraftForActivePdf === 'function') {
+        applyDraftForActivePdf();
+    }
     setActiveDocumentRelativePath(file.relative_path || null, templateChanged);
     // Tự động liên kết file PDF này với form đang nhập
     window.pdfLinkState.setLinked(true);

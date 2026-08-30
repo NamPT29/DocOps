@@ -4,6 +4,7 @@ const fs = require('fs');
 const sources = {
     auth: fs.readFileSync('frontend/auth.js', 'utf8'),
     admin: fs.readFileSync('frontend/js/admin_panel.js', 'utf8'),
+    adminOperations: fs.readFileSync('frontend/js/admin_operations.js', 'utf8'),
     form: fs.readFileSync('frontend/js/form_renderer.js', 'utf8'),
     template: fs.readFileSync('frontend/js/template_config.js', 'utf8'),
 };

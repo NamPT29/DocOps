@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import math
 from datetime import datetime, timezone
 from typing import Any
 
@@ -21,7 +22,8 @@ from server.repositories.submission_review_history_repository import (
 from server.repositories.template_repository import TemplateRepository
 
 
-ERROR_REPORT_PERCENT = 5
+DEFAULT_ERROR_REPORT_THRESHOLD_PERCENT = 5
+ERROR_REPORT_PERCENT = DEFAULT_ERROR_REPORT_THRESHOLD_PERCENT
 
 
 def _json_dict(raw_value: str | None) -> dict:
@@ -30,6 +32,27 @@ def _json_dict(raw_value: str | None) -> dict:
     except (TypeError, ValueError, json.JSONDecodeError):
         return {}
     return value if isinstance(value, dict) else {}
+
+
+def validate_error_report_threshold_percent(config: dict) -> float:
+    """Return the configured threshold or the product default.
+
+    The public template-config endpoint uses the same validation helper, while
+    persisted legacy config falls back safely in `_error_report_threshold_percent`.
+    """
+    if "error_report_threshold_percent" not in config:
+        return float(DEFAULT_ERROR_REPORT_THRESHOLD_PERCENT)
+    value = config.get("error_report_threshold_percent")
+    if (
+        isinstance(value, bool)
+        or not isinstance(value, (int, float))
+        or not math.isfinite(float(value))
+        or not 1 <= float(value) <= 100
+    ):
+        raise ValueError(
+            "error_report_threshold_percent phải là số từ 1 đến 100"
+        )
+    return float(value)
 
 
 def _public_form_data(data: dict) -> dict:
@@ -47,6 +70,21 @@ def _effective_project_config(db, project) -> dict:
         current_config = _json_dict(template.config_json)
         config.update(current_config)
     return config
+
+
+def _error_report_threshold_percent(db, submission: Submission) -> float:
+    project = SubmissionQualityRepository(db).project_for_document(
+        submission.assigned_document_id
+    )
+    if project:
+        config = _effective_project_config(db, project)
+    else:
+        template = TemplateRepository(db).get(submission.template_id)
+        config = _json_dict(template.config_json) if template else {}
+    try:
+        return validate_error_report_threshold_percent(config)
+    except ValueError:
+        return float(DEFAULT_ERROR_REPORT_THRESHOLD_PERCENT)
 
 
 def _visible_schema_field_names(schema: object, config: dict) -> list[str]:
@@ -86,7 +124,12 @@ def _visible_schema_field_names(schema: object, config: dict) -> list[str]:
     return names
 
 
-def _visible_field_names(db, submission: Submission, baseline: dict) -> list[str]:
+def _visible_field_names(
+    db,
+    submission: Submission,
+    baseline: dict,
+    comparison_data: dict | None = None,
+) -> list[str]:
     project = SubmissionQualityRepository(db).project_for_document(
         submission.assigned_document_id
     )
@@ -101,7 +144,10 @@ def _visible_field_names(db, submission: Submission, baseline: dict) -> list[str
         )
         if names:
             return names
-    return sorted(_public_form_data(baseline))
+    return sorted(
+        set(_public_form_data(baseline))
+        | set(_public_form_data(comparison_data or {}))
+    )
 
 
 def _comparable(value: Any) -> Any:
@@ -202,17 +248,23 @@ class SubmissionQualityService:
             return None
 
         baseline = _json_dict(assessment.baseline_data_json)
-        field_names = _visible_field_names(db, submission, baseline)
         final_public_data = _public_form_data(final_data)
+        field_names = _visible_field_names(
+            db,
+            submission,
+            baseline,
+            final_public_data,
+        )
         changed_count = sum(
             _comparable(baseline.get(name, ""))
             != _comparable(final_public_data.get(name, ""))
             for name in field_names
         )
         visible_count = len(field_names)
+        threshold_percent = _error_report_threshold_percent(db, submission)
         exceeds_threshold = (
             visible_count > 0
-            and changed_count * 100 >= visible_count * ERROR_REPORT_PERCENT
+            and changed_count * 100 >= visible_count * threshold_percent
         )
 
         assessment.visible_field_count = visible_count
@@ -284,7 +336,7 @@ class SubmissionQualityService:
 
         baseline = _json_dict(review_history.baseline_data_json)
         reviewed = _json_dict(review_history.reviewer_data_json)
-        field_names = _visible_field_names(db, submission, baseline)
+        field_names = _visible_field_names(db, submission, baseline, reviewed)
         reviewer_changed_names = {
             name
             for name in field_names
@@ -379,9 +431,10 @@ class SubmissionQualityService:
             )
             assessment.visible_field_count = len(field_names)
             assessment.changed_field_count = final_error_count
+            threshold_percent = _error_report_threshold_percent(db, submission)
             assessment.is_error_report = bool(
                 field_names
                 and final_error_count * 100
-                >= len(field_names) * ERROR_REPORT_PERCENT
+                >= len(field_names) * threshold_percent
             )
         return correction_history, stored_data

@@ -37,8 +37,15 @@ function runAdminPageAction(actionName) {
 
 function handleAdminPageClick(event) {
     const trigger = event.target.closest('[data-admin-action]');
-    if (!trigger) return;
-    runAdminPageAction(trigger.dataset.adminAction);
+    if (trigger) {
+        runAdminPageAction(trigger.dataset.adminAction);
+        return;
+    }
+
+    const dashboardTarget = event.target.closest('[data-admin-dashboard-target]');
+    if (!dashboardTarget) return;
+    const tab = document.getElementById(dashboardTarget.dataset.adminDashboardTarget);
+    if (tab) new bootstrap.Tab(tab).show();
 }
 
 function handleAdminPageChange(event) {

@@ -15,10 +15,11 @@ from server.models import (
     AssignedDocumentReviewAssignment,
     Submission,
     SubmissionReviewAssignment,
+    SubmissionViewPresence,
     Template,
     User,
 )
-from server.routers import auth, submissions
+from server.routers import auth, submissions, templates as template_routes
 from server.routers.documents import (
     RedistributeFolderReviewersRequest,
     RevokeAssignmentsRequest,
@@ -72,6 +73,14 @@ def assign_document(db, input_user, reviewer=None, *, filename="document.pdf"):
 
 def current_user(user):
     return {"id": user.id, "username": user.username, "role": user.role}
+
+
+def claim_lease(db, submission, user):
+    return submissions.api_claim_submission_view(
+        submission.id,
+        current_user=current_user(user),
+        db=db,
+    )["lease_token"]
 
 
 def test_duplicate_report_filter_uses_shared_source_document(db):
@@ -655,12 +664,14 @@ def test_saving_copied_draft_refreshes_its_current_utc_time(db):
     db.commit()
 
     before_save = datetime.now(timezone.utc).replace(tzinfo=None)
+    lease_token = claim_lease(db, copied_draft, author)
     result = submissions.api_update_submission(
         copied_draft.id,
         submissions.SubmitRequest(
             data={"col_8": "Dữ liệu vừa nhập"},
             status="draft",
         ),
+        lease_token=lease_token,
         current_user=current_user(author),
         db=db,
     )
@@ -1035,12 +1046,14 @@ def test_draft_is_submitted_from_existing_report_and_uses_document_reviewer(db):
     assert db.query(SubmissionReviewAssignment).count() == 0
 
     draft = db.query(Submission).one()
+    lease_token = claim_lease(db, draft, author)
     submissions.api_update_submission(
         draft.id,
         submissions.SubmitRequest(
             data={"field": "submitted", "_pdf_uuid": document.uuid_filename},
             status="pending_review",
         ),
+        lease_token=lease_token,
         current_user=current_user(author),
         db=db,
     )
@@ -1096,21 +1109,27 @@ def test_admin_reviews_unassigned_reports_and_shows_active_viewer(db):
         db=db,
     )
     assert [item['id'] for item in queue['data']] == [unassigned.id]
+    assert queue['data'][0]['reviewer_user_id'] is None
+    assert queue['data'][0]['reviewer_name'] == 'Chưa phân công'
+    assert queue['data'][0]['is_reviewer_assigned'] is False
     assert submissions.api_get_submission(
         unassigned.id,
         current_user=current_user(admin),
         db=db,
     )['can_review'] is True
 
+    admin_lease = claim_lease(db, unassigned, admin)
     corrected = submissions.api_update_review_content(
         unassigned.id,
         submissions.ReviewContentRequest(data={'field': 'admin corrected'}),
+        lease_token=admin_lease,
         current_user=current_user(admin),
         db=db,
     )
     assert corrected['status'] == 'ok'
     approved = submissions.api_toggle_check(
         unassigned.id,
+        lease_token=admin_lease,
         current_user=current_user(admin),
         db=db,
     )
@@ -1130,13 +1149,14 @@ def test_admin_reviews_unassigned_reports_and_shows_active_viewer(db):
     assert viewed_queue['data'][0]['is_being_viewed'] is True
     assert viewed_queue['data'][0]['viewing_user_name'] == reviewer.username
 
-    admin_observed = submissions.api_claim_submission_view(
-        assigned.id,
-        current_user=current_user(admin),
-        db=db,
-    )
-    assert admin_observed['viewer_is_current_user'] is False
-    assert admin_observed['viewing_user_name'] == reviewer.username
+    with pytest.raises(HTTPException) as admin_conflict:
+        submissions.api_claim_submission_view(
+            assigned.id,
+            current_user=current_user(admin),
+            db=db,
+        )
+    assert admin_conflict.value.status_code == 409
+    assert admin_conflict.value.detail['viewing_user_name'] == reviewer.username
 
     released = submissions.api_release_submission_view(
         assigned.id,
@@ -1168,6 +1188,311 @@ def test_admin_reviews_unassigned_reports_and_shows_active_viewer(db):
         db=db,
     )
     assert admin_released == {'status': 'ok', 'released': True}
+
+
+def test_submission_edit_lease_requires_token_renews_and_allows_stale_takeover(db):
+    owner = add_user(db, "lease-owner")
+    admin = add_user(db, "lease-admin", role="admin")
+    submission = Submission(
+        data_json='{"field": "original"}',
+        created_by_user_id=owner.id,
+        status="draft",
+    )
+    db.add(submission)
+    db.commit()
+
+    lease_token = claim_lease(db, submission, owner)
+    with pytest.raises(HTTPException) as missing:
+        submissions.api_update_submission(
+            submission.id,
+            submissions.SubmitRequest(data={"field": "missing"}, status="draft"),
+            lease_token=None,
+            current_user=current_user(owner),
+            db=db,
+        )
+    assert missing.value.status_code == 409
+    assert missing.value.detail["code"] == "submission_lease_required"
+
+    with pytest.raises(HTTPException) as wrong:
+        submissions.api_update_submission(
+            submission.id,
+            submissions.SubmitRequest(data={"field": "wrong"}, status="draft"),
+            lease_token="wrong-token",
+            current_user=current_user(owner),
+            db=db,
+        )
+    assert wrong.value.status_code == 409
+    assert wrong.value.detail["code"] == "submission_lease_invalid"
+
+    presence = db.get(SubmissionViewPresence, submission.id)
+    before_renewal = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(seconds=30)
+    presence.last_seen_at = before_renewal
+    db.commit()
+    assert submissions.api_update_submission(
+        submission.id,
+        submissions.SubmitRequest(data={"field": "saved"}, status="draft"),
+        lease_token=lease_token,
+        current_user=current_user(owner),
+        db=db,
+    ) == {"status": "ok"}
+    db.refresh(presence)
+    assert presence.last_seen_at > before_renewal
+
+    with pytest.raises(HTTPException) as admin_write_conflict:
+        submissions.api_update_submission(
+            submission.id,
+            submissions.SubmitRequest(data={"field": "admin"}, status="draft"),
+            lease_token=lease_token,
+            current_user=current_user(admin),
+            db=db,
+        )
+    assert admin_write_conflict.value.status_code == 409
+    assert admin_write_conflict.value.detail["code"] == "submission_view_conflict"
+
+    presence = db.get(SubmissionViewPresence, submission.id)
+    presence.last_seen_at = (
+        datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(seconds=91)
+    )
+    db.commit()
+    takeover = submissions.api_claim_submission_view(
+        submission.id,
+        current_user=current_user(admin),
+        db=db,
+    )
+    assert takeover["viewer_is_current_user"] is True
+    assert takeover["lease_token"] != lease_token
+    assert takeover["expires_in_seconds"] == 90
+
+
+def test_admin_cannot_self_review_even_with_owned_lease(db):
+    admin = add_user(db, "self-review-admin", role="admin")
+    submission = Submission(
+        data_json='{"field": "original"}',
+        created_by_user_id=admin.id,
+        status="pending_review",
+    )
+    db.add(submission)
+    db.commit()
+    lease_token = claim_lease(db, submission, admin)
+
+    assert submissions.api_get_submission(
+        submission.id,
+        current_user=current_user(admin),
+        db=db,
+    )["can_review"] is False
+    operations = [
+        lambda: submissions.api_update_review_content(
+            submission.id,
+            submissions.ReviewContentRequest(data={"field": "changed"}),
+            lease_token=lease_token,
+            current_user=current_user(admin),
+            db=db,
+        ),
+        lambda: submissions.api_confirm_submission_review(
+            submission.id,
+            submissions.ReviewContentRequest(data={"field": "changed"}),
+            lease_token=lease_token,
+            current_user=current_user(admin),
+            db=db,
+        ),
+        lambda: submissions.api_toggle_check(
+            submission.id,
+            lease_token=lease_token,
+            current_user=current_user(admin),
+            db=db,
+        ),
+        lambda: submissions.api_update_errors(
+            submission.id,
+            submissions.ErrorSectionsRequest(wrong_sections=["Thông tin"]),
+            lease_token=lease_token,
+            current_user=current_user(admin),
+            db=db,
+        ),
+    ]
+    for operation in operations:
+        with pytest.raises(HTTPException) as forbidden:
+            operation()
+        assert forbidden.value.status_code == 403
+    assert submission.status == "pending_review"
+
+
+def test_all_reviewer_write_routes_require_owned_lease(db):
+    author = add_user(db, "lease-route-author")
+    reviewer = add_user(db, "lease-route-reviewer")
+    submission = Submission(
+        data_json='{"field": "original"}',
+        created_by_user_id=author.id,
+        status="pending_review",
+    )
+    db.add(submission)
+    db.flush()
+    db.add(SubmissionReviewAssignment(
+        submission_id=submission.id,
+        reviewer_user_id=reviewer.id,
+    ))
+    db.commit()
+
+    operations = [
+        lambda: submissions.api_update_review_content(
+            submission.id,
+            submissions.ReviewContentRequest(data={"field": "changed"}),
+            lease_token=None,
+            current_user=current_user(reviewer),
+            db=db,
+        ),
+        lambda: submissions.api_confirm_submission_review(
+            submission.id,
+            submissions.ReviewContentRequest(data={"field": "changed"}),
+            lease_token=None,
+            current_user=current_user(reviewer),
+            db=db,
+        ),
+        lambda: submissions.api_toggle_check(
+            submission.id,
+            lease_token=None,
+            current_user=current_user(reviewer),
+            db=db,
+        ),
+        lambda: submissions.api_update_errors(
+            submission.id,
+            submissions.ErrorSectionsRequest(wrong_sections=["Thông tin"]),
+            lease_token=None,
+            current_user=current_user(reviewer),
+            db=db,
+        ),
+    ]
+    for operation in operations:
+        with pytest.raises(HTTPException) as missing:
+            operation()
+        assert missing.value.status_code == 409
+        assert missing.value.detail["code"] == "submission_lease_required"
+
+
+def test_review_confirmation_completes_only_when_public_data_is_unchanged(db):
+    author = add_user(db, "transition-author")
+    reviewer = add_user(db, "transition-reviewer")
+    results = []
+    for suffix, final_value in (("same", "original"), ("changed", "reviewed")):
+        submission = Submission(
+            data_json='{"field": "original"}',
+            created_by_user_id=author.id,
+            status="pending_review",
+        )
+        db.add(submission)
+        db.flush()
+        db.add(SubmissionReviewAssignment(
+            submission_id=submission.id,
+            reviewer_user_id=reviewer.id,
+        ))
+        db.commit()
+        lease_token = claim_lease(db, submission, reviewer)
+        result = submissions.api_confirm_submission_review(
+            submission.id,
+            submissions.ReviewContentRequest(data={"field": final_value}),
+            lease_token=lease_token,
+            current_user=current_user(reviewer),
+            db=db,
+        )
+        results.append((suffix, result["submission_status"]))
+
+    assert results == [
+        ("same", "completed"),
+        ("changed", "pending_input_confirmation"),
+    ]
+
+
+@pytest.mark.parametrize(
+    "status",
+    ["draft", "approved", "pending_review", "pending_input_confirmation"],
+)
+def test_reopen_accepts_only_completed_status(db, status):
+    admin = add_user(db, f"reopen-only-admin-{status}", role="admin")
+    submission = Submission(
+        data_json="{}",
+        created_by_user_id=None,
+        status=status,
+    )
+    db.add(submission)
+    db.commit()
+
+    with pytest.raises(HTTPException) as invalid:
+        submissions.api_reopen_submission_review(
+            submission.id,
+            current_user=current_user(admin),
+            db=db,
+        )
+    assert invalid.value.status_code == 409
+    assert submission.status == status
+
+
+def test_reopen_and_delete_reject_another_users_active_view(db):
+    author = add_user(db, "guarded-action-author")
+    reviewer = add_user(db, "guarded-action-reviewer")
+    admin = add_user(db, "guarded-action-admin", role="admin")
+    submission = Submission(
+        data_json="{}",
+        created_by_user_id=author.id,
+        status="completed",
+        is_checked=True,
+    )
+    db.add(submission)
+    db.flush()
+    db.add(SubmissionReviewAssignment(
+        submission_id=submission.id,
+        reviewer_user_id=reviewer.id,
+    ))
+    db.commit()
+    claim_lease(db, submission, reviewer)
+
+    with pytest.raises(HTTPException) as reopen_conflict:
+        submissions.api_reopen_submission_review(
+            submission.id,
+            current_user=current_user(admin),
+            db=db,
+        )
+    assert reopen_conflict.value.status_code == 409
+    with pytest.raises(HTTPException) as delete_conflict:
+        submissions.api_delete_submission(
+            submission.id,
+            current_user=current_user(admin),
+            db=db,
+        )
+    assert delete_conflict.value.status_code == 409
+    assert db.get(Submission, submission.id) is not None
+
+
+@pytest.mark.parametrize("value", [0, 101, "5", True, None])
+def test_template_config_rejects_invalid_error_threshold(db, value):
+    admin = add_user(db, f"threshold-admin-{value!r}", role="admin")
+    template = Template(name="Threshold template", filename="threshold.xlsx")
+    db.add(template)
+    db.commit()
+
+    with pytest.raises(HTTPException) as invalid:
+        template_routes.save_template_config(
+            template.id,
+            {"error_report_threshold_percent": value},
+            current_user=current_user(admin),
+            db=db,
+        )
+    assert invalid.value.status_code == 400
+    assert template.config_json is None
+
+
+@pytest.mark.parametrize("value", [1, 100])
+def test_template_config_accepts_error_threshold_range_endpoints(db, value):
+    admin = add_user(db, f"threshold-valid-admin-{value}", role="admin")
+    template = Template(name="Valid threshold", filename=f"threshold-{value}.xlsx")
+    db.add(template)
+    db.commit()
+
+    assert template_routes.save_template_config(
+        template.id,
+        {"error_report_threshold_percent": value},
+        current_user=current_user(admin),
+        db=db,
+    ) == {"status": "ok"}
+    assert json.loads(template.config_json)["error_report_threshold_percent"] == value
 
 
 def test_admin_review_folder_submissions_are_paginated(db):
@@ -1233,14 +1558,16 @@ def test_author_cannot_review_own_submission_and_assigned_reviewer_can_approve(d
         )
     assert error.value.status_code == 403
 
+    lease_token = claim_lease(db, submission, reviewer)
     result = submissions.api_toggle_check(
         submission.id,
+        lease_token=lease_token,
         current_user=current_user(reviewer),
         db=db,
     )
     db.refresh(submission)
-    assert result["new_status"] == "pending_input_confirmation"
-    assert submission.status == "pending_input_confirmation"
+    assert result["new_status"] == "completed"
+    assert submission.status == "completed"
     assert submission.is_checked is True
 
 
@@ -1330,6 +1657,7 @@ def test_submission_succeeds_without_reviewer_assignment(db):
         db=db,
     )
     draft = db.query(Submission).one()
+    lease_token = claim_lease(db, draft, author)
 
     submissions.api_update_submission(
             draft.id,
@@ -1337,6 +1665,7 @@ def test_submission_succeeds_without_reviewer_assignment(db):
                 data={"_pdf_uuid": document.uuid_filename},
                 status="pending_review",
             ),
+            lease_token=lease_token,
             current_user=current_user(author),
             db=db,
         )
@@ -1387,11 +1716,13 @@ def test_exact_path_and_content_duplicate_is_kept_as_draft(db):
     )
     db.add_all([submitted, draft])
     db.commit()
+    lease_token = claim_lease(db, draft, author)
 
     with pytest.raises(HTTPException) as error:
         submissions.api_update_submission(
             draft.id,
             submissions.SubmitRequest(data=data, template_id=template.id, status="pending_review"),
+            lease_token=lease_token,
             current_user=current_user(author),
             db=db,
         )
@@ -1413,10 +1744,12 @@ def test_missing_path_submission_is_allowed(db):
     )
     db.add(draft)
     db.commit()
+    lease_token = claim_lease(db, draft, author)
 
     submissions.api_update_submission(
         draft.id,
         submissions.SubmitRequest(data={"col_0": "Không có path"}, status="pending_review"),
+        lease_token=lease_token,
         current_user=current_user(author),
         db=db,
     )
@@ -1444,6 +1777,7 @@ def test_configured_required_path_may_be_missing_when_submitting(db):
     )
     db.add(draft)
     db.commit()
+    lease_token = claim_lease(db, draft, author)
 
     submissions.api_update_submission(
         draft.id,
@@ -1452,6 +1786,7 @@ def test_configured_required_path_may_be_missing_when_submitting(db):
             template_id=template.id,
             status="pending_review",
         ),
+        lease_token=lease_token,
         current_user=current_user(author),
         db=db,
     )
@@ -1482,6 +1817,49 @@ def test_employee_bulk_deletes_only_own_drafts(db):
         "processed_count": 2,
     }
     assert db.query(Submission).filter(Submission.id.in_(selected_ids)).count() == 0
+
+
+def test_bulk_action_blocks_other_viewer_and_releases_owners_lease(db):
+    author = add_user(db, "bulk-lease-author")
+    viewer = add_user(db, "bulk-lease-viewer", role="admin")
+    submission = Submission(
+        data_json="{}",
+        created_by_user_id=author.id,
+        status="draft",
+    )
+    db.add(submission)
+    db.commit()
+
+    claim_lease(db, submission, viewer)
+    with pytest.raises(HTTPException) as conflict:
+        submissions.api_bulk_submission_action(
+            submissions.BulkSubmissionActionRequest(
+                submission_ids=[submission.id],
+                action="delete",
+            ),
+            current_user=current_user(author),
+            db=db,
+        )
+    assert conflict.value.status_code == 409
+    assert conflict.value.detail["code"] == "submission_view_conflict"
+    assert db.get(Submission, submission.id) is not None
+
+    submissions.api_release_submission_view(
+        submission.id,
+        current_user=current_user(viewer),
+        db=db,
+    )
+    claim_lease(db, submission, author)
+    result = submissions.api_bulk_submission_action(
+        submissions.BulkSubmissionActionRequest(
+            submission_ids=[submission.id],
+            action="delete",
+        ),
+        current_user=current_user(author),
+        db=db,
+    )
+    assert result["processed_count"] == 1
+    assert db.get(SubmissionViewPresence, submission.id) is None
 
 
 def test_employee_cannot_bulk_process_another_users_submission(db):
@@ -1912,6 +2290,7 @@ def test_reviewer_edits_content_without_overwriting_errors_or_pdf_metadata(db):
         reviewer_user_id=reviewer.id,
     ))
     db.commit()
+    lease_token = claim_lease(db, submission, reviewer)
 
     result = submissions.api_update_review_content(
         submission.id,
@@ -1921,6 +2300,7 @@ def test_reviewer_edits_content_without_overwriting_errors_or_pdf_metadata(db):
             "_pdf_uuid": "tampered.pdf",
             "_folder_path": "tampered",
         }),
+        lease_token=lease_token,
         current_user=current_user(reviewer),
         db=db,
     )
@@ -1991,12 +2371,14 @@ def test_reviewer_saves_corrected_content_without_manual_error_marks(db):
         reviewer_user_id=reviewer.id,
     ))
     db.commit()
+    lease_token = claim_lease(db, submission, reviewer)
 
     marked = submissions.api_update_review_content(
         submission.id,
         submissions.ReviewContentRequest(
             data={"field": "reviewer corrected", "_pdf_uuid": "tampered.pdf"},
         ),
+        lease_token=lease_token,
         current_user=current_user(reviewer),
         db=db,
     )
@@ -2017,6 +2399,7 @@ def test_reviewer_saves_corrected_content_without_manual_error_marks(db):
         submissions.ReviewContentRequest(
             data={"field": "fully corrected"},
         ),
+        lease_token=lease_token,
         current_user=current_user(reviewer),
         db=db,
     )
@@ -2051,6 +2434,7 @@ def test_reviewer_confirmation_saves_content_and_approves_atomically(db):
         reviewer_user_id=reviewer.id,
     ))
     db.commit()
+    lease_token = claim_lease(db, submission, reviewer)
 
     result = submissions.api_confirm_submission_review(
         submission.id,
@@ -2061,6 +2445,7 @@ def test_reviewer_confirmation_saves_content_and_approves_atomically(db):
                 "_folder_path": "tampered",
             },
         ),
+        lease_token=lease_token,
         current_user=current_user(reviewer),
         db=db,
     )
@@ -2127,6 +2512,7 @@ def test_legacy_wrong_fields_are_discarded_during_review_save(db):
         reviewer_user_id=reviewer.id,
     ))
     db.commit()
+    lease_token = claim_lease(db, submission, reviewer)
 
     result = submissions.api_update_review_content(
         submission.id,
@@ -2134,6 +2520,7 @@ def test_legacy_wrong_fields_are_discarded_during_review_save(db):
             data={"col_8": "reviewed"},
             wrong_fields=["col_8"],
         ),
+        lease_token=lease_token,
         current_user=current_user(reviewer),
         db=db,
     )

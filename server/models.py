@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Boolean, Text
+from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Boolean, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 from server.database import Base, get_utc_now
 
@@ -13,7 +13,26 @@ class User(Base):
     full_name = Column(String(255), nullable=False, default="")
     phone_number = Column(String(50), nullable=True)
     role = Column(String(255), default="user") # 'admin' or 'user'
+    max_concurrent_sessions = Column(Integer, nullable=False, default=1)
     created_at = Column(DateTime, default=get_utc_now)
+
+
+class UserLoginSession(Base):
+    __tablename__ = "user_login_sessions"
+    __table_args__ = (
+        UniqueConstraint("user_id", "browser_id", name="uq_user_login_sessions_browser"),
+    )
+
+    session_id = Column(String(64), primary_key=True)
+    user_id = Column(
+        Integer,
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    browser_id = Column(String(128), nullable=False)
+    created_at = Column(DateTime, nullable=False, default=get_utc_now)
+    expires_at = Column(DateTime, nullable=False, index=True)
 
 
 class UserCapability(Base):
@@ -230,6 +249,7 @@ class SubmissionViewPresence(Base):
 
     submission_id = Column(Integer, ForeignKey('submissions.id'), primary_key=True)
     viewer_user_id = Column(Integer, ForeignKey('users.id'), nullable=False, index=True)
+    lease_token = Column(String(64), nullable=True)
     last_seen_at = Column(DateTime, nullable=False, default=get_utc_now)
 
 class AssignedDocument(Base):
@@ -322,7 +342,7 @@ class ServerFolderImportReviewer(Base):
     )
 
 from sqlalchemy.orm import relationship
-from sqlalchemy import BigInteger, CheckConstraint, UniqueConstraint
+from sqlalchemy import BigInteger, CheckConstraint
 
 class Dictionary(Base):
     __tablename__ = "dictionaries"

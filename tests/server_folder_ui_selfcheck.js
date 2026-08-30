@@ -2,7 +2,7 @@ const assert = require('assert');
 const fs = require('fs');
 
 const html = fs.readFileSync('frontend/admin.html', 'utf8');
-const source = fs.readFileSync('frontend/js/admin_panel.js', 'utf8');
+const source = fs.readFileSync('frontend/js/admin_operations.js', 'utf8');
 
 assert.ok(!html.includes('id="serverSourcePath"'));
 assert.ok(!html.includes('id="assignmentFolderLevel"'));

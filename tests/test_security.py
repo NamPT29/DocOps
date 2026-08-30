@@ -1,10 +1,15 @@
+from datetime import timedelta
 from types import SimpleNamespace
 
 import jwt
 import pytest
-from fastapi import HTTPException
+from fastapi import HTTPException, Response
 from pydantic import ValidationError
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
 
+from server.database import Base, get_utc_now
+from server.models import User, UserLoginSession
 from server.routers import auth, submissions
 from server.services.login_rate_limit_service import LoginRateLimiter
 
@@ -44,14 +49,23 @@ class StaticDb:
 
 
 def test_password_hash_and_legacy_login_migration(monkeypatch):
-    user = SimpleNamespace(id=7, username='legacy', password='old-password', role='user')
-    db = StaticDb(user)
+    engine = create_engine('sqlite:///:memory:')
+    Base.metadata.create_all(engine)
+    db = sessionmaker(bind=engine)()
+    user = User(id=7, username='legacy', password='old-password', role='user')
+    db.add(user)
+    db.commit()
     request = SimpleNamespace(client=SimpleNamespace(host='127.0.0.1'))
     monkeypatch.setattr(auth, "login_rate_limiter", LoginRateLimiter(5, 60))
 
     result = auth.api_login(
-        auth.LoginRequest(username='legacy', password='old-password'),
+        auth.LoginRequest(
+            username='legacy',
+            password='old-password',
+            browser_id='security-test-browser',
+        ),
         request=request,
+        response=Response(),
         db=db,
     )
 
@@ -59,7 +73,9 @@ def test_password_hash_and_legacy_login_migration(monkeypatch):
     assert user.password.startswith('scrypt$')
     assert auth.verify_password('old-password', user.password)
     assert not auth.verify_password('wrong-password', user.password)
-    assert db.committed
+    assert 'sid' in jwt.decode(result['token'], auth.SECRET_KEY, algorithms=[auth.ALGORITHM])
+    db.close()
+    engine.dispose()
 
 
 def test_signed_token_cannot_impersonate_deleted_user():
@@ -72,12 +88,34 @@ def test_signed_token_cannot_impersonate_deleted_user():
 
 
 def test_token_role_is_reloaded_from_database():
-    user = SimpleNamespace(id=7, username='member', role='user')
-    token = jwt.encode({'sub': '7', 'role': 'admin'}, auth.SECRET_KEY, algorithm=auth.ALGORITHM)
+    engine = create_engine('sqlite:///:memory:')
+    Base.metadata.create_all(engine)
+    db = sessionmaker(bind=engine)()
+    user = User(id=7, username='member', password='hash', role='user')
+    login_session = UserLoginSession(
+        session_id='role-reload-session',
+        user_id=7,
+        browser_id='role-reload-browser',
+        expires_at=get_utc_now() + timedelta(minutes=10),
+    )
+    db.add_all([user, login_session])
+    db.commit()
+    token = jwt.encode(
+        {'sub': '7', 'role': 'admin', 'sid': login_session.session_id},
+        auth.SECRET_KEY,
+        algorithm=auth.ALGORITHM,
+    )
 
-    current_user = auth.get_current_user(f'Bearer {token}', db=StaticDb(user))
+    current_user = auth.get_current_user(f'Bearer {token}', db=db)
 
-    assert current_user == {'id': 7, 'username': 'member', 'role': 'user'}
+    assert current_user == {
+        'id': 7,
+        'username': 'member',
+        'role': 'user',
+        'session_id': login_session.session_id,
+    }
+    db.close()
+    engine.dispose()
 
 
 def test_user_cannot_submit_an_admin_only_status():
