@@ -21,6 +21,7 @@ ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 CloseApplications=yes
 WizardStyle=modern
+SourceDir=..
 
 [Files]
 Source: "dist\ScanToExcelApp\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
