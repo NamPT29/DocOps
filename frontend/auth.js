@@ -9,7 +9,7 @@ const SESSION_HEARTBEAT_INTERVAL_MS = 30 * 1000;
 const SESSION_CLOSE_SIGNAL_KEY = 'scanToExcelSessionCloseSignal';
 const APP_TAB_ID = window.sessionStorage?.getItem('scanToExcelAppTabId')
     || window.crypto?.randomUUID?.()
-    || `tab-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    || `tab-${Array.from(window.crypto.getRandomValues(new Uint8Array(16)), byte => byte.toString(16).padStart(2, '0')).join('')}`;
 window.sessionStorage?.setItem('scanToExcelAppTabId', APP_TAB_ID);
 
 let lastUserActivityAt = Number(localStorage.getItem('sessionLastActivityAt')) || Date.now();
@@ -159,7 +159,7 @@ function getOrCreateBrowserId() {
     let browserId = localStorage.getItem(storageKey);
     if (browserId) return browserId;
     browserId = window.crypto?.randomUUID?.()
-        || `browser-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+        || `browser-${Array.from(window.crypto.getRandomValues(new Uint8Array(16)), byte => byte.toString(16).padStart(2, '0')).join('')}`;
     localStorage.setItem(storageKey, browserId);
     return browserId;
 }

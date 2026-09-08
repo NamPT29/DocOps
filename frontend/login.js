@@ -10,7 +10,7 @@ function getOrCreateBrowserId() {
     let browserId = localStorage.getItem(storageKey);
     if (browserId) return browserId;
     browserId = window.crypto?.randomUUID?.()
-        || `browser-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+        || `browser-${Array.from(window.crypto.getRandomValues(new Uint8Array(16)), byte => byte.toString(16).padStart(2, '0')).join('')}`;
     localStorage.setItem(storageKey, browserId);
     return browserId;
 }
