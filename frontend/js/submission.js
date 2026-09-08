@@ -65,7 +65,7 @@ function normalizeCopiedSubmissionValue(value) {
     if (typeof value === 'string') return value.trim();
     if (Array.isArray(value)) return value.map(normalizeCopiedSubmissionValue);
     if (typeof value === 'object') {
-        return Object.keys(value).sort().reduce((normalized, key) => {
+        return Object.keys(value).sort((a, b) => (a < b ? -1 : a > b ? 1 : 0)).reduce((normalized, key) => {
             normalized[key] = normalizeCopiedSubmissionValue(value[key]);
             return normalized;
         }, {});
