@@ -5,7 +5,7 @@ const vm = require('vm');
 const root = path.join(__dirname, '..');
 const html = fs.readFileSync(path.join(root, 'frontend', 'index.html'), 'utf8');
 const script = fs.readFileSync(path.join(root, 'frontend', 'js', 'admin_panel.js'), 'utf8');
-const css = fs.readFileSync(path.join(root, 'frontend', 'windows-ui.css'), 'utf8');
+const css = fs.readFileSync(path.join(root, 'frontend', 'css', 'windows-ui.css'), 'utf8');
 
 function assert(condition, message) {
     if (!condition) throw new Error(message);

@@ -10,7 +10,7 @@ assert.equal((html.match(/\bon[a-z]+\s*=/gi) || []).length, 0);
 assert.equal((html.match(/<style\b/gi) || []).length, 0);
 assert.equal((html.match(/\bstyle\s*=/gi) || []).length, 0);
 assert.equal((html.match(/\bdata-action\s*=/gi) || []).length, 24);
-assert(/href=["']index-page\.css\?v=[^"']+["']/.test(html));
+assert(/href=["'](?:css\/)?index-page\.css\?v=[^"']+["']/.test(html));
 assert(/src=["']index-page\.js\?v=[^"']+["']/.test(html));
 
 const listeners = {};

@@ -3,7 +3,7 @@ const fs = require('node:fs');
 const vm = require('node:vm');
 
 const html = fs.readFileSync('frontend/index.html', 'utf8');
-const css = fs.readFileSync('frontend/windows-ui.css', 'utf8');
+const css = fs.readFileSync('frontend/css/windows-ui.css', 'utf8');
 const rendererSource = fs.readFileSync('frontend/js/form_renderer.js', 'utf8');
 const submissionSource = fs.readFileSync('frontend/js/submission.js', 'utf8');
 

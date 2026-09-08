@@ -8,7 +8,7 @@ const sources = {
     form: fs.readFileSync('frontend/js/form_renderer.js', 'utf8'),
     template: fs.readFileSync('frontend/js/template_config.js', 'utf8'),
 };
-const css = fs.readFileSync('frontend/windows-ui.css', 'utf8');
+const css = fs.readFileSync('frontend/css/windows-ui.css', 'utf8');
 
 for (const [name, source] of Object.entries(sources)) {
     assert.doesNotMatch(source, /<[^>]*\bon[a-z]+\s*=/i, `${name} generated markup must not contain event attributes.`);

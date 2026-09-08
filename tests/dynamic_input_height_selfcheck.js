@@ -6,7 +6,7 @@ const source = fs.readFileSync('frontend/js/form_renderer.js', 'utf8');
 const submissionSource = fs.readFileSync('frontend/js/submission.js', 'utf8');
 const adminPanelSource = fs.readFileSync('frontend/js/admin_panel.js', 'utf8');
 const employeeHtml = fs.readFileSync('frontend/index.html', 'utf8');
-const employeeCss = fs.readFileSync('frontend/index-page.css', 'utf8');
+const employeeCss = fs.readFileSync('frontend/css/index-page.css', 'utf8');
 const sandbox = {
     window: {},
     document: {},
