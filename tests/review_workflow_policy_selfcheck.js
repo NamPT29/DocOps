@@ -3,7 +3,7 @@ const fs = require('node:fs');
 
 const source = fs.readFileSync('frontend/js/admin_panel.js', 'utf8');
 const submissionSource = fs.readFileSync('frontend/js/submission.js', 'utf8');
-const projectSource = fs.readFileSync('frontend/js/project_management.js', 'utf8');
+const projectSource = fs.readFileSync('frontend/js/project_reports.js', 'utf8');
 
 assert(!source.includes('Admin vẫn có thể mở để theo dõi'));
 assert.match(source, /if \(payload\.viewer_is_current_user !== true\) \{[\s\S]*?return false;/);

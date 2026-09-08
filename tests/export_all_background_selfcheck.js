@@ -2,7 +2,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 
 const html = fs.readFileSync('frontend/admin.html', 'utf8');
-const source = fs.readFileSync('frontend/js/project_management.js', 'utf8');
+const source = fs.readFileSync('frontend/js/project_reports.js', 'utf8');
 const normalizedSource = source.replace(/\r\n/g, '\n');
 
 assert(!html.includes('id="exportAllBtn"'));

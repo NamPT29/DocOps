@@ -2,19 +2,26 @@ const assert = require('assert');
 const fs = require('fs');
 
 const html = fs.readFileSync('frontend/admin.html', 'utf8');
+const uploadSource = fs.readFileSync('frontend/js/project_upload.js', 'utf8');
 const source = fs.readFileSync('frontend/js/project_management.js', 'utf8');
 
 assert(html.includes('id="projects-tab"'));
 assert(html.includes('id="projectFolderPicker"'));
 assert(html.includes('webkitdirectory'));
+assert(html.includes('js/project_upload.js'));
 assert(html.includes('js/project_management.js'));
-assert(source.includes("crypto.subtle.digest('SHA-256'"));
-assert(source.includes("'X-Upload-Offset': String(offset)"));
-assert(source.includes("response.headers.get('Retry-After')"));
-assert(source.includes('response.status === 429'));
-assert(source.includes('Promise.all(Array.from({length: workerCount}'));
-assert(source.includes('projectUploadResumeV1'));
-assert(source.includes('/api/project-upload-sessions/${encodeURIComponent(session.id)}/finalize'));
+
+// Upload engine checks
+assert(uploadSource.includes("crypto.subtle.digest('SHA-256'"));
+assert(uploadSource.includes("'X-Upload-Offset': String(offset)"));
+assert(uploadSource.includes("response.headers.get('Retry-After')"));
+assert(uploadSource.includes('response.status === 429'));
+assert(uploadSource.includes('Promise.all(Array.from({length: workerCount}'));
+assert(uploadSource.includes('projectUploadResumeV1'));
+assert(uploadSource.includes('/api/project-upload-sessions/${encodeURIComponent(session.id)}/finalize'));
+assert(uploadSource.includes('Number(resume.project_id) !== targetProjectId'));
+
+// Core project management checks
 assert(html.includes('id="projectMembersModal"'));
 assert(!html.includes('id="rebalanceProjectMembersButton"'));
 assert(html.includes('id="projectAssetsModal"'));
@@ -37,7 +44,6 @@ assert(source.includes('deleteButton.disabled = Number(asset.submission_count ||
 assert(source.includes('method: \'DELETE\''));
 assert(html.includes('id="projectUpdateTargetBanner"'));
 assert(source.includes('prepareProjectFolderUpdate(project.id)'));
-assert(source.includes('Number(resume.project_id) !== targetProjectId'));
 assert(source.includes("'Xóa dự án'"));
 assert(source.includes('async function deleteProject(project)'));
 assert(source.includes('/api/projects/${Number(project.id)}'));
