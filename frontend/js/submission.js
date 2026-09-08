@@ -80,8 +80,7 @@ function hasCopiedSubmissionBusinessChanges(sourceData, currentData) {
         ...Object.keys(currentData || {}),
     ]);
     const comparableKeys = Array.from(keys)
-        .filter(key => typeof key === 'string' && !key.startsWith('_') && key !== ignoredPathField)
-        .sort();
+        .filter(key => typeof key === 'string' && !key.startsWith('_') && key !== ignoredPathField);
     return comparableKeys.some(key => (
         JSON.stringify(normalizeCopiedSubmissionValue(sourceData?.[key]))
         !== JSON.stringify(normalizeCopiedSubmissionValue(currentData?.[key]))
