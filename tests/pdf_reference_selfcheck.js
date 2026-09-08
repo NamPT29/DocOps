@@ -258,6 +258,25 @@ assert.equal(iframeCurrentIndex, 2, 'Há»“ sÆ¡ Ä‘ang duyá»‡t pháº�
 assert.equal(activeQueueFolderKey, '1::001/0001', 'Báº¥m kiá»ƒm duyá»‡t pháº£i má»Ÿ ngay danh sÃ¡ch file trong folder');
 assert.equal(lastSelectionOptions.allowSubmissionNavigation, false, 'Programmatic review selection must not navigate to another submission');
 
+uploadedFilesQueue = [{
+    name: 'form-1.pdf',
+    uuid: 'uuid-form-1.pdf',
+    url: '/api/files/stale-form-1.pdf',
+    relative_path: '001/0001/form-1.pdf',
+    folder_group: '001/0001',
+    template_id: 1,
+}];
+loadReviewFolderFiles([{
+    name: 'form-1.pdf',
+    uuid: 'uuid-form-1.pdf',
+    url: '/api/files/uuid-form-1.pdf',
+    relative_path: '001/0001/form-1.pdf',
+    folder_group: '001/0001',
+    template_id: 1,
+}], 'uuid-form-1.pdf');
+assert.equal(uploadedFilesQueue[iframeCurrentIndex].temporary_view, true, 'Review must select the fresh server-backed queue entry');
+assert.equal(uploadedFilesQueue[iframeCurrentIndex].url, '/api/files/uuid-form-1.pdf', 'Review must ignore a persisted stale URL for the same UUID');
+
 currentEditingId = 72;
 loadReviewFolderFiles([
     {

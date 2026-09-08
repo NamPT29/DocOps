@@ -167,14 +167,16 @@ def test_cleanup_export_job_keeps_locked_log_without_raising(
 
     result = export_job_service.cleanup_export_job(job_id)
 
-    assert result["removed"] == 2
+    assert result["removed"] == 1
     assert result["retained"] == [str(log_path)]
     assert log_path.is_file()
     assert not output_path.exists()
+    assert export_job_service.export_job_status_path(job_id).is_file()
 
 
 def test_cleanup_stale_export_jobs_removes_only_old_terminal_jobs(
     isolated_export_jobs,
+    monkeypatch,
 ):
     old_job_id = "1" * 32
     recent_job_id = "2" * 32
@@ -198,13 +200,44 @@ def test_cleanup_stale_export_jobs_removes_only_old_terminal_jobs(
         "state": "running",
         "updated_at": (now - timedelta(days=7)).isoformat(),
     })
+    export_job_service.export_job_output_path(running_job_id, ".xlsx").write_bytes(b"stale")
+    export_job_service.EXPORT_LOCK_PATH.write_text(running_job_id, encoding="utf-8")
+    monkeypatch.setattr(export_job_service, "_process_is_running", lambda _pid: False)
 
     result = export_job_service.cleanup_stale_export_jobs(max_age_hours=24)
 
-    assert result == {"cleaned": 1, "skipped": 2, "errors": 0}
+    assert result == {"cleaned": 2, "skipped": 1, "errors": 0}
     assert export_job_service.read_export_job(old_job_id) is None
     assert export_job_service.read_export_job(recent_job_id) is not None
-    assert export_job_service.read_export_job(running_job_id) is not None
+    assert export_job_service.read_export_job(running_job_id) is None
+    assert not export_job_service.EXPORT_LOCK_PATH.exists()
+
+
+def test_cleanup_stale_export_jobs_marks_recent_dead_worker_error_without_deleting(
+    isolated_export_jobs,
+    monkeypatch,
+):
+    job_id = "5" * 32
+    export_job_service.write_export_job(job_id, {
+        "job_id": job_id,
+        "state": "running",
+        "extension": ".xlsx",
+        "worker_pid": 999999,
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    })
+    output_path = export_job_service.export_job_output_path(job_id, ".xlsx")
+    output_path.write_bytes(b"partial")
+    export_job_service.EXPORT_LOCK_PATH.write_text(job_id, encoding="utf-8")
+    monkeypatch.setattr(export_job_service, "_process_is_running", lambda _pid: False)
+
+    result = export_job_service.cleanup_stale_export_jobs(max_age_hours=24)
+
+    assert result == {"cleaned": 0, "skipped": 1, "errors": 0}
+    payload = export_job_service.read_export_job(job_id)
+    assert payload["state"] == "error"
+    assert payload["worker_pid"] is None
+    assert output_path.is_file()
+    assert not export_job_service.EXPORT_LOCK_PATH.exists()
 
 
 def test_cleanup_stale_export_jobs_keeps_terminal_job_with_invalid_timestamp(

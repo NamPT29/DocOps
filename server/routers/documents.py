@@ -20,9 +20,6 @@ from server.models import (
     ServerFolderImportJob,
 )
 from server.services.upload_service import save_validated_upload
-from server.services.submission_metadata_service import (
-    backfill_submission_metadata,
-)
 from server.utils.folder_utils import (
     NO_FOLDER_SENTINEL,
     normalize_folder_path,
@@ -279,7 +276,6 @@ def get_user_assignment_folders(
     if not target_user or target_user.role == "admin":
         raise HTTPException(status_code=400, detail="Nhân viên không hợp lệ")
 
-    backfill_submission_metadata(db)
     from server.services.document_assignment_service import get_user_pending_assignment_folders
     groups = get_user_pending_assignment_folders(db, target_user.id)
     data = [{
@@ -329,7 +325,6 @@ def revoke_user_assignments(
 
 
 def _get_active_reviewer_folder_groups(db: Session) -> list[dict]:
-    backfill_submission_metadata(db)
     rows = DocumentRepository(db).active_reviewer_folder_rows()
 
     groups: dict[str, dict] = {}
@@ -551,7 +546,6 @@ def get_document_stats(current_user: dict = Depends(get_admin_user), db: Session
 
 @router.get("/documents/my-queue")
 def get_my_queue(current_user: dict = Depends(get_input_user), db: Session = Depends(get_db)):
-    backfill_submission_metadata(db)
     repository = DocumentRepository(db)
     linked_pdf_uuids = repository.linked_pdf_uuids(current_user["id"])
     docs = repository.list_input_queue(current_user["id"])

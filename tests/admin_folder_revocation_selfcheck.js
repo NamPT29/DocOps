@@ -10,7 +10,7 @@ const source = [
 assert(html.includes('id="assignedFoldersModal"'));
 assert(html.includes('id="assignedFoldersList"'));
 assert(html.includes('js/admin_operations.js?v=1.00'));
-assert(html.includes('js/admin_panel.js?v=203.03'));
+assert(html.includes('js/admin_panel.js?v=203.06'));
 assert(source.includes('Tài liệu đã giao'));
 assert(source.includes('/api/documents/assignments/folders?user_id='));
 assert(source.includes('folder_path: folderPath'));

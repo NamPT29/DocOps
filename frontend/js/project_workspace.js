@@ -43,6 +43,11 @@ function applyEmployeeProjectQueue(workspace) {
         temporary_view: false,
         completed: file.entered === true,
     }));
+    // Preserve browser-local OCR progress/proposals when a project refresh
+    // replaces the queue objects with the latest server assignment.
+    if (window.EmployeeOcr && typeof window.EmployeeOcr.hydrateQueue === 'function') {
+        window.EmployeeOcr.hydrateQueue();
+    }
     iframeCurrentIndex = -1;
     activeQueueFolderKey = null;
     saveQueueState();

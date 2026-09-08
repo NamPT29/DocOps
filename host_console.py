@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ctypes
+import logging
 import multiprocessing
 import os
 import re
@@ -994,6 +995,65 @@ class HostCommandCenter:
             return False
 
 
+def silence_console_logging() -> None:
+    """Remove any StreamHandler sending logs to stdout/stderr so the dashboard remains clean."""
+    root_logger = logging.getLogger()
+    for handler in list(root_logger.handlers):
+        if type(handler) is logging.StreamHandler or (
+            isinstance(handler, logging.StreamHandler)
+            and not isinstance(handler, logging.FileHandler)
+        ):
+            root_logger.removeHandler(handler)
+
+    for logger_name in (
+        "uvicorn",
+        "uvicorn.error",
+        "uvicorn.access",
+        "alembic",
+        "alembic.runtime.migration",
+        "sqlalchemy",
+        "sqlalchemy.engine",
+        "server",
+        "server.http",
+        "server.audit",
+        "server.upload_timing",
+    ):
+        target_logger = logging.getLogger(logger_name)
+        target_logger.handlers = [
+            h
+            for h in target_logger.handlers
+            if not (isinstance(h, logging.StreamHandler) and not isinstance(h, logging.FileHandler))
+        ]
+
+
+class _StderrLogRedirector:
+    """Redirect unhandled stderr output to logs/error.log to keep the console dashboard clean."""
+
+    def __init__(self, target_path: Path) -> None:
+        self._target_path = target_path
+        self._original_stderr = sys.stderr
+        self._file: Any = None
+
+    def __enter__(self) -> _StderrLogRedirector:
+        try:
+            self._target_path.parent.mkdir(parents=True, exist_ok=True)
+            self._file = open(self._target_path, "a", encoding="utf-8", errors="replace")
+            sys.stderr = self._file
+        except OSError:
+            pass
+        return self
+
+    def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
+        if self._file is not None:
+            try:
+                self._file.flush()
+                self._file.close()
+            except OSError:
+                pass
+            self._file = None
+        sys.stderr = self._original_stderr
+
+
 class SignalServerController:
     """Adapter that lets the command center stop Uvicorn's public supervisor."""
 
@@ -1011,15 +1071,45 @@ class SignalServerController:
             signal.raise_signal(signal.SIGINT)
 
 
+def migrate_database_before_server():
+    """Run Alembic once in the parent process before workers are created."""
+    from server.database import engine
+    from server.migration_runner import upgrade_database
+
+    # A pre-Alembic database is stamped only after read-only validation of all
+    # required baseline structures. Partial/legacy schemas stop with an error.
+    return upgrade_database(engine, base_dir=BASE_DIR, adopt_existing=True)
+
+
 def main() -> int:
     os.chdir(BASE_DIR)
     load_dotenv(BASE_DIR / ".env")
     use_color = configure_console()
+    silence_console_logging()
     host = os.getenv("HOST", "0.0.0.0")
     port = int(os.getenv("PORT", "80"))
     interval = float(os.getenv("CONSOLE_STATS_INTERVAL", "1"))
     runtime = configure_server_runtime()
+    try:
+        migration = migrate_database_before_server()
+        print(
+            paint(
+                (
+                    f"  Database migration: {migration.previous or '<none>'} "
+                    f"-> {migration.current}"
+                    f"{' (adopted existing schema)' if migration.adopted_existing else ''}"
+                ),
+                Ansi.GREEN,
+                use_color,
+                bold=True,
+            )
+        )
+    except Exception as exc:
+        print(paint(f"  KHÔNG THỂ MIGRATE DATABASE: {exc}", Ansi.RED, use_color, bold=True))
+        print("  Schema không khớp baseline; hãy backup và kiểm tra migration log.")
+        return 1
 
+    silence_console_logging()
     stats = RequestStats()
     dashboard = ConsoleDashboard(stats, use_color, interval)
     dashboard.print_banner(host, port)
@@ -1041,6 +1131,7 @@ def main() -> int:
             access_log=False,
             log_level="warning",
             use_colors=use_color,
+            log_config=None,
         )
         server = uvicorn.Server(config)
         run_server = server.run
@@ -1057,6 +1148,7 @@ def main() -> int:
                 log_level="warning",
                 use_colors=use_color,
                 workers=runtime.workers,
+                log_config=None,
             )
 
     command_center = HostCommandCenter(
@@ -1066,7 +1158,8 @@ def main() -> int:
     )
     command_center.start()
     try:
-        run_server()
+        with _StderrLogRedirector(BASE_DIR / "logs" / "error.log"):
+            run_server()
     except KeyboardInterrupt:
         pass
     finally:

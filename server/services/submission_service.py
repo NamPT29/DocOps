@@ -8,7 +8,6 @@ from server.repositories.submission_review_history_repository import (
 
 from typing import Literal
 from fastapi import HTTPException
-import os
 import json
 from datetime import datetime, timedelta, timezone
 from sqlalchemy.orm import Session
@@ -243,35 +242,16 @@ class SubmissionService:
                     template_config=template_configs.get(submission.template_id, {}),
                 )
 
-            uuid_filenames = {
-                os.path.basename(str(data["_pdf_uuid"]))
-                for data in parsed_data.values()
-                if data.get("_pdf_uuid")
-            }
-            original_filenames = {
-                str(data["_pdf_filename"])
-                for data in parsed_data.values()
-                if data.get("_pdf_filename") and not data.get("_pdf_uuid")
-            }
             document_repository = DocumentRepository(db)
-            documents_by_uuid, documents_by_original = document_repository.reference_maps(
-                owner_id=current_user["id"],
-                uuid_filenames=uuid_filenames,
-                original_filenames=original_filenames,
-            )
-            resolved_documents: dict[int, AssignedDocument | None] = {}
-            for submission in selected:
-                raw_data = parsed_data[submission.id]
-                uuid_filename = raw_data.get("_pdf_uuid")
-                if uuid_filename:
-                    document = documents_by_uuid.get(
-                        os.path.basename(str(uuid_filename))
-                    )
-                elif raw_data.get("_pdf_filename"):
-                    document = documents_by_original.get(str(raw_data["_pdf_filename"]))
-                else:
-                    document = None
-                resolved_documents[submission.id] = document
+            documents = document_repository.map_by_ids({
+                submission.assigned_document_id
+                for submission in selected
+                if submission.assigned_document_id is not None
+            })
+            resolved_documents = {
+                submission.id: documents.get(submission.assigned_document_id)
+                for submission in selected
+            }
             document_metadata = document_repository.metadata_map({
                 document.id
                 for document in resolved_documents.values()
@@ -410,7 +390,6 @@ class SubmissionService:
         db: Session,
         owner_id: int,
         pending_only: bool = False,
-        allow_unregistered: bool = False,
     ):
         enriched = dict(data)
         document = SubmissionService.resolve_document(enriched, db, owner_id, pending_only)
@@ -430,12 +409,8 @@ class SubmissionService:
             else:
                 enriched.pop("_folder_path", None)
         elif enriched.get("_pdf_uuid"):
-            uuid_filename = os.path.basename(str(enriched["_pdf_uuid"]))
-            if not allow_unregistered:
-                raise HTTPException(status_code=400, detail="File đính kèm không thuộc người dùng")
-            enriched["_pdf_uuid"] = uuid_filename
-            enriched["_pdf_url"] = _pdf_url(uuid_filename)
-        elif enriched.get("_pdf_filename") and not allow_unregistered:
+            raise HTTPException(status_code=400, detail="File đính kèm không thuộc người dùng")
+        elif enriched.get("_pdf_filename"):
             raise HTTPException(status_code=400, detail="Không xác minh được file đính kèm")
         return enriched, document
 
@@ -445,7 +420,7 @@ class SubmissionService:
         document: AssignedDocument | None,
         metadata: dict | None,
     ) -> dict:
-        """Bulk-only, query-free equivalent of ``enrich_pdf_reference``."""
+        """Query-free enrichment from authoritative document metadata."""
         enriched = dict(data)
         if document:
             enriched["_pdf_filename"] = document.original_filename
@@ -799,11 +774,6 @@ class SubmissionService:
             data_dict["_pdf_url"] = _pdf_url(document.uuid_filename)
             if metadata["relative_path"]:
                 data_dict["_pdf_relative_path"] = metadata["relative_path"]
-        elif data_dict.get("_pdf_uuid"):
-            uuid_filename = os.path.basename(str(data_dict["_pdf_uuid"]))
-            data_dict["_pdf_uuid"] = uuid_filename
-            data_dict["_pdf_url"] = _pdf_url(uuid_filename)
-            
         submission_folder = normalize_folder_path(sub.folder_path)
         if not submission_folder:
             submission_folder = COMPLETED_WITHOUT_FOLDER

@@ -1,4 +1,6 @@
 import hashlib
+from datetime import timedelta
+from pathlib import Path
 
 import pytest
 from fastapi import HTTPException
@@ -6,6 +8,7 @@ from sqlalchemy import create_engine, event
 from sqlalchemy.orm import sessionmaker
 
 from server.database import Base
+from server.database import get_utc_now
 from server.models import (
     AssignedDocument,
     AssignedDocumentFolder,
@@ -24,6 +27,7 @@ from server.models import (
 from server.routers.project_uploads import router
 from server.repositories.project_upload_repository import ProjectUploadRepository
 from server.services.project_upload_service import (
+    cleanup_stale_project_uploads,
     create_or_resume_upload_session,
     finalize_upload_session,
     get_upload_session,
@@ -103,6 +107,7 @@ def test_create_session_requests_only_new_or_changed_files_and_is_idempotent(dat
     first_file = session["files"][0]
     first_upload = db.get(ProjectUploadSession, session["id"])
     assert first_upload.status == "created"
+    assert first_upload.expires_at is not None
     resumed = create_or_resume_upload_session(
         db,
         project_id=project.id,
@@ -397,6 +402,151 @@ def test_hash_mismatch_resets_file_without_finalizing(database):
         )
     assert mismatch.value.status_code == 422
     assert not list((tmp_path / "uploads" / ".project_uploads").rglob("*.part"))
+
+
+def test_cleanup_stale_project_uploads_expires_abandoned_session(database):
+    db, tmp_path = database
+    admin, project = seed_project(db, report_mode="pdf")
+    content = b"%PDF-abandoned-upload"
+    session = create_or_resume_upload_session(
+        db,
+        project_id=project.id,
+        created_by_user_id=admin.id,
+        client_session_key="abandoned-upload",
+        raw_items=[raw_item("001/report.pdf", content)],
+    )
+    upload_file = db.get(ProjectUploadFile, session["files"][0]["file_id"])
+    staging_path = (
+        tmp_path
+        / "uploads"
+        / ".project_uploads"
+        / session["id"]
+        / upload_file.staging_filename
+    )
+    staging_path.parent.mkdir(parents=True, exist_ok=True)
+    staging_path.write_bytes(content[:8])
+    old = get_utc_now() - timedelta(hours=25)
+    persisted_session = db.get(ProjectUploadSession, session["id"])
+    persisted_session.updated_at = old
+    persisted_session.created_at = old
+    upload_file.updated_at = old
+    upload_file.status = "uploading"
+    upload_file.next_offset = 8
+    db.commit()
+
+    result = cleanup_stale_project_uploads(db, max_age_hours=24)
+
+    db.refresh(persisted_session)
+    db.refresh(upload_file)
+    assert result == {"cleaned": 1, "skipped": 0, "errors": 0}
+    assert persisted_session.status == "cancelled"
+    assert upload_file.status == "failed"
+    assert upload_file.next_offset == 0
+    assert not staging_path.exists()
+
+
+def test_cleanup_stale_project_uploads_keeps_recent_file_activity(database):
+    db, tmp_path = database
+    admin, project = seed_project(db, report_mode="pdf")
+    content = b"%PDF-active-upload"
+    session = create_or_resume_upload_session(
+        db,
+        project_id=project.id,
+        created_by_user_id=admin.id,
+        client_session_key="active-upload",
+        raw_items=[raw_item("001/report.pdf", content)],
+    )
+    upload_file = db.get(ProjectUploadFile, session["files"][0]["file_id"])
+    old = get_utc_now() - timedelta(hours=25)
+    persisted_session = db.get(ProjectUploadSession, session["id"])
+    persisted_session.updated_at = old
+    persisted_session.created_at = old
+    upload_file.updated_at = get_utc_now()
+    db.commit()
+
+    result = cleanup_stale_project_uploads(db, max_age_hours=24)
+
+    assert result == {"cleaned": 0, "skipped": 1, "errors": 0}
+    assert db.get(ProjectUploadSession, session["id"]).status == "created"
+    assert not list((tmp_path / "uploads" / ".project_uploads").rglob("*.part"))
+
+
+def test_cleanup_stale_project_uploads_retries_locked_file_on_next_startup(
+    database,
+    monkeypatch,
+):
+    db, tmp_path = database
+    admin, project = seed_project(db, report_mode="pdf")
+    content = b"%PDF-locked-upload"
+    session = create_or_resume_upload_session(
+        db,
+        project_id=project.id,
+        created_by_user_id=admin.id,
+        client_session_key="locked-upload",
+        raw_items=[raw_item("001/report.pdf", content)],
+    )
+    persisted_session = db.get(ProjectUploadSession, session["id"])
+    upload_file = db.get(ProjectUploadFile, session["files"][0]["file_id"])
+    staging_path = (
+        tmp_path
+        / "uploads"
+        / ".project_uploads"
+        / session["id"]
+        / upload_file.staging_filename
+    )
+    staging_path.parent.mkdir(parents=True, exist_ok=True)
+    staging_path.write_bytes(content)
+    old = get_utc_now() - timedelta(hours=25)
+    persisted_session.created_at = old
+    persisted_session.updated_at = old
+    upload_file.updated_at = old
+    db.commit()
+    real_unlink = Path.unlink
+
+    def locked_unlink(path, *args, **kwargs):
+        if path == staging_path:
+            raise PermissionError(13, "file is being used", str(path))
+        return real_unlink(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "unlink", locked_unlink)
+    monkeypatch.setattr("server.services.project_upload_service.time.sleep", lambda _seconds: None)
+
+    result = cleanup_stale_project_uploads(db, max_age_hours=24)
+
+    assert result == {"cleaned": 0, "skipped": 0, "errors": 1}
+    assert db.get(ProjectUploadSession, session["id"]).status == "created"
+    assert staging_path.is_file()
+
+
+def test_expired_upload_session_can_restart_with_same_client_key(database):
+    db, _ = database
+    admin, project = seed_project(db, report_mode="pdf")
+    content = b"%PDF-restart-expired"
+    session = create_or_resume_upload_session(
+        db,
+        project_id=project.id,
+        created_by_user_id=admin.id,
+        client_session_key="restart-expired",
+        raw_items=[raw_item("001/report.pdf", content)],
+    )
+    persisted_session = db.get(ProjectUploadSession, session["id"])
+    upload_file = db.get(ProjectUploadFile, session["files"][0]["file_id"])
+    persisted_session.status = "cancelled"
+    upload_file.status = "failed"
+    upload_file.next_offset = 0
+    db.commit()
+
+    resumed = create_or_resume_upload_session(
+        db,
+        project_id=project.id,
+        created_by_user_id=admin.id,
+        client_session_key="restart-expired",
+        raw_items=[raw_item("001/report.pdf", content)],
+    )
+
+    assert resumed["id"] == session["id"]
+    assert resumed["state"] == "created"
+    assert resumed["files"][0]["state"] == "pending"
 
 
 def test_finalize_atomically_groups_multiple_pdfs_into_one_report(database):

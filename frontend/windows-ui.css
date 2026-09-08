@@ -287,6 +287,29 @@ body.app-shell > .container-fluid { width: min(100%, 1600px); }
     background: var(--app-surface);
 }
 
+@media (min-width: 768px) {
+    .table-responsive:has(.dropdown-menu.show) {
+        overflow: visible !important;
+    }
+}
+
+/* Global Mobile Fixes */
+@media (max-width: 767px) {
+    /* Đảm bảo các toolbar không bị đè lên nhau */
+    .d-flex.justify-content-between,
+    .d-flex.justify-content-end {
+        flex-wrap: wrap !important;
+        gap: 0.5rem !important;
+    }
+
+    /* Đảm bảo bảng cuộn mượt mà trên mobile */
+    .table-responsive {
+        -webkit-overflow-scrolling: touch;
+    }
+}
+
+
+
 .table {
     --bs-table-bg: transparent;
     --bs-table-hover-bg: #f0f5fa;
@@ -745,3 +768,68 @@ body.login-shell {
 .generated-transition-icon-sm { width: 15px; }
 .generated-submission-path-cell { min-width: 260px; max-width: 520px; }
 .generated-submission-actions-cell { min-width: 300px; }
+
+/* ========================================================================= */
+/* PHASE 3: UX ENHANCEMENTS (Hover, Focus, Loading, Utilities)             */
+/* ========================================================================= */
+
+/* 1. Hệu ứng Hover & Focus */
+.app-card {
+    border: none !important;
+    box-shadow: 0 2px 4px rgba(7, 23, 57, 0.05);
+    border-radius: var(--app-radius);
+    transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+.app-card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(7, 23, 57, 0.1);
+}
+
+.table-hover tbody tr {
+    transition: background-color 0.15s ease;
+}
+.table-hover tbody tr:hover {
+    background-color: var(--app-primary-subtle) !important;
+}
+
+.btn {
+    transition: transform 0.1s ease, box-shadow 0.15s ease, background-color 0.15s ease;
+}
+.btn:active {
+    transform: scale(0.97);
+}
+
+.form-control, .form-select {
+    transition: border-color 0.15s ease-in-out, box-shadow 0.15s ease-in-out;
+}
+.form-control:focus, .form-select:focus {
+    border-color: var(--app-focus);
+    box-shadow: 0 0 0 0.25rem rgba(91, 148, 199, 0.25);
+}
+
+/* 2. Skeleton Loading */
+@keyframes placeholderShimmer {
+    0% { background-position: -468px 0; }
+    100% { background-position: 468px 0; }
+}
+.skeleton-loader {
+    display: inline-block;
+    height: 1em;
+    width: 100%;
+    background: #f6f7f8;
+    background-image: linear-gradient(to right, #f6f7f8 0%, #edeef1 20%, #f6f7f8 40%, #f6f7f8 100%);
+    background-repeat: no-repeat;
+    background-size: 800px 104px;
+    animation: placeholderShimmer 1.5s linear infinite forwards;
+    border-radius: 4px;
+}
+.skeleton-table-row td {
+    border-color: transparent !important;
+}
+.skeleton-text {
+    height: 14px;
+    margin-bottom: 5px;
+}
+.skeleton-text.short {
+    width: 60%;
+}

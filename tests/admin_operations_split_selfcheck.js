@@ -15,7 +15,7 @@ assert(panel.includes('const ADMIN_GENERATED_PAGINATION_ACTIONS'));
 for (const page of ['frontend/admin.html', 'frontend/index.html', 'frontend/temp.html']) {
     const html = fs.readFileSync(page, 'utf8');
     const operationsIndex = html.indexOf('js/admin_operations.js?v=1.00');
-    const panelIndex = html.indexOf('js/admin_panel.js?v=203.03');
+    const panelIndex = html.indexOf('js/admin_panel.js?v=203.06');
     assert(operationsIndex >= 0, `${page} must load admin_operations.js.`);
     assert(panelIndex > operationsIndex, `${page} must load admin operations before admin panel events.`);
 }

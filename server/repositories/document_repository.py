@@ -1,6 +1,6 @@
 import os
 
-from sqlalchemy import case, exists, func, or_
+from sqlalchemy import case, exists, func
 from server.models import (
     AssignedDocument,
     AssignedDocumentFolder,
@@ -59,35 +59,6 @@ class DocumentRepository(BaseRepository[AssignedDocument]):
                 AssignedDocument.id.in_(document_ids),
             ).all()
         }
-
-    def reference_maps(
-        self,
-        *,
-        owner_id: int | None,
-        uuid_filenames: set[str],
-        original_filenames: set[str],
-    ) -> tuple[dict[str, AssignedDocument], dict[str, AssignedDocument]]:
-        """Resolve many PDF references while preserving newest-file semantics."""
-        if not uuid_filenames and not original_filenames:
-            return {}, {}
-        filters = []
-        if uuid_filenames:
-            filters.append(AssignedDocument.uuid_filename.in_(uuid_filenames))
-        if original_filenames:
-            filters.append(AssignedDocument.original_filename.in_(original_filenames))
-        query = self.session.query(AssignedDocument)
-        if owner_id is not None:
-            query = query.filter(AssignedDocument.assigned_to_user_id == owner_id)
-        rows = query.filter(or_(*filters)).order_by(
-            AssignedDocument.created_at.desc(),
-            AssignedDocument.id.desc(),
-        ).all()
-        by_uuid: dict[str, AssignedDocument] = {}
-        by_original: dict[str, AssignedDocument] = {}
-        for document in rows:
-            by_uuid.setdefault(document.uuid_filename, document)
-            by_original.setdefault(document.original_filename, document)
-        return by_uuid, by_original
 
     def get_path_and_folder(self, document_id: int) -> tuple[str | None, str | None]:
         path = self.session.query(AssignedDocumentPath).filter(
@@ -152,43 +123,6 @@ class DocumentRepository(BaseRepository[AssignedDocument]):
             AssignedDocument.id,
         ).all()
 
-    def metadata_backfill_rows(self) -> list[tuple]:
-        return self.session.query(
-            AssignedDocument.id,
-            AssignedDocument.assigned_to_user_id,
-            AssignedDocument.uuid_filename,
-            AssignedDocument.original_filename,
-            AssignedDocumentFolder.folder_group,
-        ).outerjoin(
-            AssignedDocumentFolder,
-            AssignedDocumentFolder.document_id == AssignedDocument.id,
-        ).order_by(
-            AssignedDocument.created_at.desc(),
-            AssignedDocument.id.desc(),
-        ).all()
-
-    def _legacy_pdf_sets(self) -> tuple[set[str], set[str]]:
-        """Parse legacy submissions (no assigned_document_id) and return
-        sets of (_pdf_uuid values, _pdf_filename values) for O(1) lookup."""
-        import json as _json
-        legacy_subs = self.session.query(Submission.data_json).filter(
-            Submission.assigned_document_id.is_(None)
-        ).all()
-        legacy_uuids: set[str] = set()
-        legacy_filenames: set[str] = set()
-        for (data_json,) in legacy_subs:
-            try:
-                data = _json.loads(data_json)
-            except (TypeError, ValueError):
-                continue
-            pdf_uuid = data.get("_pdf_uuid")
-            pdf_filename = data.get("_pdf_filename")
-            if pdf_uuid:
-                legacy_uuids.add(str(pdf_uuid))
-            if pdf_filename:
-                legacy_filenames.add(str(pdf_filename))
-        return legacy_uuids, legacy_filenames
-
     def list_input_queue(self, user_id: int) -> list[tuple]:
         all_docs = self.session.query(
             AssignedDocument,
@@ -216,36 +150,15 @@ class DocumentRepository(BaseRepository[AssignedDocument]):
         return all_docs
 
     def linked_pdf_uuids(self, user_id: int) -> set[str]:
-        all_docs = self.session.query(
-            AssignedDocument.id,
+        rows = self.session.query(
             AssignedDocument.uuid_filename,
-            AssignedDocument.original_filename
+        ).join(
+            Submission,
+            Submission.assigned_document_id == AssignedDocument.id,
         ).filter(
-            AssignedDocument.assigned_to_user_id == user_id
-        ).all()
-
-        if not all_docs:
-            return set()
-
-        doc_ids = [d.id for d in all_docs]
-        
-        subs_by_id = self.session.query(Submission.assigned_document_id).filter(
-            Submission.assigned_document_id.in_(doc_ids)
-        ).all()
-        submitted_doc_ids = {s.assigned_document_id for s in subs_by_id}
-
-        legacy_uuids, legacy_filenames = self._legacy_pdf_sets()
-
-        result = set()
-        for doc_id, uuid_filename, original_filename in all_docs:
-            if doc_id in submitted_doc_ids:
-                result.add(uuid_filename)
-            elif uuid_filename and uuid_filename in legacy_uuids:
-                result.add(uuid_filename)
-            elif original_filename and original_filename in legacy_filenames:
-                result.add(uuid_filename)
-                
-        return result
+            AssignedDocument.assigned_to_user_id == user_id,
+        ).distinct().all()
+        return {uuid_filename for (uuid_filename,) in rows if uuid_filename}
 
     def is_direct_reviewer(self, document_id: int, user_id: int) -> bool:
         return self.session.query(AssignedDocumentReviewAssignment.document_id).filter(

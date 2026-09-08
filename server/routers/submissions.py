@@ -36,7 +36,6 @@ from server.repositories.submission_view_repository import (
 )
 from server.services.submission_metadata_service import (
     apply_submission_metadata,
-    backfill_submission_metadata,
 )
 from server.services.submission_service import COMPLETED_WITHOUT_FOLDER, SubmissionService, _load_submission_document_metadata, _pdf_url
 from server.services.export_job_service import (
@@ -188,8 +187,6 @@ def api_get_submissions(
         if page_size < 1 or page_size > 100:
             raise HTTPException(status_code=400, detail="Số hồ sơ mỗi trang phải từ 1 đến 100")
             
-        backfill_submission_metadata(db)
-        
         return SubmissionService.get_paginated_submissions_payload(
             db=db,
             current_user=current_user,
@@ -217,7 +214,6 @@ def api_get_completed_folders(
     current_user: dict = Depends(get_admin_user),
     db: Session = Depends(get_db),
 ):
-    backfill_submission_metadata(db)
     count_rows, input_rows, template_rows = (
         SubmissionRepository(db).completed_folder_groups(
             template_id=template_id,
@@ -444,7 +440,6 @@ def api_get_next_review_submission(
     db: Session = Depends(get_db),
 ):
     """Return the next active review item in the same queue as ``current_id``."""
-    backfill_submission_metadata(db)
     ReviewWorkflowService.backfill_pending_review_assignments(db)
     submission_repository = SubmissionRepository(db)
     current = submission_repository.get(current_id)
@@ -530,11 +525,14 @@ def api_get_submission(sub_id: int, current_user: dict = Depends(get_current_use
             and not can_review
         ):
             raise HTTPException(status_code=403, detail="Không có quyền truy cập hồ sơ này.")
-        data_dict, document = SubmissionService.enrich_pdf_reference(
+        document_metadata = _load_submission_document_metadata([sub], db).get(
+            sub.assigned_document_id
+        )
+        document = document_metadata["document"] if document_metadata else None
+        data_dict = SubmissionService._enrich_pdf_reference_from_context(
             json.loads(sub.data_json),
-            db,
-            sub.created_by_user_id,
-            allow_unregistered=True,
+            document,
+            document_metadata,
         )
         quality = (
             SubmissionQualityService.detail_for_input_user(
@@ -1065,7 +1063,6 @@ def api_export(
         
         from server.services.excel_service import export_submissions_to_excel
         
-        backfill_submission_metadata(db)
         submissions = SubmissionRepository(db).approved_for_export(
             template_id=template_id,
             folder_path=folder_path,
@@ -1181,49 +1178,38 @@ def api_get_pdf_file(
 
     document_repository = DocumentRepository(db)
     review_repository = ReviewRepository(db)
-    submission_repository = SubmissionRepository(db)
     document = document_repository.get_by_uuid(safe_filename)
-    original_filename = document.original_filename if document else safe_filename
+    if not document:
+        raise HTTPException(status_code=404, detail="File không tồn tại")
+    original_filename = document.original_filename
 
-    if document:
-        if current_user["role"] != "admin":
-            # A document can be reviewed by a user who is not its input/owner
-            # (`assigned_to_user_id`).  The review assignment is the authority
-            # for opening the source PDF in that workflow.
-            is_assigned_reviewer = document_repository.is_direct_reviewer(
-                document.id,
-                current_user["id"],
-            )
-            folder_metadata = document_repository.get_folder(document.id)
-            is_folder_reviewer = False
-            if folder_metadata and folder_metadata.folder_group:
-                is_folder_reviewer = document_repository.is_folder_reviewer(
-                    folder_metadata.folder_group,
-                    current_user["id"],
-                )
-            is_submission_reviewer = review_repository.reviewer_has_linked_submission(
-                current_user["id"],
-                document.id,
-                safe_filename,
-            )
-            if (
-                document.assigned_to_user_id != current_user["id"]
-                and not is_assigned_reviewer
-                and not is_folder_reviewer
-                and not is_submission_reviewer
-            ):
-                raise HTTPException(status_code=403, detail="Không có quyền truy cập file")
-    else:
-        legacy_submission = submission_repository.latest_legacy_pdf_submission(
-            safe_filename,
-            None if current_user["role"] == "admin" else current_user["id"],
+    if current_user["role"] != "admin":
+        # A document can be reviewed by a user who is not its input/owner
+        # (`assigned_to_user_id`).  The review assignment is the authority
+        # for opening the source PDF in that workflow.
+        is_assigned_reviewer = document_repository.is_direct_reviewer(
+            document.id,
+            current_user["id"],
         )
-        if not legacy_submission:
-            raise HTTPException(status_code=404, detail="File không tồn tại")
-        legacy_data = json.loads(legacy_submission.data_json)
-        if os.path.basename(str(legacy_data.get("_pdf_uuid", ""))) != safe_filename:
-            raise HTTPException(status_code=404, detail="File không tồn tại")
-        original_filename = legacy_data.get("_pdf_filename") or safe_filename
+        folder_metadata = document_repository.get_folder(document.id)
+        is_folder_reviewer = False
+        if folder_metadata and folder_metadata.folder_group:
+            is_folder_reviewer = document_repository.is_folder_reviewer(
+                folder_metadata.folder_group,
+                current_user["id"],
+            )
+        is_submission_reviewer = review_repository.reviewer_has_linked_submission(
+            current_user["id"],
+            document.id,
+            safe_filename,
+        )
+        if (
+            document.assigned_to_user_id != current_user["id"]
+            and not is_assigned_reviewer
+            and not is_folder_reviewer
+            and not is_submission_reviewer
+        ):
+            raise HTTPException(status_code=403, detail="Không có quyền truy cập file")
 
     filepath = os.path.join(PDF_STORAGE_PATH, safe_filename)
     if not os.path.isfile(filepath):

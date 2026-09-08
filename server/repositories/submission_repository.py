@@ -412,29 +412,6 @@ class SubmissionRepository(BaseRepository[Submission]):
         )
         return query.order_by(Submission.id).all()
 
-    def has_missing_metadata(self) -> bool:
-        return self.session.query(Submission.id).filter(
-            Submission.folder_path_key.is_(None)
-        ).first() is not None
-
-    def missing_metadata_batch(self, last_id: int, batch_size: int) -> list[Submission]:
-        return self.session.query(Submission).filter(
-            Submission.id > last_id,
-            Submission.folder_path_key.is_(None),
-        ).order_by(Submission.id).limit(batch_size).all()
-
-    def latest_legacy_pdf_submission(
-        self,
-        safe_filename: str,
-        user_id: int | None,
-    ) -> Submission | None:
-        query = self.session.query(Submission).filter(
-            Submission.data_json.contains(safe_filename)
-        )
-        if user_id is not None:
-            query = query.filter(Submission.created_by_user_id == user_id)
-        return query.order_by(Submission.id.desc()).first()
-
     def delete(self, submission: Submission):
         self.session.delete(submission)
 

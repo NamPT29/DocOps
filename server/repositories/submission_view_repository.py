@@ -1,7 +1,6 @@
 import secrets
 from datetime import timedelta
 
-from sqlalchemy import inspect, text
 from sqlalchemy.orm import Session
 
 from server.models import Submission, SubmissionViewPresence, User
@@ -10,23 +9,6 @@ from server.database import get_utc_now
 
 VIEWER_PRESENCE_TIMEOUT = timedelta(seconds=90)
 VIEWER_PRESENCE_TIMEOUT_SECONDS = int(VIEWER_PRESENCE_TIMEOUT.total_seconds())
-
-
-def ensure_submission_view_schema(engine) -> None:
-    """Add the opaque lease token without rewriting existing presence rows."""
-    inspector = inspect(engine)
-    if "submission_view_presence" not in set(inspector.get_table_names()):
-        return
-    existing_columns = {
-        column["name"]
-        for column in inspector.get_columns("submission_view_presence")
-    }
-    if "lease_token" not in existing_columns:
-        with engine.begin() as connection:
-            connection.execute(text(
-                "ALTER TABLE submission_view_presence "
-                "ADD COLUMN lease_token VARCHAR(64) NULL"
-            ))
 
 
 class SubmissionViewRepository:

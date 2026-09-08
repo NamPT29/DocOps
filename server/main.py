@@ -16,7 +16,9 @@ from server.frontend_static import PublicFrontendStaticFiles, resolve_public_fro
 from server.http_middleware import configure_http_middleware
 from server.openapi import configure_openapi
 from server.release_info import APP_VERSION
+from server.migration_runner import migration_state
 from server.services.export_job_service import cleanup_stale_export_jobs
+from server.services.project_upload_service import cleanup_stale_project_uploads
 
 configure_logging(
     settings.log_dir,
@@ -32,48 +34,36 @@ def run_startup_maintenance() -> None:
         result = cleanup_stale_export_jobs()
     except Exception:
         logger.warning("Không thể dọn tác vụ xuất cũ khi khởi động", exc_info=True)
+    else:
+        logger.info(
+            "Dọn tác vụ xuất khi khởi động: cleaned=%d skipped=%d errors=%d",
+            result["cleaned"],
+            result["skipped"],
+            result["errors"],
+        )
+
+    try:
+        state = migration_state(engine)
+        if not state.ready:
+            logger.warning("Bỏ qua dọn phiên upload vì database chưa migrate")
+            return
+        with SessionLocal() as db:
+            upload_result = cleanup_stale_project_uploads(db)
+    except Exception:
+        logger.warning("Không thể dọn phiên upload cũ khi khởi động", exc_info=True)
         return
     logger.info(
-        "Dọn tác vụ xuất khi khởi động: cleaned=%d skipped=%d errors=%d",
-        result["cleaned"],
-        result["skipped"],
-        result["errors"],
+        "Dọn phiên upload khi khởi động: cleaned=%d skipped=%d errors=%d",
+        upload_result["cleaned"],
+        upload_result["skipped"],
+        upload_result["errors"],
     )
 
 
-@asynccontextmanager
-async def lifespan(_app: FastAPI):
-    run_startup_maintenance()
-    yield
-
-# Initialize database
-from server.database import Base, engine
-from server.models import Template, Dictionary, DictionaryItem
+from server.database import SessionLocal, engine
+from server.models import Template
 from server.routers.auth import init_admin
-from server.database import SessionLocal
-from server.services.submission_metadata_service import (
-    backfill_submission_metadata,
-    ensure_submission_metadata_schema,
-)
-from server.services.project_status_service import ensure_project_status_schema
-from server.services.submission_status_service import ensure_submission_status_schema
-from server.services.user_profile_service import ensure_user_profile_schema
-from server.repositories.submission_view_repository import ensure_submission_view_schema
-
-Base.metadata.create_all(bind=engine)
-ensure_submission_view_schema(engine)
-ensure_user_profile_schema(engine)
-ensure_submission_metadata_schema(engine)
-ensure_project_status_schema(engine)
-ensure_submission_status_schema(engine)
-with SessionLocal() as metadata_db:
-    backfill_submission_metadata(metadata_db)
-init_admin()
 from server.host_setup import HOST_CONFIG_PATH_ENV, consume_initial_admin_password
-
-host_config_path = os.environ.get(HOST_CONFIG_PATH_ENV)
-if host_config_path:
-    consume_initial_admin_password(host_config_path)
 
 # Seed the default template
 def seed_default_template():
@@ -88,12 +78,32 @@ def seed_default_template():
     finally:
         db.close()
 
-seed_default_template()
+
+def run_database_bootstrap() -> None:
+    state = migration_state(engine)
+    if not state.ready:
+        logger.warning(
+            "Bỏ qua bootstrap dữ liệu vì database chưa migrate: current=%s expected=%s",
+            state.current or "<none>",
+            state.expected,
+        )
+        return
+    init_admin()
+    host_config_path = os.environ.get(HOST_CONFIG_PATH_ENV)
+    if host_config_path:
+        consume_initial_admin_password(host_config_path)
+    seed_default_template()
+
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    run_startup_maintenance()
+    run_database_bootstrap()
+    yield
 
 OPENAPI_TAGS = [
     {"name": "auth", "description": "Sign-in and account administration."},
     {"name": "templates", "description": "Template management and configuration."},
-    {"name": "tasks", "description": "Background processing tasks."},
     {"name": "submissions", "description": "Submission intake, review, and export."},
     {"name": "documents", "description": "Document and folder operations."},
     {"name": "processing", "description": "Template field processing."},
@@ -123,10 +133,9 @@ register_exception_handlers(app)
 configure_http_middleware(app, settings.cors_origins)
 
 # Include routers
-from server.routers import auth, templates, tasks, submissions, documents, processing, dictionaries, notifications, projects, project_uploads
+from server.routers import auth, templates, submissions, documents, processing, dictionaries, notifications, projects, project_uploads
 app.include_router(auth.router)
 app.include_router(templates.router)
-app.include_router(tasks.router)
 app.include_router(submissions.router)
 app.include_router(documents.router)
 app.include_router(processing.router)
@@ -167,7 +176,22 @@ def health_ready():
             status_code=503,
             content={"status": "not-ready", "version": APP_VERSION},
         )
-    return {"status": "ready", "version": APP_VERSION}
+    state = migration_state(engine)
+    if not state.ready:
+        return JSONResponse(
+            status_code=503,
+            content={
+                "status": "not-ready",
+                "version": APP_VERSION,
+                "database_revision": state.current,
+                "expected_database_revision": state.expected,
+            },
+        )
+    return {
+        "status": "ready",
+        "version": APP_VERSION,
+        "database_revision": state.current,
+    }
 
 @app.get("/")
 def serve_index():

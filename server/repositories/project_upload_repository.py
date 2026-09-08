@@ -63,6 +63,15 @@ class ProjectUploadRepository:
             .first()
         )
 
+    def lock_session_files(self, session_id):
+        return (
+            self.session.query(ProjectUploadFile)
+            .filter(ProjectUploadFile.session_id == session_id)
+            .order_by(ProjectUploadFile.id)
+            .with_for_update()
+            .all()
+        )
+
     def count_session_files_by_status(self, session_id, status):
         return (
             self.session.query(func.count(ProjectUploadFile.id))
@@ -72,6 +81,21 @@ class ProjectUploadRepository:
             )
             .scalar()
             or 0
+        )
+
+    def list_open_sessions_with_latest_file_activity(self):
+        return (
+            self.session.query(
+                ProjectUploadSession,
+                func.max(ProjectUploadFile.updated_at).label("latest_file_activity"),
+            )
+            .outerjoin(
+                ProjectUploadFile,
+                ProjectUploadFile.session_id == ProjectUploadSession.id,
+            )
+            .filter(ProjectUploadSession.status.notin_(("completed", "cancelled")))
+            .group_by(ProjectUploadSession.id)
+            .all()
         )
 
     def asset_identities(self, project_id):

@@ -186,9 +186,6 @@ async function fetchSubmissions(page = 1) {
         if (sub.status === 'pending_review') statusBadge = '<span class="badge bg-warning text-dark"><i class="fas fa-hourglass-half"></i> Chờ duyệt</span>';
         else if (sub.status === 'pending_input_confirmation') statusBadge = '<span class="badge bg-info text-dark"><i class="fas fa-user-check"></i> Chờ người nhập xác nhận</span>';
         else if (sub.status === 'completed') statusBadge = '<span class="badge bg-success"><i class="fas fa-check-circle"></i> Hoàn thành</span>';
-        if (isReviewTab && sub.is_reviewer_assigned === false) {
-            statusBadge += '<span class="badge bg-secondary ms-1"><i class="fas fa-user-clock"></i> Chưa phân người kiểm</span>';
-        }
         else statusBadge = '<span class="badge bg-secondary"><i class="fas fa-save"></i> Lưu nháp</span>';
 
         tr.innerHTML = `
@@ -348,7 +345,23 @@ async function selectReviewFolder(folderPath, page = 1, rerenderTree = true) {
     const title = document.getElementById('selectedReviewFolderTitle');
     if (title) title.textContent = folderPath === '__ROOT__' ? 'Thư mục gốc' : folderPath;
     const tbody = document.getElementById('reviewTableBody');
-    if (tbody) tbody.innerHTML = '<tr><td colspan="6" class="text-center">Đang tải báo cáo trong folder...</td></tr>';
+    if (tbody) tbody.innerHTML = `
+        <tr class="skeleton-table-row">
+            <td><div class="skeleton-loader skeleton-text"></div></td>
+            <td><div class="skeleton-loader skeleton-text"></div></td>
+            <td><div class="skeleton-loader skeleton-text"></div></td>
+            <td><div class="skeleton-loader skeleton-text"></div></td>
+            <td><div class="skeleton-loader skeleton-text"></div></td>
+            <td><div class="skeleton-loader skeleton-text"></div></td>
+        </tr>
+        <tr class="skeleton-table-row">
+            <td><div class="skeleton-loader skeleton-text"></div></td>
+            <td><div class="skeleton-loader skeleton-text"></div></td>
+            <td><div class="skeleton-loader skeleton-text"></div></td>
+            <td><div class="skeleton-loader skeleton-text"></div></td>
+            <td><div class="skeleton-loader skeleton-text"></div></td>
+            <td><div class="skeleton-loader skeleton-text"></div></td>
+        </tr>`;
 
     const url = new URL('/api/review-folder-submissions', window.location.origin);
     url.searchParams.set('folder_path', folderPath);
@@ -413,7 +426,25 @@ async function fetchCompletedSubmissions(page = 1, refreshFolders = Number(page)
                 ? 'Thư mục gốc'
                 : activeCompletedFolderPath;
     }
-    if (tbody) tbody.innerHTML = '<tr><td colspan="7" class="text-center">Đang tải hồ sơ trong folder...</td></tr>';
+    if (tbody) tbody.innerHTML = `
+        <tr class="skeleton-table-row">
+            <td><div class="skeleton-loader skeleton-text"></div></td>
+            <td><div class="skeleton-loader skeleton-text"></div></td>
+            <td><div class="skeleton-loader skeleton-text"></div></td>
+            <td><div class="skeleton-loader skeleton-text"></div></td>
+            <td><div class="skeleton-loader skeleton-text"></div></td>
+            <td><div class="skeleton-loader skeleton-text"></div></td>
+            <td><div class="skeleton-loader skeleton-text"></div></td>
+        </tr>
+        <tr class="skeleton-table-row">
+            <td><div class="skeleton-loader skeleton-text"></div></td>
+            <td><div class="skeleton-loader skeleton-text"></div></td>
+            <td><div class="skeleton-loader skeleton-text"></div></td>
+            <td><div class="skeleton-loader skeleton-text"></div></td>
+            <td><div class="skeleton-loader skeleton-text"></div></td>
+            <td><div class="skeleton-loader skeleton-text"></div></td>
+            <td><div class="skeleton-loader skeleton-text"></div></td>
+        </tr>`;
 
     let url = new URL('/api/submissions', window.location.origin);
     url.searchParams.set('status', 'completed');
@@ -542,6 +573,9 @@ function renderAdminSubmissionsTable(data, tbodyId, isReviewTab, pagination = nu
         if (sub.status === 'pending_review') statusBadge = '<span class="badge bg-warning text-dark"><i class="fas fa-hourglass-half"></i> Chờ duyệt</span>';
         else if (sub.status === 'pending_input_confirmation') statusBadge = '<span class="badge bg-info text-dark"><i class="fas fa-user-check"></i> Chờ người nhập xác nhận</span>';
         else if (sub.status === 'completed') statusBadge = '<span class="badge bg-success"><i class="fas fa-check-circle"></i> Hoàn thành</span>';
+        if (isReviewTab && sub.is_reviewer_assigned === false) {
+            statusBadge += '<span class="badge bg-secondary ms-1"><i class="fas fa-user-clock"></i> Chưa phân người kiểm</span>';
+        }
 
         const reviewTarget = isReviewTab ? '' : ' target="_blank"';
         let actions = `<a class="btn btn-sm btn-outline-primary" href="${safeSubmissionUrl}"${reviewTarget} title="Mở để kiểm tra và chỉnh sửa"><i class="fas fa-search"></i> Kiểm tra/Sửa</a>`;
@@ -615,7 +649,7 @@ function updateReviewConfirmationStatus(status, canConfirm = false, submissionSt
                 ? 'Nội dung đã được lưu và chuyển cho người nhập kiểm tra lại.'
             : (isSaving
                 ? 'Hệ thống đang lưu chỉnh sửa và xác nhận kiểm duyệt.'
-                : 'Tích xác nhận để lưu chỉnh sửa; hồ sơ không đổi sẽ hoàn thành ngay.'));
+                : 'Nhấn “Lưu kết quả kiểm tra”; hồ sơ không đổi sẽ hoàn thành ngay.'));
     }
 }
 
@@ -790,6 +824,7 @@ function bindSubmissionViewLifecycle() {
     if (typeof window === 'undefined' || window.__submissionViewLifecycleBound) return;
     window.__submissionViewLifecycleBound = true;
     window.addEventListener('pagehide', stopSubmissionView);
+    document.addEventListener('hidden.bs.modal', stopSubmissionView);
 }
 
 async function renewSubmissionView(submissionId) {
@@ -1005,12 +1040,25 @@ async function editSubmission(id, isCopied = false) {
             res.submission_status,
         );
 
-        // Việc lưu nội dung kiểm duyệt được thực hiện bởi ô xác nhận riêng.
+        // Một lần lưu vừa ghi nội dung vừa kết thúc bước kiểm tra. Máy chủ tự
+        // quyết định hoàn thành ngay hay trả hồ sơ cho người nhập.
         const draftBtn = document.getElementById('draftBtn');
-        if (draftBtn) draftBtn.classList.add('d-none');
+        if (draftBtn) {
+            draftBtn.classList.toggle('d-none', !reviewEditMode);
+            if (reviewEditMode) {
+                draftBtn.innerHTML = '<i class="fas fa-save"></i> Lưu kết quả kiểm tra';
+            }
+        }
         const btnSubmit = document.getElementById('submitBtn');
         if (btnSubmit) btnSubmit.classList.add('d-none');
-        if (actionBtns) actionBtns.classList.add('d-none');
+        if (actionBtns) actionBtns.classList.toggle('d-none', !reviewEditMode);
+        const reviewCheckbox = document.getElementById('reviewConfirmCheckbox');
+        const reviewCheckboxControl = reviewCheckbox && reviewCheckbox.closest
+            ? reviewCheckbox.closest('.form-check')
+            : null;
+        if (reviewCheckboxControl) {
+            reviewCheckboxControl.classList.toggle('d-none', reviewEditMode);
+        }
         if (readonlyNotice) {
             readonlyNotice.style.display = reviewEditMode ? 'none' : 'block';
             readonlyNotice.textContent = reviewEditMode

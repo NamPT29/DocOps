@@ -35,6 +35,15 @@ async function doLogin() {
         if (data.status === 'ok') {
             localStorage.setItem('token', data.token);
             localStorage.setItem('user', JSON.stringify(data.user));
+            localStorage.setItem('sessionLastActivityAt', String(Date.now()));
+            const idleMinutes = Number(data.session_idle_timeout_minutes);
+            if (Number.isFinite(idleMinutes) && idleMinutes > 0) {
+                localStorage.setItem('sessionIdleTimeoutMinutes', String(idleMinutes));
+            }
+            const closeGraceSeconds = Number(data.session_close_grace_seconds);
+            if (Number.isFinite(closeGraceSeconds) && closeGraceSeconds > 0) {
+                localStorage.setItem('sessionCloseGraceSeconds', String(closeGraceSeconds));
+            }
             window.location.href = data.user.role === 'admin' ? '/admin.html' : '/index.html';
             return;
         }
@@ -48,6 +57,11 @@ document.addEventListener('DOMContentLoaded', () => {
     const username = document.getElementById('loginUsername');
     const password = document.getElementById('loginPassword');
     const loginButton = document.getElementById('loginButton');
+    const authNotice = sessionStorage.getItem('authNotice');
+    if (authNotice) {
+        sessionStorage.removeItem('authNotice');
+        showLoginError(authNotice);
+    }
 
     if (username) username.focus();
     if (loginButton) loginButton.addEventListener('click', doLogin);

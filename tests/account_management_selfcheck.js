@@ -29,7 +29,11 @@ const sandbox = {
         setItem() {},
         removeItem() {},
     },
-    window: { location: { pathname: '/admin.html' } },
+    window: {
+        location: { pathname: '/admin.html' },
+        addEventListener() {},
+        setInterval() { return 1; },
+    },
     async fetch(url, options) {
         requests.push({ url, options });
         return { status: 200, async json() { return { status: 'ok', data: [] }; } };
@@ -45,7 +49,7 @@ sandbox.checkAuth();
     assert.equal(sandbox.userDisplayName({ full_name: ' ', username: 'worker' }), 'worker');
 
     await sandbox.createUser();
-    const request = requests.find(item => item.options.method === 'POST');
+    const request = requests.find(item => item.url === '/api/users');
     assert.equal(request.url, '/api/users');
     assert.equal(request.options.headers['Content-Type'], 'application/json');
     assert.deepEqual(JSON.parse(request.options.body), {

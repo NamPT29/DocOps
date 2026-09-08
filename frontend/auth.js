@@ -2,6 +2,158 @@ let currentUser = null;
 let currentToken = null;
 let adminUserData = [];
 
+const DEFAULT_SESSION_IDLE_TIMEOUT_MINUTES = 30;
+const SESSION_ACTIVITY_RECENT_MS = 90 * 1000;
+const SESSION_MONITOR_INTERVAL_MS = 10 * 1000;
+const SESSION_HEARTBEAT_INTERVAL_MS = 30 * 1000;
+const SESSION_CLOSE_SIGNAL_KEY = 'scanToExcelSessionCloseSignal';
+const APP_TAB_ID = window.sessionStorage?.getItem('scanToExcelAppTabId')
+    || window.crypto?.randomUUID?.()
+    || `tab-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+window.sessionStorage?.setItem('scanToExcelAppTabId', APP_TAB_ID);
+
+let lastUserActivityAt = Number(localStorage.getItem('sessionLastActivityAt')) || Date.now();
+let lastActivityPersistedAt = lastUserActivityAt;
+let lastSessionHeartbeatAt = 0;
+let sessionMonitorTimer = null;
+let sessionHeartbeatInFlight = false;
+let sessionTrackingStarted = false;
+let explicitLogoutInProgress = false;
+
+function sessionIdleTimeoutMs() {
+    const configured = Number(localStorage.getItem('sessionIdleTimeoutMinutes'));
+    const minutes = Number.isFinite(configured) && configured > 0
+        ? configured
+        : DEFAULT_SESSION_IDLE_TIMEOUT_MINUTES;
+    return minutes * 60 * 1000;
+}
+
+function persistSessionPolicy(data) {
+    const idleMinutes = Number(data?.session_idle_timeout_minutes);
+    if (Number.isFinite(idleMinutes) && idleMinutes > 0) {
+        localStorage.setItem('sessionIdleTimeoutMinutes', String(idleMinutes));
+    }
+    const closeGraceSeconds = Number(data?.session_close_grace_seconds);
+    if (Number.isFinite(closeGraceSeconds) && closeGraceSeconds > 0) {
+        localStorage.setItem('sessionCloseGraceSeconds', String(closeGraceSeconds));
+    }
+}
+
+function recordUserActivity() {
+    const now = Date.now();
+    lastUserActivityAt = now;
+    if (now - lastActivityPersistedAt >= 1000) {
+        localStorage.setItem('sessionLastActivityAt', String(now));
+        lastActivityPersistedAt = now;
+    }
+}
+
+function clearLocalSession(message) {
+    if (sessionMonitorTimer) window.clearInterval(sessionMonitorTimer);
+    sessionMonitorTimer = null;
+    currentToken = null;
+    currentUser = null;
+    localStorage.removeItem('token');
+    localStorage.removeItem('user');
+    localStorage.removeItem('sessionLastActivityAt');
+    localStorage.removeItem('sessionIdleTimeoutMinutes');
+    localStorage.removeItem('sessionCloseGraceSeconds');
+    if (message) sessionStorage.setItem('authNotice', message);
+}
+
+function expireLocalSession(message = 'Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.') {
+    if (explicitLogoutInProgress) return;
+    clearLocalSession(message);
+    if (!window.location.pathname.includes('login.html')) {
+        window.location.href = '/login.html';
+    }
+}
+
+async function sendSessionHeartbeat(userActive) {
+    if (!currentToken || sessionHeartbeatInFlight) return;
+    sessionHeartbeatInFlight = true;
+    try {
+        const response = await fetch('/api/session/heartbeat', {
+            method: 'POST',
+            headers: {
+                Authorization: `Bearer ${currentToken}`,
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ user_active: userActive === true }),
+            cache: 'no-store',
+        });
+        if (response.status === 401) {
+            expireLocalSession('Phiên đăng nhập đã bị thu hồi hoặc hết thời gian sử dụng.');
+            return;
+        }
+        if (response.ok) lastSessionHeartbeatAt = Date.now();
+    } catch (_error) {
+        // A temporary network failure must not erase a local draft. The server
+        // remains authoritative and the next request/heartbeat will re-check it.
+    } finally {
+        sessionHeartbeatInFlight = false;
+    }
+}
+
+function requestSessionClose() {
+    const token = currentToken || localStorage.getItem('token');
+    if (!token || explicitLogoutInProgress) return;
+    fetch('/api/session/closing', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+        keepalive: true,
+    }).catch(() => undefined);
+    localStorage.setItem(
+        SESSION_CLOSE_SIGNAL_KEY,
+        `${APP_TAB_ID}:${Date.now()}`,
+    );
+}
+
+function startSessionLifecycle() {
+    if (sessionTrackingStarted || !currentToken) return;
+    sessionTrackingStarted = true;
+    recordUserActivity();
+    ['pointerdown', 'keydown', 'input', 'scroll', 'touchstart'].forEach(eventName => {
+        document.addEventListener(eventName, recordUserActivity, {
+            capture: true,
+            passive: true,
+        });
+    });
+    document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible') {
+            recordUserActivity();
+            sendSessionHeartbeat(true);
+        }
+    });
+    window.addEventListener('storage', event => {
+        if (event.key !== SESSION_CLOSE_SIGNAL_KEY || !event.newValue) return;
+        // A surviving app tab cancels another tab's close request without
+        // extending the idle timer. Delaying avoids racing ahead of keepalive.
+        window.setTimeout(() => sendSessionHeartbeat(false), 750);
+        window.setTimeout(() => sendSessionHeartbeat(false), 2000);
+    });
+    window.addEventListener('pagehide', event => {
+        if (event.persisted || explicitLogoutInProgress) return;
+        requestSessionClose();
+    });
+    sendSessionHeartbeat(true);
+    sessionMonitorTimer = window.setInterval(() => {
+        const sharedActivityAt = Number(localStorage.getItem('sessionLastActivityAt')) || lastUserActivityAt;
+        const inactiveFor = Date.now() - Math.max(lastUserActivityAt, sharedActivityAt);
+        if (inactiveFor >= sessionIdleTimeoutMs()) {
+            expireLocalSession('Phiên đăng nhập đã tự thu hồi do không sử dụng trong thời gian cho phép.');
+            return;
+        }
+        if (
+            document.visibilityState === 'visible'
+            && inactiveFor <= SESSION_ACTIVITY_RECENT_MS
+            && Date.now() - lastSessionHeartbeatAt >= SESSION_HEARTBEAT_INTERVAL_MS
+        ) {
+            sendSessionHeartbeat(true);
+        }
+    }, SESSION_MONITOR_INTERVAL_MS);
+}
+
 function getOrCreateBrowserId() {
     const storageKey = 'scanToExcelBrowserId';
     let browserId = localStorage.getItem(storageKey);
@@ -78,6 +230,7 @@ function checkAuth() {
     if (token && userStr) {
         currentToken = token;
         currentUser = JSON.parse(userStr);
+        startSessionLifecycle();
         
         // Show user info if element exists
         const userInfo = document.getElementById('userInfoDisplay');
@@ -210,6 +363,8 @@ async function doLogin() {
         if (data.status === 'ok') {
             localStorage.setItem('token', data.token);
             localStorage.setItem('user', JSON.stringify(data.user));
+            localStorage.setItem('sessionLastActivityAt', String(Date.now()));
+            persistSessionPolicy(data);
             if (data.user.role === 'admin') {
                 window.location.href = '/admin.html';
             } else {
@@ -226,6 +381,8 @@ async function doLogin() {
 }
 
 function doLogout() {
+    explicitLogoutInProgress = true;
+    if (sessionMonitorTimer) window.clearInterval(sessionMonitorTimer);
     const tokenToRevoke = currentToken || localStorage.getItem('token');
     if (tokenToRevoke) {
         fetch('/api/logout', {
@@ -250,6 +407,9 @@ function doLogout() {
     }
     localStorage.removeItem('token');
     localStorage.removeItem('user');
+    localStorage.removeItem('sessionLastActivityAt');
+    localStorage.removeItem('sessionIdleTimeoutMinutes');
+    localStorage.removeItem('sessionCloseGraceSeconds');
     window.location.href = '/login.html';
 }
 
@@ -260,7 +420,7 @@ async function authFetch(url, options = {}) {
     }
     const res = await fetch(url, options);
     if (res.status === 401) {
-        doLogout();
+        expireLocalSession('Phiên đăng nhập đã bị thu hồi hoặc hết thời gian sử dụng.');
         return null;
     }
     return res;

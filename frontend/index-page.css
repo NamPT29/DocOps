@@ -1,107 +1,3 @@
-#submissionsTableBody tr.table-success > * {
-    --bs-table-bg-state: #b7e4c7;
-    background-color: #b7e4c7 !important;
-    box-shadow: inset 4px 0 0 #198754;
-}
-
-#submissionsTableBody tr.submission-quality-changed > *,
-#reviewTableBody tr.submission-quality-changed > * {
-    --bs-table-bg-state: #fff3cd;
-    background-color: #fff3cd !important;
-    box-shadow: inset 4px 0 0 #ffc107;
-}
-
-#submissionsTableBody tr.submission-quality-error > *,
-#reviewTableBody tr.submission-quality-error > * {
-    --bs-table-bg-state: #f8d7da;
-    background-color: #f8d7da !important;
-    box-shadow: inset 4px 0 0 #dc3545;
-}
-
-.review-history-changed-field .form-label {
-    color: #b02a37;
-}
-
-.review-history-changed-field .form-control {
-    border-color: #dc3545 !important;
-    background-color: #fff5f5 !important;
-    box-shadow: 0 0 0 0.18rem rgba(220, 53, 69, 0.14);
-}
-
-.review-history-corrected-field .form-label {
-    color: #146c43;
-}
-
-.review-history-corrected-field .form-control {
-    border-color: #198754 !important;
-    background-color: #f0fff4 !important;
-    box-shadow: 0 0 0 0.18rem rgba(25, 135, 84, 0.14);
-}
-
-body {
-    background-color: #f8f9fa;
-}
-
-.navbar {
-    background-color: #0d6efd;
-    color: white;
-}
-
-.form-section {
-    background: white;
-    border-radius: 8px;
-    padding: 20px;
-    margin-bottom: 20px;
-    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
-}
-
-.form-section-title {
-    color: #0d6efd;
-    border-bottom: 2px solid #0d6efd;
-    padding-bottom: 10px;
-    margin-bottom: 20px;
-    font-weight: bold;
-}
-
-.autocomplete-items {
-    position: absolute;
-    border: 1px solid #d4d4d4;
-    border-bottom: none;
-    border-top: none;
-    z-index: 99;
-    top: 100%;
-    left: 0;
-    right: 0;
-    max-height: 200px;
-    overflow-y: auto;
-    background-color: white;
-    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
-}
-
-.autocomplete-items div {
-    padding: 10px;
-    cursor: pointer;
-    border-bottom: 1px solid #d4d4d4;
-}
-
-.autocomplete-items div:hover {
-    background-color: #e9e9e9;
-}
-
-.autocomplete-active {
-    background-color: #0d6efd !important;
-    color: #ffffff;
-}
-
-.position-relative {
-    position: relative;
-}
-
-#loading {
-    text-align: center;
-    margin-top: 50px;
-    font-size: 1.2rem;
-}
 
 #userInfoDisplay,
 #templateSelectContainer,
@@ -115,14 +11,63 @@ body {
     z-index: 1;
 }
 
-.index-file-queue-scroll {
-    height: 75vh;
-    overflow-y: auto;
+/* Desktop Layout (Flexbox) */
+@media (min-width: 992px) {
+    .index-sticky-pane {
+        height: calc(100vh - 160px);
+        display: flex;
+        flex-direction: column;
+    }
+
+    .index-sticky-pane > .row {
+        flex: 1;
+        min-height: 0;
+    }
+
+    #fileSidebar, #pdfViewerCol {
+        display: flex;
+        flex-direction: column;
+        height: 100%;
+    }
+
+    .index-file-queue-scroll {
+        flex: 1;
+        overflow-y: auto;
+        min-height: 0;
+    }
+
+    #pdfViewerContainer {
+        flex: 1;
+        overflow: hidden;
+        min-height: 0;
+    }
+
+    .index-form-scroll {
+        height: calc(100vh - 160px);
+        overflow-y: auto;
+        overflow-x: hidden;
+        padding-right: 15px;
+        padding-left: 5px;
+    }
 }
 
-#pdfViewerContainer {
-    height: 85vh;
-    overflow: hidden;
+/* Mobile/Tablet Layout */
+@media (max-width: 991px) {
+    .index-file-queue-scroll {
+        max-height: 300px;
+        overflow-y: auto;
+    }
+
+    #pdfViewerContainer {
+        height: 50vh; /* Ngắn lại để không đẩy form xuống quá sâu */
+        overflow: hidden;
+    }
+
+    .index-form-scroll {
+        height: auto;
+        overflow: visible;
+        padding-top: 20px;
+    }
 }
 
 #pdfIframe {
@@ -130,15 +75,6 @@ body {
     height: 100%;
     display: none;
 }
-
-.index-form-scroll {
-    height: 85vh;
-    overflow-y: auto;
-    overflow-x: hidden;
-    padding-right: 15px;
-    padding-left: 5px;
-}
-
 #reviewConfirmCheckbox,
 label[for="reviewConfirmCheckbox"] {
     cursor: pointer;

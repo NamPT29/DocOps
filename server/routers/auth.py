@@ -26,9 +26,11 @@ from server.services.auth_session_service import (
     create_login_session,
     enforce_session_limit,
     get_authenticated_user,
+    mark_session_closing,
     normalize_session_limit,
     revoke_session,
     revoke_user_sessions,
+    touch_session_activity,
 )
 from server.settings import settings
 
@@ -38,7 +40,7 @@ logger = logging.getLogger("server.auth")
 SECRET_KEY = settings.secret_key
 
 ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = 1440 # 24 hours
+ACCESS_TOKEN_EXPIRE_MINUTES = settings.access_token_expire_minutes
 def _create_login_rate_limiter():
     if not settings.redis_url:
         return DatabaseLoginRateLimiter(
@@ -120,7 +122,13 @@ def get_current_user(
         raise HTTPException(status_code=401, detail="Invalid token")
 
     session_id = payload.get("sid")
-    user = get_authenticated_user(db, user_id=user_id, session_id=session_id)
+    user = get_authenticated_user(
+        db,
+        user_id=user_id,
+        session_id=session_id,
+        idle_timeout_minutes=settings.session_idle_timeout_minutes,
+        close_grace_seconds=settings.session_close_grace_seconds,
+    )
     if not user and not UserRepository(db).get(user_id):
         raise HTTPException(status_code=401, detail="User no longer exists")
     if not user:
@@ -312,6 +320,8 @@ def api_login(
             user=user,
             browser_id=browser_id,
             expires_at=expire,
+            idle_timeout_minutes=settings.session_idle_timeout_minutes,
+            close_grace_seconds=settings.session_close_grace_seconds,
         )
     except ConcurrentSessionLimitReached as exc:
         db.rollback()
@@ -347,7 +357,13 @@ def api_login(
         samesite="lax",
     )
 
-    return {"status": "ok", "token": token, "user": user_data}
+    return {
+        "status": "ok",
+        "token": token,
+        "user": user_data,
+        "session_idle_timeout_minutes": settings.session_idle_timeout_minutes,
+        "session_close_grace_seconds": settings.session_close_grace_seconds,
+    }
 
 
 @router.post("/logout")
@@ -362,6 +378,49 @@ def api_logout(
     )
     db.commit()
     return {"status": "ok"}
+
+
+class SessionHeartbeatRequest(BaseModel):
+    user_active: bool = False
+
+
+@router.post("/session/heartbeat")
+def api_session_heartbeat(
+    req: SessionHeartbeatRequest,
+    current_user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    touched = touch_session_activity(
+        db,
+        user_id=current_user["id"],
+        session_id=current_user.get("session_id"),
+        user_active=req.user_active,
+        touch_interval_seconds=settings.session_activity_touch_interval_seconds,
+    )
+    if touched:
+        db.commit()
+    return {
+        "status": "ok",
+        "idle_timeout_minutes": settings.session_idle_timeout_minutes,
+    }
+
+
+@router.post("/session/closing", status_code=202)
+def api_mark_session_closing(
+    current_user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    marked = mark_session_closing(
+        db,
+        user_id=current_user["id"],
+        session_id=current_user.get("session_id"),
+    )
+    if marked:
+        db.commit()
+    return {
+        "status": "closing",
+        "grace_seconds": settings.session_close_grace_seconds,
+    }
 
 class CreateUserRequest(BaseModel):
     username: str

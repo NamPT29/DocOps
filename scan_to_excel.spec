@@ -50,6 +50,8 @@ a = Analysis(
     datas=[
         ('frontend', 'frontend'),
         ('Caddyfile', '.'),
+        ('alembic.ini', '.'),
+        ('migrations', 'migrations'),
     ],
     hiddenimports=[
         'uvicorn.logging',
@@ -67,6 +69,10 @@ a = Analysis(
         'wizard',
         'psycopg',
         'psycopg.pq',
+        'alembic',
+        'alembic.command',
+        'alembic.config',
+        'alembic.runtime.migration',
     ],
     hookspath=[],
     hooksconfig={},

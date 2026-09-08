@@ -5,7 +5,7 @@ const vm = require('vm');
 const root = path.join(__dirname, '..');
 const html = fs.readFileSync(path.join(root, 'frontend', 'index.html'), 'utf8');
 const script = fs.readFileSync(path.join(root, 'frontend', 'js', 'admin_panel.js'), 'utf8');
-const css = fs.readFileSync(path.join(root, 'frontend', 'index-page.css'), 'utf8');
+const css = fs.readFileSync(path.join(root, 'frontend', 'windows-ui.css'), 'utf8');
 
 function assert(condition, message) {
     if (!condition) throw new Error(message);
@@ -31,9 +31,9 @@ assert(
 );
 
 assert(css.includes('tr.submission-quality-changed > *'), 'Missing changed-row CSS.');
-assert(css.includes('background-color: #fff3cd'), 'Changed rows are not yellow.');
+assert(css.includes('background-color: var(--app-warning-bg)'), 'Changed rows do not use the warning palette.');
 assert(css.includes('tr.submission-quality-error > *'), 'Missing error-row CSS.');
-assert(css.includes('background-color: #f8d7da'), 'Error reports are not red.');
+assert(css.includes('background-color: var(--app-danger-bg)'), 'Error reports do not use the danger palette.');
 
 const helperStart = script.indexOf('function hasSubmissionQualityChanges');
 const helperEnd = script.indexOf('async function fetchSubmissions', helperStart);

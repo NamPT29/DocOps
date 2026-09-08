@@ -11,7 +11,7 @@ assert(!/<script\b(?![^>]*\bsrc\s*=)[^>]*>/i.test(html), 'Login page must not co
 assert(!/\bon[a-z]+\s*=/i.test(html), 'Login page must not contain inline event handlers.');
 assert(!/<style\b/i.test(html), 'Login page must not contain inline style elements.');
 assert(!/\bstyle\s*=/i.test(html), 'Login page must not contain inline style attributes.');
-assert(/<script\s+src=["']login\.js\?v=2["']><\/script>/i.test(html), 'Login page must load its external script.');
+assert(/<script\s+src=["']login\.js\?v=[^"']+["']><\/script>/i.test(html), 'Login page must load its external script.');
 
 function element(initial = {}) {
     const listeners = {};
@@ -44,6 +44,10 @@ const context = {
     localStorage: {
         setItem(key, value) { storage.set(key, value); },
         getItem(key) { return storage.get(key); },
+    },
+    sessionStorage: {
+        getItem() { return null; },
+        removeItem() {},
     },
     window: { location: { href: '' } },
 };

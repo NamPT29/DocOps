@@ -7,7 +7,7 @@ const normalizedSource = source.replace(/\r\n/g, '\n');
 
 assert(!html.includes('id="exportAllBtn"'));
 assert(html.includes('id="projectExportStatus"'));
-assert(html.includes('auth.js?v=100.02'));
+assert(/src=["']auth\.js\?v=[^"']+["']/.test(html));
 assert(normalizedSource.includes("authFetch(\n            `/api/projects/${project.id}/export-jobs?${params.toString()}`"));
 assert(source.includes("authFetch(`/api/export-jobs/${jobId}`"));
 assert(source.includes("authFetch(`/api/export-jobs/${jobId}/download`"));

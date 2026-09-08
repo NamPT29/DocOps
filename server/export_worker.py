@@ -11,6 +11,7 @@ from sqlalchemy.exc import OperationalError
 load_dotenv()
 
 from server.database import SessionLocal
+from server.settings import settings
 from server.repositories import LookupRepository, SubmissionRepository
 from server.repositories.project_reporting_repository import ProjectReportingRepository
 from server.services.excel_service import export_submissions_to_excel
@@ -77,7 +78,7 @@ def run_export_job(args) -> int:
                     template = LookupRepository(db).get_template(args.template_id)
                     if not template:
                         raise RuntimeError("Không tìm thấy template mẫu")
-                    template_file_path = os.path.join("templates", template.filename)
+                    template_file_path = str(settings.template_storage_path / template.filename)
                     submissions = SubmissionRepository(db).approved_for_export(
                         template_id=args.template_id,
                         folder_path=args.folder_path,
@@ -142,7 +143,7 @@ def run_export_job(args) -> int:
         release_export_lock(job_id)
 
 
-def parse_args():
+def parse_args(argv: list[str] | None = None):
     parser = argparse.ArgumentParser()
     parser.add_argument("--job-id", required=True)
     parser.add_argument("--template-id", required=True, type=int)
@@ -152,7 +153,7 @@ def parse_args():
     parser.add_argument("--folder-path")
     parser.add_argument("--start-date")
     parser.add_argument("--end-date")
-    return parser.parse_args()
+    return parser.parse_args(argv)
 
 
 if __name__ == "__main__":

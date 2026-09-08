@@ -84,6 +84,10 @@ class Settings:
     document_upload_max_bytes: int
     login_max_failures: int
     login_failure_window_seconds: int
+    access_token_expire_minutes: int
+    session_idle_timeout_minutes: int
+    session_activity_touch_interval_seconds: int
+    session_close_grace_seconds: int
     heavy_api_rate_limit: int
     heavy_api_rate_window_seconds: int
     project_upload_chunk_rate_limit: int
@@ -177,6 +181,26 @@ class Settings:
                 source,
                 "LOGIN_FAILURE_WINDOW_SECONDS",
                 15 * 60,
+            ),
+            access_token_expire_minutes=_positive_int(
+                source,
+                "ACCESS_TOKEN_EXPIRE_MINUTES",
+                24 * 60,
+            ),
+            session_idle_timeout_minutes=_positive_int(
+                source,
+                "SESSION_IDLE_TIMEOUT_MINUTES",
+                30,
+            ),
+            session_activity_touch_interval_seconds=_positive_int(
+                source,
+                "SESSION_ACTIVITY_TOUCH_INTERVAL_SECONDS",
+                60,
+            ),
+            session_close_grace_seconds=_positive_int(
+                source,
+                "SESSION_CLOSE_GRACE_SECONDS",
+                30,
             ),
             heavy_api_rate_limit=_positive_int(source, "HEAVY_API_RATE_LIMIT", 240),
             heavy_api_rate_window_seconds=_positive_int(

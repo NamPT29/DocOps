@@ -8,6 +8,7 @@ import subprocess
 import sys
 import time
 import uuid
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -74,10 +75,11 @@ def read_export_job(job_id: str) -> dict | None:
 
 
 def update_export_job(job_id: str, **changes) -> dict:
-    payload = read_export_job(job_id) or {"job_id": _validate_job_id(job_id)}
-    payload.update(changes)
-    payload["updated_at"] = _utc_timestamp()
-    return write_export_job(job_id, payload)
+    with _file_guard(EXPORT_SCRATCH_DIR / "export_status.guard"):
+        payload = read_export_job(job_id) or {"job_id": _validate_job_id(job_id)}
+        payload.update(changes)
+        payload["updated_at"] = _utc_timestamp()
+        return write_export_job(job_id, payload)
 
 
 def public_export_job(payload: dict) -> dict:
@@ -103,6 +105,8 @@ def _process_is_running(pid: object) -> bool:
         return False
     if normalized_pid <= 0:
         return False
+    if os.name == "nt":
+        return _windows_process_is_running(normalized_pid)
     try:
         os.kill(normalized_pid, 0)
     except ProcessLookupError:
@@ -112,6 +116,54 @@ def _process_is_running(pid: object) -> bool:
     except OSError:
         return False
     return True
+
+
+def _windows_process_is_running(pid: int) -> bool:
+    import ctypes
+    from ctypes import wintypes
+
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+    kernel32.OpenProcess.restype = wintypes.HANDLE
+    kernel32.WaitForSingleObject.argtypes = [wintypes.HANDLE, wintypes.DWORD]
+    kernel32.WaitForSingleObject.restype = wintypes.DWORD
+    kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+    kernel32.CloseHandle.restype = wintypes.BOOL
+    # SYNCHRONIZE allows a zero-time wait without sending a signal to the worker.
+    handle = kernel32.OpenProcess(0x00100000, False, pid)
+    if not handle:
+        # ERROR_INVALID_PARAMETER means no such PID. Other errors (including
+        # access denied) are inconclusive: do not reclaim a possibly live job.
+        return ctypes.get_last_error() != 87
+    try:
+        return kernel32.WaitForSingleObject(handle, 0) != 0
+    finally:
+        kernel32.CloseHandle(handle)
+
+
+@contextmanager
+def _file_guard(path: Path):
+    """Serialize short filesystem transactions across threads and processes."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    # Keep this file permanently: unlinking it would allow two lock identities.
+    with path.open("a+b") as handle:
+        handle.seek(0)
+        if os.name == "nt":
+            import msvcrt
+
+            msvcrt.locking(handle.fileno(), msvcrt.LK_LOCK, 1)
+        else:
+            import fcntl
+
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            handle.seek(0)
+            if os.name == "nt":
+                msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+            else:
+                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
 
 
 def _active_export_job_is_stale(payload: dict) -> bool:
@@ -132,19 +184,13 @@ def _active_export_job_is_stale(payload: dict) -> bool:
     return age_seconds > _EXPORT_JOB_STARTUP_TIMEOUT_SECONDS
 
 
-def _acquire_export_lock(job_id: str) -> None:
-    EXPORT_SCRATCH_DIR.mkdir(parents=True, exist_ok=True)
-    for _attempt in range(2):
+def _acquire_export_lock(job_id: str, payload: dict) -> None:
+    with _file_guard(EXPORT_LOCK_PATH.with_suffix(".guard")):
         try:
-            descriptor = os.open(
-                EXPORT_LOCK_PATH,
-                os.O_CREAT | os.O_EXCL | os.O_WRONLY,
-            )
-        except FileExistsError:
-            try:
-                active_job_id = EXPORT_LOCK_PATH.read_text(encoding="utf-8").strip()
-            except OSError:
-                active_job_id = ""
+            active_job_id = EXPORT_LOCK_PATH.read_text(encoding="utf-8").strip()
+        except FileNotFoundError:
+            active_job_id = ""
+        if active_job_id:
             try:
                 active_job = read_export_job(active_job_id) if active_job_id else None
             except ValueError:
@@ -162,24 +208,20 @@ def _acquire_export_lock(job_id: str) -> None:
                     worker_pid=None,
                     message="Tác vụ xuất đã dừng ngoài dự kiến; khóa đã được thu hồi",
                 )
-            try:
-                EXPORT_LOCK_PATH.unlink()
-            except FileNotFoundError:
-                pass
-            continue
-        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
-            handle.write(job_id)
-        return
-    raise ExportJobBusyError()
+        # Publish the queued state while still holding the guard. A contender
+        # can never mistake a job being initialized for an abandoned lock.
+        write_export_job(job_id, payload)
+        EXPORT_LOCK_PATH.write_text(job_id, encoding="utf-8")
 
 
 def release_export_lock(job_id: str) -> None:
-    try:
-        active_job_id = EXPORT_LOCK_PATH.read_text(encoding="utf-8").strip()
-        if active_job_id == _validate_job_id(job_id):
-            EXPORT_LOCK_PATH.unlink()
-    except FileNotFoundError:
-        pass
+    with _file_guard(EXPORT_LOCK_PATH.with_suffix(".guard")):
+        try:
+            active_job_id = EXPORT_LOCK_PATH.read_text(encoding="utf-8").strip()
+            if active_job_id == _validate_job_id(job_id):
+                EXPORT_LOCK_PATH.unlink()
+        except FileNotFoundError:
+            pass
 
 
 def start_export_job(
@@ -194,7 +236,6 @@ def start_export_job(
     project_id: int | None = None,
 ) -> dict:
     job_id = uuid.uuid4().hex
-    _acquire_export_lock(job_id)
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     if project_id is not None:
         filename_prefix = "DuAn_TatCa" if include_pending_review else "DuAn_HoanChinh"
@@ -216,12 +257,12 @@ def start_export_job(
         "created_at": _utc_timestamp(),
         "updated_at": _utc_timestamp(),
     }
-    write_export_job(job_id, payload)
+    _acquire_export_lock(job_id, payload)
 
     command = [
         sys.executable,
-        "-m",
-        "server.export_worker",
+        *(["--export-worker"] if getattr(sys, "frozen", False)
+          else ["-m", "server.export_worker"]),
         "--job-id",
         job_id,
         "--template-id",
@@ -287,11 +328,15 @@ def _unlink_export_artifact(path: Path) -> bool:
 
 
 def cleanup_export_job(job_id: str) -> dict:
-    payload = read_export_job(job_id) or {}
+    normalized_job_id = _validate_job_id(job_id)
+    payload = read_export_job(normalized_job_id) or {}
     extension = payload.get("extension")
-    paths = [export_job_status_path(job_id), EXPORT_SCRATCH_DIR / f"export_job_{job_id}.log"]
-    if extension in {".xlsx", ".xlsm"}:
-        paths.append(export_job_output_path(job_id, extension))
+    paths = [EXPORT_SCRATCH_DIR / f"export_job_{normalized_job_id}.log"]
+    output_extensions = (extension,) if extension in {".xlsx", ".xlsm"} else (".xlsx", ".xlsm")
+    paths.extend(
+        export_job_output_path(normalized_job_id, output_extension)
+        for output_extension in output_extensions
+    )
     removed = 0
     retained = []
     for path in paths:
@@ -299,6 +344,12 @@ def cleanup_export_job(job_id: str) -> dict:
             removed += 1
         else:
             retained.append(str(path))
+    if not retained:
+        status_path = export_job_status_path(normalized_job_id)
+        if _unlink_export_artifact(status_path):
+            removed += 1
+        else:
+            retained.append(str(status_path))
     return {"removed": removed, "retained": retained}
 
 
@@ -309,7 +360,9 @@ def cleanup_stale_export_jobs(*, max_age_hours: int = 24) -> dict:
     A job is eligible for cleanup when its state is ``completed`` or ``error``
     **and** its ``updated_at`` timestamp is older than *max_age_hours*.
 
-    Jobs in ``queued`` or ``running`` state are **never** touched.
+    Active jobs are preserved while their worker is alive. Stale active jobs
+    are reconciled to ``error``; artifacts older than the retention window are
+    then removed in the same pass.
     """
     if max_age_hours <= 0:
         raise ValueError("Thời gian lưu tác vụ xuất phải lớn hơn 0 giờ")
@@ -336,11 +389,6 @@ def cleanup_stale_export_jobs(*, max_age_hours: int = 24) -> dict:
             skipped += 1
             continue
 
-        state = payload.get("state")
-        if state not in terminal_states:
-            skipped += 1
-            continue
-
         timestamp = payload.get("updated_at") or payload.get("created_at")
         try:
             updated_at = datetime.fromisoformat(
@@ -358,6 +406,28 @@ def cleanup_stale_export_jobs(*, max_age_hours: int = 24) -> dict:
         age_hours = (
             datetime.now(timezone.utc) - updated_at
         ).total_seconds() / 3600
+
+        state = payload.get("state")
+        if state in _ACTIVE_STATES:
+            if not _active_export_job_is_stale(payload):
+                skipped += 1
+                continue
+            update_export_job(
+                raw_job_id,
+                state="error",
+                worker_pid=None,
+                message="Tác vụ xuất đã dừng ngoài dự kiến khi máy chủ khởi động lại",
+            )
+            release_export_lock(raw_job_id)
+            if age_hours < max_age_hours:
+                skipped += 1
+                continue
+            state = "error"
+
+        if state not in terminal_states:
+            skipped += 1
+            continue
+
         if age_hours < max_age_hours:
             skipped += 1
             continue

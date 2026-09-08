@@ -27,7 +27,7 @@ assert(source.includes('activeSubmissionLeaseToken = payload.lease_token'));
 assert(!source.includes('Máy chủ không trả về mã khóa hồ sơ'));
 assert(source.includes('Rolling-deploy compatibility'));
 assert.match(source, /confirm-review[\s\S]*?headers: submissionLeaseHeaders/);
-assert.match(submissionSource, /review-content[\s\S]*?submissionLeaseHeaders/);
+assert.match(submissionSource, /confirm-review[\s\S]*?submissionLeaseHeaders/);
 assert.match(submissionSource, /input-confirmation[\s\S]*?submissionLeaseHeaders/);
 assert.match(projectSource, /toggle_check[\s\S]*?withSubmissionViewLease/);
 

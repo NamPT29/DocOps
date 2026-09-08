@@ -1,6 +1,7 @@
 fastapi
 uvicorn
 sqlalchemy
+alembic>=1.13,<2
 psycopg[binary]
 python-multipart
 pydantic

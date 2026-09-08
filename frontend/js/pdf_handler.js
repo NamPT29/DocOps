@@ -225,6 +225,7 @@ function appendQueueFileRow(fileQueueList, file, index) {
     btn.appendChild(statusBadge);
     btn.appendChild(icon);
     btn.appendChild(textSpan);
+    if (window.EmployeeOcr) window.EmployeeOcr.appendStatus(btn, file);
     btn.appendChild(removeBtn);
     if (iframeCurrentIndex === index) {
         btn.classList.add('active');
@@ -350,6 +351,7 @@ async function selectFileFromQueue(index, { allowSubmissionNavigation = true } =
     if (previousFile && typeof setActivePdfDraftFile === 'function') setActivePdfDraftFile(previousFile);
     if (previousFile && typeof saveFormDraft === 'function') saveFormDraft();
     const file = uploadedFilesQueue[index];
+    if (window.EmployeeOcr) window.EmployeeOcr.selectionStarted(file);
     const previousDraftIdentity = window.activePdfDraftIdentity || (typeof getPdfDraftIdentity === 'function'
         ? getPdfDraftIdentity(previousFile)
         : null);
@@ -412,6 +414,7 @@ async function selectFileFromQueue(index, { allowSubmissionNavigation = true } =
     renderFileQueue();
     
     // Only a deliberate click in the review queue may navigate to another
+    if (window.EmployeeOcr) void window.EmployeeOcr.selected(file);
     // submission. Programmatic selections while opening a review must stay on
     // the submission requested by the user.
     if (allowSubmissionNavigation && isEditingFromList && file.submission_id && typeof currentEditingId !== 'undefined' && currentEditingId != file.submission_id && typeof editSubmission === 'function') {
@@ -627,8 +630,15 @@ function loadReviewFolderFiles(folderFiles, selectedUuid) {
             'vi'
         )
     );
+    // Always select the fresh server-backed review entry. A persisted employee
+    // queue can contain the same UUID with an obsolete URL, which otherwise
+    // wins findIndex() and leaves reviewers/admins with an empty PDF frame.
     let selectedIndex = selectedUuid
-        ? uploadedFilesQueue.findIndex(file => String(file.uuid) === String(selectedUuid))
+        ? uploadedFilesQueue.findIndex(file =>
+            file.temporary_view === true
+            && normalizeQueuePath(file.folder_group) === folderPath
+            && String(file.uuid) === String(selectedUuid)
+        )
         : -1;
     if (selectedIndex < 0 && typeof currentEditingId !== 'undefined' && currentEditingId !== null) {
         selectedIndex = uploadedFilesQueue.findIndex(file =>

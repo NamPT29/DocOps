@@ -1,4 +1,3 @@
-import json
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
@@ -10,25 +9,13 @@ from server.repositories import (
     SubmissionRepository,
     UserRepository,
 )
-from server.services.submission_metadata_service import backfill_submission_metadata
 from server.utils.folder_utils import NO_FOLDER_SENTINEL, normalize_folder_path
 
 
 def _find_submission_document(db: Session, submission: Submission):
-    try:
-        data = json.loads(submission.data_json)
-    except (TypeError, ValueError, json.JSONDecodeError):
+    if submission.assigned_document_id is None:
         return None
-    uuid_filename = data.get("_pdf_uuid")
-    original_filename = data.get("_pdf_filename")
-    if not uuid_filename and not original_filename:
-        return None
-
-    return DocumentRepository(db).resolve_reference(
-        owner_id=submission.created_by_user_id,
-        uuid_filename=uuid_filename,
-        original_filename=original_filename,
-    )
+    return DocumentRepository(db).get(submission.assigned_document_id)
 
 
 def get_user_pending_assignment_folders(db: Session, user_id: int) -> list[dict]:
@@ -103,7 +90,6 @@ def execute_revoke_user_assignments(db: Session, target_user_id: int, assignment
                 status_code=400,
                 detail="Vui lòng chọn folder cần thu hồi",
             )
-        backfill_submission_metadata(db)
         groups = get_user_pending_assignment_folders(db, target_user_id)
         target_group = next(
             (

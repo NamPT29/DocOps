@@ -8,8 +8,8 @@
     <link href="vendor/bootstrap/css/bootstrap.min.css" rel="stylesheet">
     <!-- FontAwesome for Icons -->
     <link rel="stylesheet" href="vendor/fontawesome/css/all.min.css">
-    <link rel="stylesheet" href="index-page.css?v=1.00">
-    <link rel="stylesheet" href="windows-ui.css?v=10">
+    <link rel="stylesheet" href="index-page.css?v=1.01">
+    <link rel="stylesheet" href="windows-ui.css?v=11">
 </head>
 <body class="app-shell">
     <nav class="navbar navbar-expand-lg navbar-dark shadow-sm">
@@ -48,7 +48,7 @@
         <div class="tab-content" id="appTabsContent">
             <!-- FORM PANE -->
             <div class="tab-pane fade show active" id="form-pane" role="tabpanel">
-                <div class="card border-primary shadow-sm mb-3" id="employeeProjectCard">
+                <div class="card app-card mb-3" id="employeeProjectCard">
                     <div class="card-body py-3">
                         <div class="row align-items-center g-2">
                             <div class="col-md-7">
@@ -79,6 +79,11 @@
                                         <button class="btn btn-success fw-bold w-100" data-action="refreshEmployeeProjectQueue" id="btnFetchQueue">
                                             <i class="fas fa-sync-alt"></i> Làm mới tài liệu
                                         </button>
+                                        <button type="button" class="btn btn-primary fw-bold w-100" id="ocrStartButton">Nhận dạng</button>
+                                        <button type="button" class="btn btn-outline-primary fw-bold w-100" id="ocrResumeButton" hidden>Tiếp tục OCR</button>
+                                        <button type="button" class="btn btn-outline-secondary w-100" id="ocrPauseButton" hidden>Tạm dừng OCR</button>
+                                        <button type="button" class="btn btn-outline-secondary btn-sm w-100" id="ocrRetryButton">Nhận dạng lại PDF đang mở</button>
+                                        <div id="ocrQueueStatus" class="small text-muted" role="status">OCR trên máy này; kết quả cần được kiểm tra trước khi lưu nháp.</div>
                                     </div>
                                     <div class="border rounded bg-light mb-2 p-1 d-flex align-items-center" id="queueExplorerBreadcrumb">
                                         <button type="button" class="btn btn-sm btn-link text-decoration-none p-1 fw-semibold" data-action="openQueueFolder" title="Về danh sách folder">
@@ -140,7 +145,7 @@
                                         <input class="form-check-input" type="checkbox" id="reviewConfirmCheckbox" data-action="confirmReviewSubmission">
                                         <label class="form-check-label text-primary fw-bold" for="reviewConfirmCheckbox">Xác nhận kiểm duyệt</label>
                                     </div>
-                                    <small id="reviewConfirmationHelp" class="text-muted d-block mt-2">Tích xác nhận để lưu chỉnh sửa và chuyển cho người nhập kiểm tra lại.</small>
+                                    <small id="reviewConfirmationHelp" class="text-muted d-block mt-2">Nhấn “Lưu kết quả kiểm tra”; hồ sơ không đổi sẽ hoàn thành ngay.</small>
                                 </div>
                                 <div class="d-grid gap-2 mb-5 mt-4">
                                     <div class="row g-2" id="actionButtonsRow">
@@ -259,14 +264,17 @@
     <!-- Bootstrap JS Bundle -->
     <script src="vendor/bootstrap/js/bootstrap.bundle.min.js"></script>
     <script src="index-page.js?v=1.00"></script>
-    <script src="auth.js?v=101.00"></script>
+    <script src="auth.js?v=102.00"></script>
     <script src="js/pdf_link_state.js?v=1.00"></script>
-    <script src="js/pdf_handler.js?v=100.03"></script>
-    <script src="js/form_renderer.js?v=100.04"></script>
-    <script src="js/submission.js?v=100.03"></script>
+    <script src="js/pdf_handler.js?v=101.00"></script>
+    <script src="js/form_renderer.js?v=101.00"></script>
+    <script src="js/submission.js?v=100.04"></script>
     <script src="js/project_workspace.js?v=1.00"></script>
     <script src="js/admin_operations.js?v=1.00"></script>
-    <script src="js/admin_panel.js?v=203.03"></script>
-    <script src="app.js?v=100.00"></script>
+    <script src="js/admin_panel.js?v=203.06"></script>
+    <script src="js/ocr_image.js?v=2"></script>
+    <script src="vendor/tesseract/tesseract.min.js?v=1"></script>
+    <script src="js/employee_ocr.js?v=2"></script>
+    <script src="app.js?v=100.01"></script>
 </body>
 </html>

@@ -3,7 +3,7 @@ const fs = require('node:fs');
 const vm = require('node:vm');
 
 const html = fs.readFileSync('frontend/index.html', 'utf8');
-const css = fs.readFileSync('frontend/index-page.css', 'utf8');
+const css = fs.readFileSync('frontend/windows-ui.css', 'utf8');
 const rendererSource = fs.readFileSync('frontend/js/form_renderer.js', 'utf8');
 const submissionSource = fs.readFileSync('frontend/js/submission.js', 'utf8');
 
@@ -11,9 +11,9 @@ assert(html.includes('id="submissionUnreadBadge"'));
 assert(html.includes('id="submissionQualityLegend"'));
 assert(!/id="submissionUnreadBadge"[^>]+onclick=/i.test(html));
 assert(css.includes('.review-history-changed-field .form-control'));
-assert(css.includes('border-color: #dc3545'));
+assert(css.includes('border-color: #d68b95'));
 assert(css.includes('.review-history-corrected-field .form-control'));
-assert(css.includes('border-color: #198754'));
+assert(css.includes('border-color: #9bc6ad'));
 assert(submissionSource.includes('response.unread_review_count'));
 assert(submissionSource.includes('/input-confirmation'));
 assert(submissionSource.includes("window.addEventListener('load'"));

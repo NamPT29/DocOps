@@ -157,8 +157,8 @@ function populateColDropdowns() {
                     <td class="text-center"><input class="form-check-input unified-chk-date generated-checkbox-emphasis" type="checkbox" value="${col}" id="chk_date_${col}"></td>
                     <td class="text-center"><input class="form-check-input unified-chk-year generated-checkbox-emphasis" type="checkbox" value="${col}" id="chk_year_${col}"></td>
                     <td class="text-center"><input class="form-check-input unified-chk-cover generated-checkbox-emphasis" type="checkbox" value="${col}" id="chk_cover_${col}"></td>
-                    <td class="text-center"><input class="form-check-input unified-chk-required generated-checkbox-emphasis" type="checkbox" value="${col}" id="chk_required_${col}"></td>
-                    <td><input type="text" class="form-control form-control-sm placeholder-rule-text" data-col="${col}" placeholder="Nhập gợi ý..." maxlength="255"></td>
+                    <td class="text-center"><input class="form-check-input unified-chk-required generated-checkbox-emphasis" type="checkbox" value="${col}" id="chk_required_${col}" aria-label="Bắt buộc nhập ${escapeHTML(f.label)}"></td>
+                    <td><div class="d-flex align-items-center gap-2 text-nowrap"><input class="form-check-input unified-chk-ocr generated-checkbox-emphasis" type="checkbox" value="${col}" id="chk_ocr_${col}" aria-label="OCR ${escapeHTML(f.label)}"><button type="button" class="btn btn-sm btn-outline-primary ocr-region-button" data-col="${col}">Chọn vùng</button></div></td>
                 </tr>
             `;
         }).join('');
@@ -193,7 +193,9 @@ function populateDictDropdowns() {
 function resetVisualUi() {
     // Reset unified checkboxes and inputs
     document.querySelectorAll('.unified-chk-hidden, .unified-chk-ro, .unified-chk-date, .unified-chk-year, .unified-chk-cover, .unified-chk-required').forEach(cb => cb.checked = false);
-    document.querySelectorAll('.placeholder-rule-text').forEach(input => input.value = '');
+    document.querySelectorAll('.unified-chk-ocr').forEach(input => input.checked = false);
+    if (typeof resetOcrSample === 'function') resetOcrSample();
+    if (typeof refreshOcrButtons === 'function') refreshOcrButtons();
     
     document.getElementById('dictRulesBody').innerHTML = '<tr><td colspan="4" class="text-center text-muted">Chưa có luật nào</td></tr>';
     document.getElementById('syncRulesList').innerHTML = '';
@@ -234,12 +236,8 @@ function buildConfigFromUI() {
     currentConfigObj.error_report_threshold_percent = errorReportThreshold;
     if (errorThresholdInput) errorThresholdInput.value = String(errorReportThreshold);
     
-    currentConfigObj.placeholder_rules = Array.from(document.querySelectorAll('.placeholder-rule-text'))
-        .map(input => {
-            const col = parseInt(input.getAttribute('data-col'), 10);
-            return { col, text: input.value.trim() };
-        })
-        .filter(rule => Number.isInteger(rule.col) && rule.text.length > 0);
+    currentConfigObj.ocr_cols = getMultiValsByClass('unified-chk-ocr');
+    delete currentConfigObj.placeholder_rules;
     
     const coverFolderLevels = parseInt(document.getElementById('coverFolderLevels')?.value || '0', 10);
     currentConfigObj.cover_folder_level = Number.isInteger(coverFolderLevels) ? Math.min(20, Math.max(0, coverFolderLevels)) : 0;
@@ -290,15 +288,8 @@ function renderVisualUiFromJSON() {
         coverLevels.value = Number.isInteger(obj.cover_folder_level) ? String(Math.min(20, Math.max(0, obj.cover_folder_level))) : '0';
     }
 
-    const rules = Array.isArray(obj.placeholder_rules) ? obj.placeholder_rules : [];
-    document.querySelectorAll('.placeholder-rule-text').forEach(input => input.value = '');
-    rules.forEach(rule => {
-        const col = Number(rule.col);
-        const input = document.querySelector(`.placeholder-rule-text[data-col="${col}"]`);
-        if (input && typeof rule.text === 'string' && rule.text.trim()) {
-            input.value = rule.text.trim();
-        }
-    });
+    setMultiValsByClass('unified-chk-ocr', obj.ocr_cols);
+    if (typeof refreshOcrButtons === 'function') refreshOcrButtons();
 
     const linkedPath = obj.linked_pdf_path || {};
     const linkedPathEnabled = document.getElementById('linkedPdfPathEnabled');

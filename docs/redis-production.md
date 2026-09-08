@@ -29,6 +29,6 @@ về limiter cục bộ, để không làm yếu bảo vệ đa worker.
 
 ## Development
 
-`compose.yaml` tạo Redis chỉ trong mạng Docker nội bộ và không publish port
-ra host. Đây chỉ là cấu hình development; không dùng endpoint `redis://` đó
-cho production.
+Dự án không kèm cấu hình Docker Compose. Khi phát triển cục bộ, có thể bỏ trống
+`REDIS_URL` để dùng limiter trong bộ nhớ; chỉ cấu hình một Redis riêng khi cần
+kiểm thử nhiều worker.

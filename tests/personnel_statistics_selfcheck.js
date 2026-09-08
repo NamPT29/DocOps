@@ -41,7 +41,11 @@ const sandbox = {
         setItem() {},
         removeItem() {},
     },
-    window: { location: { pathname: '/admin.html', search: '', hash: '' } },
+    window: {
+        location: { pathname: '/admin.html', search: '', hash: '' },
+        addEventListener() {},
+        setInterval() { return 1; },
+    },
     async fetch(url) {
         requests.push(String(url));
         const payload = String(url) === '/api/users/personnel-stats'

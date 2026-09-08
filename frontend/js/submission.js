@@ -165,7 +165,7 @@ async function submitData(targetStatus = 'draft') {
         }
 
         let url = isReviewEdit
-            ? `/api/submissions/${currentEditingId}/review-content`
+            ? `/api/submissions/${currentEditingId}/confirm-review`
             : (isEditing ? `/api/submissions/${currentEditingId}` : '/api/submit');
         let method = isEditing ? 'PUT' : 'POST';
         
@@ -207,12 +207,25 @@ async function submitData(targetStatus = 'draft') {
         }
         
         if (res.status === 'ok') {
-            alert(isReviewEdit ? 'Đã lưu chỉnh sửa của người kiểm tra!' : 'Lưu thành công!');
-
             if (isReviewEdit) {
+                window.reviewApproved = true;
+                window.reviewEditMode = false;
+                const completedWithoutChanges = res.submission_status === 'completed';
+                if (typeof updateReviewConfirmationStatus === 'function') {
+                    updateReviewConfirmationStatus(
+                        completedWithoutChanges ? 'completed' : 'confirmed',
+                        false,
+                        res.submission_status || null,
+                    );
+                }
+                alert(completedWithoutChanges
+                    ? 'Đã lưu kiểm tra. Hồ sơ không có thay đổi và đã hoàn thành.'
+                    : 'Đã lưu chỉnh sửa và chuyển cho người nhập kiểm tra lại.');
                 await editSubmission(currentEditingId);
                 return;
             }
+
+            alert('Lưu thành công!');
             
             if (isEditing) {
                 cancelEdit();

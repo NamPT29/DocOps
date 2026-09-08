@@ -7,7 +7,8 @@
     <link href="vendor/bootstrap/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="vendor/fontawesome/css/all.min.css">
     <link rel="stylesheet" href="admin-page.css?v=1">
-    <link rel="stylesheet" href="windows-ui.css?v=10">
+    <link rel="stylesheet" href="ocr-config.css?v=1">
+    <link rel="stylesheet" href="windows-ui.css?v=11">
 </head>
 <body class="app-shell">
     <nav class="navbar navbar-expand-lg navbar-dark shadow-sm">
@@ -41,7 +42,7 @@
         <div class="tab-content">
             <!-- TAB DASHBOARD -->
             <div class="tab-pane fade show active" id="dashboard-pane" role="tabpanel" aria-labelledby="dashboard-tab">
-                <div class="card border-0 shadow-sm mb-3">
+                <div class="card app-card mb-3">
                     <div class="card-body">
                         <div class="row g-3 align-items-end">
                             <div class="col-sm-6 col-lg-3">
@@ -544,11 +545,12 @@
                                             <th class="text-center" title="Ép kiểu ngày tháng"><i class="fas fa-calendar text-info"></i> Ngày</th>
                                             <th class="text-center" title="Ép kiểu năm"><i class="fas fa-calendar-alt text-warning"></i> Năm</th>
                                             <th class="text-center" title="Giữ lại nội dung khi nộp form"><i class="fas fa-book text-primary"></i> Bìa hồ sơ</th>
-                                            <th class="text-center" title="Hiển thị mờ khi ô trống"><i class="fas fa-lightbulb text-success"></i> Chữ gợi ý (Placeholder)</th>
+                                            <th class="text-center" title="Yêu cầu nhập dữ liệu trước khi hoàn tất"><i class="fas fa-asterisk text-danger" aria-hidden="true"></i> Bắt buộc nhập</th>
+                                            <th class="text-center">OCR</th>
                                         </tr>
                                     </thead>
                                     <tbody id="unifiedColConfigBody">
-                                        <tr><td colspan="7" class="text-center text-muted">Đang tải danh sách cột...</td></tr>
+                                        <tr><td colspan="8" class="text-center text-muted">Đang tải danh sách cột...</td></tr>
                                     </tbody>
                                 </table>
                             </div>
@@ -862,16 +864,17 @@
 
     <!-- JS -->
     <script src="vendor/bootstrap/js/bootstrap.bundle.min.js"></script>
-    <script src="auth.js?v=101.00"></script>
+    <script src="auth.js?v=102.00"></script>
     <script src="js/pdf_link_state.js?v=1.00"></script>
-    <script src="js/pdf_handler.js?v=100.02"></script>
-    <script src="js/form_renderer.js?v=100.03"></script>
+    <script src="js/pdf_handler.js?v=100.04"></script>
+    <script src="js/form_renderer.js?v=100.06"></script>
     <script src="js/submission.js?v=100.03"></script>
     <script src="js/admin_operations.js?v=1.00"></script>
-    <script src="js/admin_panel.js?v=203.03"></script>
-    <script src="js/project_management.js?v=2.05"></script>
-    <script src="js/template_config.js?v=100.00"></script>
-    <script src="app.js?v=100.00"></script>
+    <script src="js/admin_panel.js?v=203.06"></script>
+    <script src="js/project_management.js?v=2.07"></script>
+    <script src="js/ocr_image.js?v=2"></script>
+    <script src="js/ocr_config.js?v=4"></script>
+    <script src="js/template_config.js?v=101.01"></script>
     <script src="admin-page.js?v=2"></script>
 </body>
 </html>

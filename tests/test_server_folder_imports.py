@@ -147,6 +147,7 @@ def test_my_queue_keeps_pdf_linked_to_draft_and_marks_it_entered(database_factor
     draft = Submission(
         data_json=json.dumps({"_pdf_uuid": document.uuid_filename}),
         created_by_user_id=user.id,
+        assigned_document_id=document.id,
         template_id=template.id,
         status="draft",
     )

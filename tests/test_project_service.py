@@ -28,7 +28,6 @@ from server.routers.projects import (
 )
 from server.services import project_service
 from server.services.project_service import create_project, list_projects, update_project_status
-from server.services.project_status_service import ensure_project_status_schema
 
 
 @pytest.fixture()
@@ -439,13 +438,3 @@ def test_project_cannot_complete_until_all_required_reports_are_completed(databa
     result = update_project_status(database, project_id=project.id, status="completed")
 
     assert result == {"id": project.id, "status": "completed"}
-
-
-def test_project_status_migration_normalizes_legacy_values(database):
-    _, _, _, project = create_ready_project(database)
-    database.query(Project).filter(Project.id == project.id).update({"status": "ready"})
-    database.commit()
-
-    ensure_project_status_schema(database.get_bind())
-
-    assert database.get(Project, project.id).status == "in_progress"

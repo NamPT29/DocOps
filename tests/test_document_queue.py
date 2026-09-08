@@ -1,9 +1,4 @@
-"""Tests for DocumentRepository.list_input_queue and linked_pdf_uuids.
-
-These functions filter out documents that already have submissions (either via
-assigned_document_id or via legacy JSON matching).  The optimisation replaces
-a giant‑string substring scan with parsed‑JSON set lookups.
-"""
+"""Tests for DocumentRepository.list_input_queue and linked_pdf_uuids."""
 
 import json
 import pytest
@@ -99,28 +94,6 @@ class TestListInputQueue:
         result = DocumentRepository(session).list_input_queue(uid)
         assert {row[0].uuid_filename for row in result} == {"aaa.pdf", "bbb.pdf"}
 
-    def test_keeps_docs_matched_by_legacy_uuid(self, db):
-        session, uid, tid = db
-        _add_document(session, uid, tid, "aaa.pdf", "file_a.pdf")
-        _add_document(session, uid, tid, "bbb.pdf", "file_b.pdf")
-        # Legacy submission references aaa.pdf by uuid but has no assigned_document_id
-        _add_submission(session, uid, tid, pdf_uuid="aaa.pdf")
-        session.commit()
-
-        result = DocumentRepository(session).list_input_queue(uid)
-        assert {row[0].uuid_filename for row in result} == {"aaa.pdf", "bbb.pdf"}
-
-    def test_keeps_docs_matched_by_legacy_filename(self, db):
-        session, uid, tid = db
-        _add_document(session, uid, tid, "aaa.pdf", "file_a.pdf")
-        _add_document(session, uid, tid, "bbb.pdf", "file_b.pdf")
-        # Legacy submission references file_a.pdf by original_filename
-        _add_submission(session, uid, tid, pdf_filename="file_a.pdf")
-        session.commit()
-
-        result = DocumentRepository(session).list_input_queue(uid)
-        assert {row[0].uuid_filename for row in result} == {"aaa.pdf", "bbb.pdf"}
-
     def test_entered_document_remains_in_queue(self, db):
         session, uid, tid = db
         doc = _add_document(session, uid, tid, "aaa.pdf", "file_a.pdf")
@@ -158,23 +131,14 @@ class TestLinkedPdfUuids:
         result = DocumentRepository(session).linked_pdf_uuids(uid)
         assert "aaa.pdf" in result
 
-    def test_includes_docs_matched_by_legacy_uuid(self, db):
+    def test_ignores_legacy_json_without_document_link(self, db):
         session, uid, tid = db
         _add_document(session, uid, tid, "aaa.pdf", "file_a.pdf")
         _add_submission(session, uid, tid, pdf_uuid="aaa.pdf")
         session.commit()
 
         result = DocumentRepository(session).linked_pdf_uuids(uid)
-        assert "aaa.pdf" in result
-
-    def test_includes_docs_matched_by_legacy_filename(self, db):
-        session, uid, tid = db
-        _add_document(session, uid, tid, "aaa.pdf", "file_a.pdf")
-        _add_submission(session, uid, tid, pdf_filename="file_a.pdf")
-        session.commit()
-
-        result = DocumentRepository(session).linked_pdf_uuids(uid)
-        assert "aaa.pdf" in result
+        assert "aaa.pdf" not in result
 
     def test_excludes_unlinked_docs(self, db):
         session, uid, tid = db

@@ -10,6 +10,7 @@ from sqlalchemy.orm import sessionmaker
 from server.database import Base
 from server.routers import submissions
 from server.services.submission_service import SubmissionService, _pdf_url
+from server.utils.folder_utils import folder_path_key
 from server.models import (
     AssignedDocument,
     AssignedDocumentFolder,
@@ -105,7 +106,7 @@ def test_enriches_report_with_authoritative_pdf_and_folder_paths():
     assert data['_folder_path'] == 'tlm/HOANHMO/001/0001'
 
 
-def test_submission_list_backfills_linked_pdf_path_for_legacy_draft():
+def test_submission_list_reads_pre_migrated_pdf_metadata_without_writing():
     engine = create_engine('sqlite:///:memory:')
     Base.metadata.create_all(bind=engine)
     test_session = sessionmaker(bind=engine)()
@@ -140,6 +141,9 @@ def test_submission_list_backfills_linked_pdf_path_for_legacy_draft():
                 template_id=3,
                 created_by_user_id=2,
                 status='draft',
+                assigned_document_id=7,
+                folder_path='tlm/HOANHMO/001/0002',
+                folder_path_key=folder_path_key('tlm/HOANHMO/001/0002'),
                 data_json=json.dumps({
                     '_pdf_filename': '001.pdf',
                     '_pdf_uuid': 'uuid_001.pdf',
@@ -147,6 +151,12 @@ def test_submission_list_backfills_linked_pdf_path_for_legacy_draft():
             ),
         ])
         test_session.commit()
+        before = test_session.get(Submission, 11)
+        metadata_before = (
+            before.assigned_document_id,
+            before.folder_path,
+            before.folder_path_key,
+        )
 
         result = submissions.api_get_submissions(
             current_user={'id': 2, 'role': 'user'},
@@ -159,6 +169,13 @@ def test_submission_list_backfills_linked_pdf_path_for_legacy_draft():
         assert result['data'][0]['reviewer_name'] == 'kiemduyet'
         assert result['data'][0]['pdf_relative_path'] == 'tlm/HOANHMO/001/0002/001.pdf'
         assert result['data'][0]['folder_path'] == 'tlm/HOANHMO/001/0002'
+        test_session.expire_all()
+        after = test_session.get(Submission, 11)
+        assert (
+            after.assigned_document_id,
+            after.folder_path,
+            after.folder_path_key,
+        ) == metadata_before
     finally:
         test_session.close()
 
@@ -192,6 +209,7 @@ def test_reviewer_gets_every_pdf_from_the_submission_folder():
             AssignedDocumentReviewAssignment(document_id=21, reviewer_user_id=3),
             Submission(
                 id=30, template_id=4, created_by_user_id=2, status='pending_review',
+                assigned_document_id=21,
                 data_json=json.dumps({
                     '_pdf_filename': 'form-1.pdf',
                     '_pdf_uuid': 'uuid-form-1.pdf',
@@ -244,6 +262,7 @@ def test_admin_opening_review_also_gets_every_pdf_from_the_folder():
             ),
             Submission(
                 id=42, created_by_user_id=2, status='pending_review',
+                assigned_document_id=41,
                 data_json=json.dumps({
                     '_pdf_filename': 'form.pdf',
                     '_pdf_uuid': 'admin-form.pdf',
@@ -310,24 +329,7 @@ def test_reviewer_opening_pending_submission_recovers_document_review_assignment
         test_session.close()
 
 
-def test_builds_url_for_manual_upload_uuid_without_assignment():
-    data, resolved = SubmissionService.enrich_pdf_reference(
-        {
-            '_pdf_filename': 'Hồ sơ.pdf',
-            '_pdf_uuid': 'uuid_Hồ sơ.pdf',
-        },
-        FakeDb(),
-        owner_id=2,
-        allow_unregistered=True,
-    )
-
-    assert resolved is None
-    assert data['_pdf_url'] == _pdf_url('uuid_Hồ sơ.pdf')
-    assert data['_pdf_url'] == '/api/files/uuid_H%E1%BB%93%20s%C6%A1.pdf'
-
-
-def test_file_download_rejects_another_user(tmp_path, monkeypatch):
-    monkeypatch.setattr(submissions, 'PDF_STORAGE_PATH', str(tmp_path))
+def test_file_download_rejects_another_user():
     document = SimpleNamespace(
         id=1,
         original_filename='private.pdf',
@@ -343,3 +345,21 @@ def test_file_download_rejects_another_user(tmp_path, monkeypatch):
         )
 
     assert error.value.status_code == 403
+
+
+def test_file_download_does_not_fallback_to_legacy_submission(monkeypatch):
+    legacy_submission = SimpleNamespace(data_json=json.dumps({
+        '_pdf_filename': 'legacy.pdf',
+        '_pdf_uuid': 'legacy-uuid.pdf',
+    }))
+    db = FakeDb(rows={Submission: legacy_submission})
+    monkeypatch.setattr(submissions.os.path, 'isfile', lambda _path: True)
+
+    with pytest.raises(HTTPException, match='File không tồn tại') as error:
+        submissions.api_get_pdf_file(
+            'legacy-uuid.pdf',
+            current_user={'id': 1, 'role': 'admin'},
+            db=db,
+        )
+
+    assert error.value.status_code == 404

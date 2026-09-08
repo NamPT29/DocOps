@@ -206,6 +206,12 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
 
 def main(argv: list[str] | None = None) -> int:
     configure_console_output()
+    if argv and argv[0] == "--export-worker":
+        os.chdir(get_resource_root())
+        prepare_runtime_environment()
+        from server.export_worker import parse_args, run_export_job
+
+        return run_export_job(parse_args(argv[1:]))
     args = _parse_args(argv)
     resource_root = get_resource_root()
     os.chdir(resource_root)

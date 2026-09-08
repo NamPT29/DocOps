@@ -43,6 +43,6 @@ assert.equal(threshold.value, '5');
 const adminHtml = fs.readFileSync('frontend/admin.html', 'utf8');
 assert(adminHtml.includes('id="errorReportThresholdPercent"'));
 assert(adminHtml.includes('min="1" max="100"'));
-assert(adminHtml.includes('js/template_config.js?v=100.00'));
+assert(/js\/template_config\.js\?v=[\d.]+/.test(adminHtml));
 
 console.log('Template quality threshold self-check: OK');

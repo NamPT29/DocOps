@@ -44,6 +44,16 @@ def db(tmp_path):
         engine.dispose()
 
 
+@pytest.fixture(autouse=True)
+def isolated_heavy_api_limiter(db, monkeypatch):
+    from server.services import api_rate_limit_service
+
+    limiter = api_rate_limit_service.DatabaseRateLimiter(
+        240, 60, session_factory=sessionmaker(bind=db.get_bind()),
+    )
+    monkeypatch.setattr(api_rate_limit_service, "heavy_api_rate_limiter", limiter)
+
+
 def add_user(db, username, *, role="user"):
     user = User(username=username, password="hash", role=role)
     db.add(user)
@@ -69,6 +79,14 @@ def assign_document(db, input_user, reviewer=None, *, filename="document.pdf"):
         )
     db.commit()
     return document
+
+
+def make_submission(*, document=None, folder_path=None, **kwargs):
+    if document is not None:
+        kwargs["assigned_document_id"] = document.id
+    kwargs["folder_path"] = folder_path
+    kwargs["folder_path_key"] = folder_path_key(folder_path)
+    return Submission(**kwargs)
 
 
 def current_user(user):
@@ -327,19 +345,25 @@ def test_completed_folders_filter_approved_submissions_and_excel_by_folder(db, m
             folder_group="00000000/004/0011",
         ),
     ])
-    first_approved = Submission(
+    first_approved = make_submission(
+        document=first_document,
+        folder_path="00000000/004/0011",
         template_id=template.id,
         created_by_user_id=author.id,
         data_json=f'{{"_pdf_uuid": "{first_document.uuid_filename}"}}',
         status="completed",
     )
-    second_approved = Submission(
+    second_approved = make_submission(
+        document=second_document,
+        folder_path="00000000/004/0012",
         template_id=template.id,
         created_by_user_id=author.id,
         data_json=f'{{"_pdf_uuid": "{second_document.uuid_filename}"}}',
         status="completed",
     )
-    pending = Submission(
+    pending = make_submission(
+        document=pending_document,
+        folder_path="00000000/004/0011",
         template_id=template.id,
         created_by_user_id=author.id,
         data_json=f'{{"_pdf_uuid": "{pending_document.uuid_filename}"}}',
@@ -403,7 +427,7 @@ def test_completed_folders_filter_approved_submissions_and_excel_by_folder(db, m
 
 def test_completed_folders_keep_approved_legacy_records_without_folder(db):
     author = add_user(db, "legacy-completed-author")
-    legacy = Submission(
+    legacy = make_submission(
         created_by_user_id=author.id,
         data_json='{"col_8": "Hồ sơ cũ"}',
         status="completed",
@@ -435,7 +459,9 @@ def test_completed_root_folder_keeps_root_folder_metadata(db):
         document_id=document.id,
         folder_group="__ROOT__",
     ))
-    approved = Submission(
+    approved = make_submission(
+        document=document,
+        folder_path="__ROOT__",
         created_by_user_id=author.id,
         data_json=f'{{"_pdf_uuid": "{document.uuid_filename}"}}',
         status="completed",
@@ -770,7 +796,9 @@ def test_admin_lists_and_revokes_one_input_folder_while_preserving_other_folders
             document_id=other_folder.id,
             folder_group="00000000/004/0013",
         ),
-        Submission(
+        make_submission(
+            document=blocked_first,
+            folder_path="00000000/004/0011",
             data_json=f'{{"_pdf_uuid": "{blocked_first.uuid_filename}"}}',
             created_by_user_id=employee.id,
             status=submission_status,
@@ -858,6 +886,7 @@ def test_admin_revokes_reviewer_work_and_takes_over_active_submissions(db):
         submission = Submission(
             data_json=f'{{"_pdf_uuid": "{document.uuid_filename}"}}',
             created_by_user_id=employee.id,
+            assigned_document_id=document.id,
             status=status,
         )
         db.add(submission)
@@ -959,7 +988,9 @@ def test_folder_redistribution_moves_active_submission_and_preserves_content(db)
     document = assign_document(db, input_user, old_reviewer, filename="submitted.pdf")
     document.status = "completed"
     db.add(AssignedDocumentFolder(document_id=document.id, folder_group="00000000/005/0001"))
-    submission = Submission(
+    submission = make_submission(
+        document=document,
+        folder_path="00000000/005/0001",
         data_json=f'{{"_pdf_uuid": "{document.uuid_filename}", "field": "kept", "_wrong_sections": ["A"]}}',
         created_by_user_id=input_user.id,
         status="pending_review",
@@ -1077,16 +1108,16 @@ def test_admin_reviews_unassigned_reports_and_shows_active_viewer(db):
     admin = add_user(db, 'admin', role='admin')
     author = add_user(db, 'author')
     reviewer = add_user(db, 'reviewer')
-    assigned = Submission(
+    assigned = make_submission(
+        folder_path="004/0021",
         data_json=json.dumps({'_folder_path': '004/0021'}),
         created_by_user_id=author.id,
-        folder_path='004/0021',
         status='pending_review',
     )
-    unassigned = Submission(
+    unassigned = make_submission(
+        folder_path="004/0022",
         data_json=json.dumps({'_folder_path': '004/0022'}),
         created_by_user_id=author.id,
-        folder_path='004/0022',
         status='pending_review',
     )
     db.add_all([assigned, unassigned])
@@ -1502,11 +1533,11 @@ def test_admin_review_folder_submissions_are_paginated(db):
     db.flush()
     records = []
     for offset in range(3):
-        record = Submission(
+        record = make_submission(
+            folder_path="004/0023",
             template_id=template.id,
             created_by_user_id=admin.id,
             data_json='{"col_8": "Hồ sơ kiểm duyệt", "_folder_path": "004/0023"}',
-            folder_path="004/0023",
             status="pending_review",
             created_at=datetime(2026, 8, 15, 8, 0, 0) + timedelta(minutes=offset),
         )
@@ -2135,7 +2166,9 @@ def test_pending_submission_backfill_uses_its_document_reviewer(db):
         document_id=document.id,
         folder_group="004/0012",
     ))
-    submission = Submission(
+    submission = make_submission(
+        document=document,
+        folder_path="004/0012",
         data_json=f'{{"_pdf_uuid": "{document.uuid_filename}"}}',
         created_by_user_id=author.id,
         status="pending_review",
@@ -2179,12 +2212,16 @@ def test_review_folders_include_empty_assignments_and_only_submitted_reports(db)
         AssignedDocumentFolder(document_id=submitted_document.id, folder_group="00000000/004/0012"),
         AssignedDocumentFolder(document_id=draft_document.id, folder_group="00000000/004/0012"),
     ])
-    submitted = Submission(
+    submitted = make_submission(
+        document=submitted_document,
+        folder_path="00000000/004/0012",
         data_json=f'{{"_pdf_uuid": "{submitted_document.uuid_filename}"}}',
         created_by_user_id=author.id,
         status="pending_review",
     )
-    draft = Submission(
+    draft = make_submission(
+        document=draft_document,
+        folder_path="00000000/004/0012",
         data_json=f'{{"_pdf_uuid": "{draft_document.uuid_filename}"}}',
         created_by_user_id=author.id,
         status="draft",

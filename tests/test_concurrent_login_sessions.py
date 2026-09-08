@@ -7,8 +7,9 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from server.database import Base
-from server.models import User
+from server.models import User, UserLoginSession
 from server.routers import auth
+from server.services import auth_session_service
 from server.services.auth_session_service import active_session_counts
 from server.services.login_rate_limit_service import LoginRateLimiter
 
@@ -155,3 +156,75 @@ def test_logout_revokes_only_the_current_browser_session(auth_db, monkeypatch):
     assert active_session_counts(auth_db, {user.id})[user.id] == 1
     with pytest.raises(HTTPException, match="Phiên đăng nhập không còn hiệu lực"):
         auth.get_current_user(f"Bearer {first['token']}", db=auth_db)
+
+
+def test_idle_session_is_excluded_and_revoked(auth_db, monkeypatch):
+    monkeypatch.setattr(auth, "login_rate_limiter", LoginRateLimiter(5, 60))
+    user = User(
+        username="employee",
+        password=auth.hash_password("employee-password"),
+        role="user",
+    )
+    auth_db.add(user)
+    auth_db.commit()
+    login = _login(auth_db, browser_id="browser-a")
+    login_session = auth_db.query(UserLoginSession).one()
+    expired_now = login_session.last_activity_at + auth.timedelta(minutes=31)
+    monkeypatch.setattr(auth_session_service, "get_utc_now", lambda: expired_now)
+
+    assert active_session_counts(auth_db, {user.id})[user.id] == 0
+    with pytest.raises(HTTPException, match="Phiên đăng nhập không còn hiệu lực"):
+        auth.get_current_user(f"Bearer {login['token']}", db=auth_db)
+    assert auth_db.query(UserLoginSession).count() == 0
+
+
+def test_close_request_has_grace_and_heartbeat_cancels_it(auth_db, monkeypatch):
+    monkeypatch.setattr(auth, "login_rate_limiter", LoginRateLimiter(5, 60))
+    user = User(
+        username="employee",
+        password=auth.hash_password("employee-password"),
+        role="user",
+    )
+    auth_db.add(user)
+    auth_db.commit()
+    login = _login(auth_db, browser_id="browser-a")
+    current = auth.get_current_user(f"Bearer {login['token']}", db=auth_db)
+
+    closing = auth.api_mark_session_closing(current_user=current, db=auth_db)
+    assert closing["status"] == "closing"
+    login_session = auth_db.query(UserLoginSession).one()
+    assert login_session.close_requested_at is not None
+    assert active_session_counts(auth_db, {user.id})[user.id] == 1
+
+    heartbeat_now = login_session.last_activity_at + auth.timedelta(seconds=61)
+    monkeypatch.setattr(auth_session_service, "get_utc_now", lambda: heartbeat_now)
+    heartbeat = auth.api_session_heartbeat(
+        auth.SessionHeartbeatRequest(user_active=True),
+        current_user=current,
+        db=auth_db,
+    )
+    assert heartbeat["status"] == "ok"
+    auth_db.refresh(login_session)
+    assert login_session.close_requested_at is None
+    assert login_session.last_activity_at == heartbeat_now
+
+
+def test_close_request_revokes_session_after_grace(auth_db, monkeypatch):
+    monkeypatch.setattr(auth, "login_rate_limiter", LoginRateLimiter(5, 60))
+    user = User(
+        username="employee",
+        password=auth.hash_password("employee-password"),
+        role="user",
+    )
+    auth_db.add(user)
+    auth_db.commit()
+    login = _login(auth_db, browser_id="browser-a")
+    current = auth.get_current_user(f"Bearer {login['token']}", db=auth_db)
+    auth.api_mark_session_closing(current_user=current, db=auth_db)
+    login_session = auth_db.query(UserLoginSession).one()
+    after_grace = login_session.close_requested_at + auth.timedelta(seconds=31)
+    monkeypatch.setattr(auth_session_service, "get_utc_now", lambda: after_grace)
+
+    assert active_session_counts(auth_db, {user.id})[user.id] == 0
+    with pytest.raises(HTTPException, match="Phiên đăng nhập không còn hiệu lực"):
+        auth.get_current_user(f"Bearer {login['token']}", db=auth_db)

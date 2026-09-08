@@ -1,4 +1,3 @@
-import os
 import json
 from datetime import datetime, timedelta
 from sqlalchemy.orm import Session
@@ -17,7 +16,6 @@ from server.repositories import (
     SubmissionViewRepository,
 )
 from server.services.submission_helpers import COMPLETED_WITHOUT_FOLDER, _pdf_url
-from server.services.submission_metadata_service import backfill_submission_metadata
 from server.utils.folder_utils import normalize_folder_path
 
 class ReviewWorkflowService:
@@ -161,7 +159,6 @@ class ReviewWorkflowService:
 
     @staticmethod
     def backfill_pending_review_assignments(db: Session) -> None:
-        backfill_submission_metadata(db)
         review_repository = ReviewRepository(db)
         pending, assignments, document_reviewers = (
             review_repository.pending_assignment_context()
@@ -349,10 +346,6 @@ class ReviewWorkflowService:
             data_dict["_pdf_url"] = _pdf_url(document.uuid_filename)
             if document_metadata["relative_path"]:
                 data_dict["_pdf_relative_path"] = document_metadata["relative_path"]
-        elif data_dict.get("_pdf_uuid"):
-            uuid_filename = os.path.basename(str(data_dict["_pdf_uuid"]))
-            data_dict["_pdf_uuid"] = uuid_filename
-            data_dict["_pdf_url"] = _pdf_url(uuid_filename)
         folder_path = normalize_folder_path(submission.folder_path)
         return {
             'viewing_user_id': viewer.get('user_id') if viewer else None,

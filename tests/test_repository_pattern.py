@@ -42,7 +42,6 @@ def test_repository_package_exposes_domain_boundaries():
         ReviewRepository,
         ServerFolderRepository,
         SubmissionRepository,
-        TaskRepository,
         TemplateRepository,
         UserRepository,
     )
@@ -55,7 +54,6 @@ def test_repository_package_exposes_domain_boundaries():
             ReviewRepository,
             ServerFolderRepository,
             SubmissionRepository,
-            TaskRepository,
             TemplateRepository,
             UserRepository,
         )
@@ -66,7 +64,6 @@ def test_repository_package_exposes_domain_boundaries():
         "ReviewRepository",
         "ServerFolderRepository",
         "SubmissionRepository",
-        "TaskRepository",
         "TemplateRepository",
         "UserRepository",
     }

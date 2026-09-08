@@ -1,6 +1,4 @@
 import asyncio
-from datetime import datetime, timedelta
-
 import pytest
 from fastapi import HTTPException
 from sqlalchemy import create_engine
@@ -25,7 +23,7 @@ from server.models import (
     User,
     UserCapability,
 )
-from server.routers import auth, tasks, templates
+from server.routers import auth, templates
 
 
 @pytest.fixture()
@@ -356,77 +354,6 @@ def test_template_configuration_round_trip_and_soft_delete(db):
 def test_template_config_returns_not_found_for_unknown_template(db):
     with pytest.raises(HTTPException) as error:
         templates.get_template_config(999, db=db)
-
-    assert error.value.status_code == 404
-
-
-def test_task_creation_and_listing_are_scoped_by_user(db):
-    admin = _add_user(db, "admin", role="admin")
-    first_user = _add_user(db, "first")
-    second_user = _add_user(db, "second")
-    template = Template(name="Biểu mẫu giao việc", filename="task.xlsx")
-    db.add(template)
-    db.commit()
-
-    assert tasks.api_create_task(
-        tasks.CreateTaskRequest(
-            user_id=first_user.id,
-            template_id=template.id,
-            title="Nhập hồ sơ đợt 1",
-            target_quantity=25,
-        ),
-        current_user=_current_user(admin),
-        db=db,
-    ) == {"status": "ok"}
-    assert tasks.api_create_task(
-        tasks.CreateTaskRequest(
-            user_id=second_user.id,
-            template_id=template.id,
-            title="Nhập hồ sơ đợt 2",
-            target_quantity=30,
-        ),
-        current_user=_current_user(admin),
-        db=db,
-    ) == {"status": "ok"}
-
-    stored_tasks = db.query(Task).order_by(Task.id).all()
-    stored_tasks[0].created_at = datetime(2026, 8, 14, 8, 0, 0)
-    stored_tasks[1].created_at = stored_tasks[0].created_at + timedelta(minutes=1)
-    db.commit()
-
-    admin_result = tasks.api_get_tasks(current_user=_current_user(admin), db=db)
-    first_user_result = tasks.api_get_tasks(
-        current_user=_current_user(first_user),
-        db=db,
-    )
-
-    assert [item["title"] for item in admin_result["data"]] == [
-        "Nhập hồ sơ đợt 2",
-        "Nhập hồ sơ đợt 1",
-    ]
-    assert [item["title"] for item in first_user_result["data"]] == [
-        "Nhập hồ sơ đợt 1"
-    ]
-    assert first_user_result["data"][0]["username"] == first_user.username
-    assert first_user_result["data"][0]["template_name"] == template.name
-
-
-def test_task_is_not_created_when_template_does_not_exist(db):
-    admin = _add_user(db, "admin", role="admin")
-    employee = _add_user(db, "employee")
-    db.commit()
-
-    with pytest.raises(HTTPException) as error:
-        tasks.api_create_task(
-            tasks.CreateTaskRequest(
-                user_id=employee.id,
-                template_id=999,
-                title="Không được lưu",
-                target_quantity=1,
-            ),
-            current_user=_current_user(admin),
-            db=db,
-        )
 
     assert error.value.status_code == 404
 

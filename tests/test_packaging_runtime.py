@@ -154,14 +154,14 @@ def test_caddyfile_uses_the_configured_public_hostname():
     assert "{$PUBLIC_HOSTNAME:nhaplieu1.aivn.net.vn}" in caddyfile
 
 
-def test_release_contract_is_version_0_1_for_postgresql_18():
+def test_release_contract_is_version_0_2_for_postgresql_18():
     from server.release_info import (
         APP_VERSION,
         DEFAULT_PUBLIC_HOSTNAME,
         SUPPORTED_POSTGRESQL_MAJOR,
     )
 
-    assert APP_VERSION == "0.1"
+    assert APP_VERSION == "0.2"
     assert SUPPORTED_POSTGRESQL_MAJOR == 18
     assert DEFAULT_PUBLIC_HOSTNAME == "nhaplieu1.aivn.net.vn"
 
@@ -223,7 +223,7 @@ def test_browser_opens_only_for_exact_ready_payload(monkeypatch):
             return False
 
         def read(self):
-            return b'{"status":"ready","version":"0.1"}'
+            return b'{"status":"ready","version":"0.2"}'
 
     monkeypatch.setattr(app_launcher, "urlopen", lambda *_args, **_kwargs: FakeResponse())
     monkeypatch.setattr(app_launcher.webbrowser, "open", opened.append)
@@ -250,7 +250,7 @@ def test_browser_rejects_non_ready_success_response(monkeypatch):
             return False
 
         def read(self):
-            return b'{"status":"starting","version":"0.1"}'
+            return b'{"status":"starting","version":"0.2"}'
 
     monkeypatch.setattr(app_launcher, "urlopen", lambda *_args, **_kwargs: FakeResponse())
     monkeypatch.setattr(app_launcher.webbrowser, "open", opened.append)
@@ -298,7 +298,7 @@ def test_release_files_share_version_and_reconfiguration_contract():
         encoding="utf-8"
     )
 
-    assert '#define MyAppVersion "0.1"' in setup
+    assert '#define MyAppVersion "0.2"' in setup
     assert 'Parameters: "--configure"' in setup
     assert 'Start-ScanToExcelHost.cmd' in setup
     assert "shellexec nowait postinstall" not in setup

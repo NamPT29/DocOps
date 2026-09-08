@@ -1,12 +1,15 @@
 import hashlib
+import logging
 import os
 import secrets
 import time
 import uuid
+from datetime import timedelta
 from pathlib import Path
 
 from fastapi import HTTPException
 
+from server.database import get_utc_now
 from server.models import (
     ProjectCase,
     ProjectDocumentAsset,
@@ -27,6 +30,10 @@ from server.services.project_manifest_service import (
 
 DEFAULT_CHUNK_BYTES = 1 * 1024 * 1024
 MAX_CHUNK_BYTES = 16 * 1024 * 1024
+DEFAULT_UPLOAD_RETENTION_HOURS = 24
+_CLEANUP_RETRY_ATTEMPTS = 10
+_CLEANUP_RETRY_DELAY_SECONDS = 0.05
+logger = logging.getLogger(__name__)
 
 
 def _configured_chunk_bytes():
@@ -132,6 +139,19 @@ def create_or_resume_upload_session(
                 status_code=409,
                 detail="Khóa phiên đã được dùng cho một manifest khác",
             )
+        if existing_session.status == "cancelled":
+            for upload_file in repository.list_session_files(existing_session.id):
+                upload_file.status = "pending"
+                upload_file.next_offset = 0
+                upload_file.error_message = None
+            existing_session.status = "created"
+            existing_session.completed_files = 0
+            existing_session.failed_files = 0
+            existing_session.expires_at = get_utc_now() + timedelta(
+                hours=DEFAULT_UPLOAD_RETENTION_HOURS
+            )
+            db.commit()
+            db.refresh(existing_session)
         return serialize_upload_session(db, existing_session)
 
     assets = repository.asset_identities(project.id)
@@ -155,6 +175,7 @@ def create_or_resume_upload_session(
         status="created",
         total_files=prepared["total_files"],
         requested_files=len(required_items),
+        expires_at=get_utc_now() + timedelta(hours=DEFAULT_UPLOAD_RETENTION_HOURS),
     )
     db.add(session)
     # ProjectUploadFile only stores the foreign-key value; no ORM relationship
@@ -203,6 +224,121 @@ def _hash_file(path):
                 break
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def _unlink_staged_upload(path):
+    for attempt in range(_CLEANUP_RETRY_ATTEMPTS):
+        try:
+            path.unlink()
+            return True
+        except FileNotFoundError:
+            return True
+        except PermissionError:
+            if attempt + 1 < _CLEANUP_RETRY_ATTEMPTS:
+                time.sleep(_CLEANUP_RETRY_DELAY_SECONDS)
+                continue
+            logger.warning("Không thể dọn file upload đang bị khóa: %s", path)
+            return False
+        except OSError as exc:
+            logger.warning("Không thể dọn file upload %s: %s", path, exc)
+            return False
+    return False
+
+
+def _latest_upload_activity(session, latest_file_activity):
+    timestamps = [
+        value
+        for value in (session.updated_at, session.created_at, latest_file_activity)
+        if value is not None
+    ]
+    return max(timestamps) if timestamps else None
+
+
+def cleanup_stale_project_uploads(db, *, max_age_hours=DEFAULT_UPLOAD_RETENTION_HOURS):
+    """Expire abandoned upload sessions and remove their recorded staging files."""
+    if max_age_hours <= 0:
+        raise ValueError("Thời gian lưu phiên upload phải lớn hơn 0 giờ")
+
+    cutoff = get_utc_now() - timedelta(hours=max_age_hours)
+    repository = ProjectUploadRepository(db)
+    cleaned = 0
+    skipped = 0
+    errors = 0
+
+    for candidate_session, latest_file_activity in repository.list_open_sessions_with_latest_file_activity():
+        session = repository.lock_session(candidate_session.id)
+        if not session or session.status in {"completed", "cancelled"}:
+            db.rollback()
+            skipped += 1
+            continue
+        upload_files = repository.lock_session_files(session.id)
+        locked_file_activity = max(
+            (item.updated_at for item in upload_files if item.updated_at is not None),
+            default=latest_file_activity,
+        )
+        last_activity = _latest_upload_activity(session, locked_file_activity)
+        if last_activity is not None and last_activity >= cutoff:
+            db.rollback()
+            skipped += 1
+            continue
+
+        retained = []
+        for upload_file in upload_files:
+            try:
+                staging_path = _staging_path(session, upload_file)
+            except HTTPException:
+                logger.warning(
+                    "Không thể xác định file tạm của phiên upload %s",
+                    session.id,
+                    exc_info=True,
+                )
+                retained.append(str(upload_file.staging_filename or "<invalid>"))
+                continue
+            if not _unlink_staged_upload(staging_path):
+                retained.append(str(staging_path))
+
+        if retained:
+            db.rollback()
+            errors += 1
+            continue
+
+        staging_directory = _storage_root() / ".project_uploads" / session.id
+        try:
+            staging_directory.rmdir()
+        except FileNotFoundError:
+            pass
+        except OSError as exc:
+            logger.warning(
+                "Không thể dọn thư mục phiên upload %s: %s",
+                session.id,
+                exc,
+            )
+            db.rollback()
+            errors += 1
+            continue
+
+        for upload_file in upload_files:
+            upload_file.status = "failed"
+            upload_file.next_offset = 0
+            upload_file.error_message = "Phiên tải đã hết hạn do không hoạt động"
+        session.status = "cancelled"
+        session.completed_files = 0
+        session.failed_files = len(upload_files)
+        session.expires_at = get_utc_now()
+        try:
+            db.commit()
+        except Exception:
+            db.rollback()
+            logger.warning(
+                "Không thể cập nhật trạng thái phiên upload cũ %s",
+                session.id,
+                exc_info=True,
+            )
+            errors += 1
+            continue
+        cleaned += 1
+
+    return {"cleaned": cleaned, "skipped": skipped, "errors": errors}
 
 
 def _mark_upload_timing(timing_marks, name):

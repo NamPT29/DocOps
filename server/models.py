@@ -1,13 +1,13 @@
 from datetime import datetime
 
-from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Boolean, Text, UniqueConstraint
+from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Boolean, Text, UniqueConstraint, Index
 from sqlalchemy.orm import Mapped, mapped_column
 from server.database import Base, get_utc_now
 
 class User(Base):
     __tablename__ = "users"
     
-    id = Column(Integer, primary_key=True, index=True)
+    id = Column(Integer, primary_key=True)
     username = Column(String(255), unique=True, index=True, nullable=False)
     password = Column(String(255), nullable=False) # Scrypt hash; legacy values migrate on login
     full_name = Column(String(255), nullable=False, default="")
@@ -32,6 +32,8 @@ class UserLoginSession(Base):
     )
     browser_id = Column(String(128), nullable=False)
     created_at = Column(DateTime, nullable=False, default=get_utc_now)
+    last_activity_at = Column(DateTime, nullable=False, default=get_utc_now)
+    close_requested_at = Column(DateTime, nullable=True)
     expires_at = Column(DateTime, nullable=False, index=True)
 
 
@@ -57,7 +59,7 @@ class ApiRateLimitBucket(Base):
 class Notification(Base):
     __tablename__ = "notifications"
 
-    id = Column(Integer, primary_key=True, index=True)
+    id = Column(Integer, primary_key=True)
     title = Column(String(255), nullable=False)
     message = Column(Text, nullable=False)
     created_by_user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
@@ -74,7 +76,7 @@ class NotificationRecipient(Base):
 class Template(Base):
     __tablename__ = "templates"
     
-    id = Column(Integer, primary_key=True, index=True)
+    id = Column(Integer, primary_key=True)
     name = Column(String(255), nullable=False)
     filename = Column(String(255), nullable=False)
     created_at = Column(DateTime, default=get_utc_now)
@@ -84,7 +86,7 @@ class Template(Base):
 class Task(Base):
     __tablename__ = "tasks"
     
-    id = Column(Integer, primary_key=True, index=True)
+    id = Column(Integer, primary_key=True)
     user_id = Column(Integer, ForeignKey("users.id"))
     template_id = Column(Integer, ForeignKey("templates.id"), nullable=True) # Which template this task is for
     title = Column(String(255), nullable=False)
@@ -95,18 +97,33 @@ class Task(Base):
 
 class Submission(Base):
     __tablename__ = "submissions"
+    __table_args__ = (
+        Index(
+            "ix_submissions_status_template_created_at",
+            "status",
+            "template_id",
+            "created_at",
+        ),
+        Index(
+            "ix_submissions_status_template_folder_created_at",
+            "status",
+            "template_id",
+            "folder_path_key",
+            "created_at",
+        ),
+    )
 
-    id = Column(Integer, primary_key=True, index=True)
+    id = Column(Integer, primary_key=True)
     created_at = Column(DateTime, default=get_utc_now)
     
     # Store the dynamically filled JSON
     data_json = Column(Text, nullable=False)
     
     # Track which template this belongs to
-    template_id = Column(Integer, ForeignKey("templates.id"), nullable=True)
+    template_id = Column(Integer, ForeignKey("templates.id"), nullable=True, index=True)
     
     # Track which user created this submission
-    created_by_user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    created_by_user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
 
     # Indexed metadata used for folder/document queries. `data_json` remains
     # untouched as the source of the dynamic form values and as a compatibility
@@ -153,7 +170,7 @@ class SubmissionReviewHistory(Base):
 
     __tablename__ = "submission_review_histories"
 
-    id = Column(Integer, primary_key=True, index=True)
+    id = Column(Integer, primary_key=True)
     submission_id = Column(
         Integer,
         ForeignKey("submissions.id", ondelete="CASCADE"),
@@ -187,7 +204,7 @@ class SubmissionReviewFieldHistory(Base):
 
     __tablename__ = "submission_review_field_histories"
 
-    id = Column(Integer, primary_key=True, index=True)
+    id = Column(Integer, primary_key=True)
     event_id = Column(
         Integer,
         ForeignKey("submission_review_histories.id", ondelete="CASCADE"),
@@ -255,11 +272,11 @@ class SubmissionViewPresence(Base):
 class AssignedDocument(Base):
     __tablename__ = "assigned_documents"
     
-    id = Column(Integer, primary_key=True, index=True)
+    id = Column(Integer, primary_key=True)
     original_filename = Column(String(255), nullable=False)
     uuid_filename = Column(String(255), nullable=False, unique=True)
-    assigned_to_user_id = Column(Integer, ForeignKey("users.id"), nullable=True) # null = unassigned
-    template_id = Column(Integer, ForeignKey("templates.id"), nullable=True)
+    assigned_to_user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True) # null = unassigned
+    template_id = Column(Integer, ForeignKey("templates.id"), nullable=True, index=True)
     status = Column(String(255), default="pending") # pending, assigned, completed
     created_at = Column(DateTime, default=get_utc_now)
 
@@ -280,7 +297,7 @@ class AssignedDocumentPath(Base):
 
     __tablename__ = "assigned_document_paths"
 
-    id = Column(Integer, primary_key=True, index=True)
+    id = Column(Integer, primary_key=True)
     document_id = Column(
         Integer,
         ForeignKey("assigned_documents.id"),
@@ -295,7 +312,7 @@ class AssignedDocumentPath(Base):
 class AssignedDocumentFolder(Base):
     __tablename__ = "assigned_document_folders"
 
-    id = Column(Integer, primary_key=True, index=True)
+    id = Column(Integer, primary_key=True)
     document_id = Column(
         Integer,
         ForeignKey("assigned_documents.id"),
@@ -309,7 +326,7 @@ class AssignedDocumentFolder(Base):
 class ServerFolderImportJob(Base):
     __tablename__ = "server_folder_import_jobs"
 
-    id = Column(Integer, primary_key=True, index=True)
+    id = Column(Integer, primary_key=True)
     created_by_user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     template_id = Column(Integer, ForeignKey("templates.id"), nullable=False)
     source_relative_path = Column(String(1024), nullable=False, default="")
@@ -347,7 +364,7 @@ from sqlalchemy import BigInteger, CheckConstraint
 class Dictionary(Base):
     __tablename__ = "dictionaries"
 
-    id = Column(Integer, primary_key=True, index=True)
+    id = Column(Integer, primary_key=True)
     template_id = Column(Integer, ForeignKey("templates.id"), nullable=False)
     name = Column(String(100), index=True, nullable=False) # e.g. "DM_DanToc"
     description = Column(String(255), nullable=True) # e.g. "Dân tộc"
@@ -359,8 +376,8 @@ class Dictionary(Base):
 class DictionaryItem(Base):
     __tablename__ = "dictionary_items"
 
-    id = Column(Integer, primary_key=True, index=True)
-    dictionary_id = Column(Integer, ForeignKey("dictionaries.id"))
+    id = Column(Integer, primary_key=True)
+    dictionary_id = Column(Integer, ForeignKey("dictionaries.id"), index=True)
     code = Column(String(50), nullable=True)  # e.g. "1" or "01"
     value = Column(String(255), nullable=False) # e.g. "Kinh"
     
@@ -372,7 +389,7 @@ class Project(Base):
 
     __tablename__ = "projects"
 
-    id = Column(Integer, primary_key=True, index=True)
+    id = Column(Integer, primary_key=True)
     name = Column(String(255), nullable=False)
     root_folder_name = Column(String(255), nullable=False)
     template_id = Column(Integer, ForeignKey("templates.id"), nullable=False, index=True)
@@ -385,9 +402,8 @@ class Project(Base):
     case_level = Column(Integer, nullable=False)
     report_mode = Column(String(32), nullable=False)
     report_level = Column(Integer, nullable=True)
-    # Public lifecycle values. Legacy databases are normalized at startup by
-    # ``ensure_project_status_schema``; keeping this as a string avoids
-    # breaking existing rows while the migration runs.
+    # Public lifecycle values. Migration 0004 normalizes legacy rows once;
+    # keeping this as a string preserves compatibility with stored values.
     status = Column(String(32), nullable=False, default="new", index=True)
     created_by_user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
     created_at = Column(DateTime, nullable=False, default=get_utc_now)
@@ -441,7 +457,7 @@ class ProjectCase(Base):
 
     __tablename__ = "project_cases"
 
-    id = Column(Integer, primary_key=True, index=True)
+    id = Column(Integer, primary_key=True)
     project_id = Column(
         Integer,
         ForeignKey("projects.id", ondelete="CASCADE"),
@@ -465,7 +481,7 @@ class ProjectReportUnit(Base):
 
     __tablename__ = "project_report_units"
 
-    id = Column(Integer, primary_key=True, index=True)
+    id = Column(Integer, primary_key=True)
     project_id = Column(
         Integer,
         ForeignKey("projects.id", ondelete="CASCADE"),
@@ -494,7 +510,7 @@ class ProjectDocumentAsset(Base):
 
     __tablename__ = "project_document_assets"
 
-    id = Column(Integer, primary_key=True, index=True)
+    id = Column(Integer, primary_key=True)
     project_id = Column(
         Integer,
         ForeignKey("projects.id", ondelete="CASCADE"),
@@ -581,7 +597,7 @@ class ProjectUploadFile(Base):
 
     __tablename__ = "project_upload_files"
 
-    id = Column(Integer, primary_key=True, index=True)
+    id = Column(Integer, primary_key=True)
     session_id = Column(
         String(64),
         ForeignKey("project_upload_sessions.id", ondelete="CASCADE"),
@@ -614,7 +630,7 @@ class ProjectUploadFile(Base):
 class ProjectAssignmentHistory(Base):
     __tablename__ = "project_assignment_history"
 
-    id = Column(Integer, primary_key=True, index=True)
+    id = Column(Integer, primary_key=True)
     project_id = Column(Integer, ForeignKey("projects.id"), nullable=False, index=True)
     case_id = Column(Integer, ForeignKey("project_cases.id"), nullable=False, index=True)
     assignment_role = Column(String(16), nullable=False)
@@ -637,7 +653,7 @@ class ProjectPdfDeletionAudit(Base):
 
     __tablename__ = "project_pdf_deletion_audit"
 
-    id = Column(Integer, primary_key=True, index=True)
+    id = Column(Integer, primary_key=True)
     project_id = Column(Integer, ForeignKey("projects.id"), nullable=False, index=True)
     case_id = Column(Integer, ForeignKey("project_cases.id"), nullable=False, index=True)
     report_unit_id = Column(Integer, ForeignKey("project_report_units.id"), nullable=False, index=True)

@@ -1,7 +1,7 @@
 from datetime import datetime, timedelta
 import json
 
-from sqlalchemy import create_engine, event, inspect, text
+from sqlalchemy import create_engine, event
 from sqlalchemy.orm import sessionmaker
 
 from server.database import Base
@@ -15,133 +15,7 @@ from server.models import (
     User,
 )
 from server.routers import submissions
-from server.services.submission_metadata_service import (
-    backfill_submission_metadata,
-    ensure_submission_metadata_schema,
-    folder_path_key,
-)
-
-
-def test_legacy_metadata_migration_preserves_every_submission_value(tmp_path):
-    database_path = tmp_path / "legacy-submissions.sqlite3"
-    engine = create_engine(f"sqlite:///{database_path.as_posix()}")
-    original_json = {
-        1: '{  "col_8": "Hồ sơ đang nhập", "_pdf_uuid": "uuid-001.pdf"  }',
-        2: '{"col_8":"Hồ sơ đã nhận","custom":{"kept":true}}',
-        3: '{"col_8":"PDF cũ","_pdf_filename":"missing.pdf"}',
-    }
-    original_statuses = {1: "draft", 2: "pending_review", 3: "completed"}
-
-    with engine.begin() as connection:
-        connection.execute(text("""
-            CREATE TABLE assigned_documents (
-                id INTEGER PRIMARY KEY,
-                original_filename VARCHAR(255),
-                uuid_filename VARCHAR(255),
-                assigned_to_user_id INTEGER,
-                template_id INTEGER,
-                status VARCHAR(255),
-                created_at DATETIME
-            )
-        """))
-        connection.execute(text("""
-            CREATE TABLE assigned_document_folders (
-                id INTEGER PRIMARY KEY,
-                document_id INTEGER,
-                folder_group VARCHAR(1024),
-                created_at DATETIME
-            )
-        """))
-        connection.execute(text("""
-            CREATE TABLE submissions (
-                id INTEGER PRIMARY KEY,
-                data_json TEXT,
-                template_id INTEGER,
-                created_at DATETIME,
-                created_by_user_id INTEGER,
-                is_checked BOOLEAN,
-                status VARCHAR(50)
-            )
-        """))
-        connection.execute(text("""
-            INSERT INTO assigned_documents (
-                id, original_filename, uuid_filename, assigned_to_user_id,
-                status, created_at
-            ) VALUES (
-                11, '001.pdf', 'uuid-001.pdf', 7,
-                'pending', '2026-08-14 01:02:03'
-            )
-        """))
-        connection.execute(text("""
-            INSERT INTO assigned_document_folders (
-                id, document_id, folder_group, created_at
-            ) VALUES (
-                21, 11, '00000000/004/0011', '2026-08-14 01:02:03'
-            )
-        """))
-        for submission_id in original_json:
-            connection.execute(text("""
-                INSERT INTO submissions (
-                    id, data_json, created_at, created_by_user_id,
-                    is_checked, status
-                ) VALUES (
-                    :id, :data_json, :created_at, 7, :is_checked, :status
-                )
-            """), {
-                "id": submission_id,
-                "data_json": original_json[submission_id],
-                "created_at": f"2026-08-14 0{submission_id}:02:03",
-                "is_checked": submission_id == 3,
-                "status": original_statuses[submission_id],
-            })
-
-    ensure_submission_metadata_schema(engine)
-    schema = inspect(engine)
-    column_names = {column["name"] for column in schema.get_columns("submissions")}
-    index_names = {index["name"] for index in schema.get_indexes("submissions")}
-    assert {
-        "assigned_document_id",
-        "folder_path",
-        "folder_path_key",
-    }.issubset(column_names)
-    assert {
-        "ix_submissions_assigned_document_id",
-        "ix_submissions_folder_path_key",
-    }.issubset(index_names)
-
-    db = sessionmaker(bind=engine)()
-    try:
-        before = {
-            row.id: (row.data_json, row.status, row.created_at, row.is_checked)
-            for row in db.query(Submission).order_by(Submission.id).all()
-        }
-        result = backfill_submission_metadata(db, batch_size=1)
-        after = {
-            row.id: (row.data_json, row.status, row.created_at, row.is_checked)
-            for row in db.query(Submission).order_by(Submission.id).all()
-        }
-
-        assert before == after
-        assert {row_id: values[0] for row_id, values in after.items()} == original_json
-        assert {row_id: values[1] for row_id, values in after.items()} == original_statuses
-        assert db.query(Submission).count() == 3
-        linked = db.get(Submission, 1)
-        assert linked.assigned_document_id == 11
-        assert linked.folder_path == "00000000/004/0011"
-        assert linked.folder_path_key == folder_path_key("00000000/004/0011")
-        assert result == {
-            "updated": 3,
-            "unresolved_documents": 1,
-            "invalid_json": 0,
-        }
-        assert backfill_submission_metadata(db) == {
-            "updated": 0,
-            "unresolved_documents": 0,
-            "invalid_json": 0,
-        }
-    finally:
-        db.close()
-        engine.dispose()
+from server.utils.folder_utils import folder_path_key
 
 
 def test_folder_listing_and_pagination_have_bounded_sql_queries(tmp_path):

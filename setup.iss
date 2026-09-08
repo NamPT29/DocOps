@@ -1,6 +1,6 @@
 #define MyAppName "Scan To Excel Host"
 #ifndef MyAppVersion
-#define MyAppVersion "0.1"
+#define MyAppVersion "0.2"
 #endif
 #define MyAppExeName "ScanToExcelApp.exe"
 

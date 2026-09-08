@@ -34,11 +34,25 @@ function setProjectUploadProgress(done, total) {
     const wrapper = document.getElementById('projectUploadProgressWrap');
     const bar = document.getElementById('projectUploadProgress');
     if (!wrapper || !bar) return;
+
+    if (total === 0) {
+        wrapper.classList.add('d-none');
+        return;
+    }
     wrapper.classList.remove('d-none');
-    const percent = total > 0 ? Math.min(100, Math.round((done / total) * 100)) : 0;
+
+    const percent = Math.min(100, Math.round((done / total) * 100));
     bar.style.width = `${percent}%`;
     bar.textContent = `${percent}%`;
     bar.setAttribute('aria-valuenow', String(percent));
+
+    // Tự động ẩn thanh trạng thái sau 1.5 giây khi hoàn thành
+    if (percent === 100) {
+        if (window.projectUploadProgressTimeout) clearTimeout(window.projectUploadProgressTimeout);
+        window.projectUploadProgressTimeout = setTimeout(() => {
+            wrapper.classList.add('d-none');
+        }, 1500);
+    }
 }
 
 function projectRelativeFileRow(file) {
@@ -222,7 +236,21 @@ async function updateProjectStatus(project, status, select) {
 
 async function loadProjectList() {
     const body = document.getElementById('projectListBody');
-    if (body) body.innerHTML = '<tr><td colspan="5" class="text-center text-muted">Đang tải...</td></tr>';
+    if (body) body.innerHTML = `
+        <tr class="skeleton-table-row">
+            <td><div class="skeleton-loader skeleton-text"></div><div class="skeleton-loader skeleton-text short mt-1"></div></td>
+            <td><div class="skeleton-loader skeleton-text"></div><div class="skeleton-loader skeleton-text short mt-1"></div></td>
+            <td><div class="skeleton-loader skeleton-text"></div><div class="skeleton-loader skeleton-text short mt-1"></div></td>
+            <td><div class="skeleton-loader skeleton-text"></div></td>
+            <td><div class="skeleton-loader skeleton-text"></div></td>
+        </tr>
+        <tr class="skeleton-table-row">
+            <td><div class="skeleton-loader skeleton-text"></div><div class="skeleton-loader skeleton-text short mt-1"></div></td>
+            <td><div class="skeleton-loader skeleton-text"></div><div class="skeleton-loader skeleton-text short mt-1"></div></td>
+            <td><div class="skeleton-loader skeleton-text"></div><div class="skeleton-loader skeleton-text short mt-1"></div></td>
+            <td><div class="skeleton-loader skeleton-text"></div></td>
+            <td><div class="skeleton-loader skeleton-text"></div></td>
+        </tr>`;
     const data = await apiCall('/api/projects', { cache: 'no-store' });
     if (!data || !body) return;
     projectManagementProjects = Array.isArray(data.data) ? data.data : [];
@@ -273,13 +301,20 @@ async function loadProjectList() {
             dropdown.className = 'dropdown d-inline-block ms-1';
             const toggle = document.createElement('button');
             toggle.type = 'button';
-            toggle.className = `btn btn-sm ${buttonClass} dropdown-toggle`;
+            // Cải trang nút bấm thành form-select để giống hệt dropdown Trạng thái
+            toggle.className = 'form-select form-select-sm d-inline-block w-auto text-start fw-medium';
             toggle.dataset.bsToggle = 'dropdown';
             toggle.setAttribute('aria-expanded', 'false');
             toggle.setAttribute('aria-label', `${label} cho dự án ${project.name}`);
-            toggle.innerHTML = `<i class="fas ${icon}"></i> ${label}`;
+            toggle.innerHTML = `--- ${label} ---`;
+
             const menu = document.createElement('ul');
-            menu.className = 'dropdown-menu dropdown-menu-end';
+            // Thêm class small để font chữ bên trong đồng nhất với table
+            menu.className = 'dropdown-menu dropdown-menu-end shadow-sm small';
+
+            // Fix dropdown bị cắt
+            toggle.dataset.bsBoundary = 'window';
+
             actions.forEach(action => {
                 if (action.divider) {
                     const divider = document.createElement('li');
@@ -565,7 +600,23 @@ async function openProjectAssets(projectId) {
     document.getElementById('projectAssetsProjectId').value = String(project.id);
     document.getElementById('projectAssetsModalTitle').textContent = project.name;
     const body = document.getElementById('projectAssetsTableBody');
-    body.innerHTML = '<tr><td colspan="6" class="text-center text-muted">Đang tải...</td></tr>';
+    body.innerHTML = `
+        <tr class="skeleton-table-row">
+            <td><div class="skeleton-loader skeleton-text"></div></td>
+            <td><div class="skeleton-loader skeleton-text"></div></td>
+            <td><div class="skeleton-loader skeleton-text"></div></td>
+            <td><div class="skeleton-loader skeleton-text"></div></td>
+            <td><div class="skeleton-loader skeleton-text"></div></td>
+            <td><div class="skeleton-loader skeleton-text"></div></td>
+        </tr>
+        <tr class="skeleton-table-row">
+            <td><div class="skeleton-loader skeleton-text"></div></td>
+            <td><div class="skeleton-loader skeleton-text"></div></td>
+            <td><div class="skeleton-loader skeleton-text"></div></td>
+            <td><div class="skeleton-loader skeleton-text"></div></td>
+            <td><div class="skeleton-loader skeleton-text"></div></td>
+            <td><div class="skeleton-loader skeleton-text"></div></td>
+        </tr>`;
     bootstrap.Modal.getOrCreateInstance(document.getElementById('projectAssetsModal')).show();
     const response = await apiCall(`/api/projects/${project.id}/assets`, { cache: 'no-store' });
     if (!response) return;

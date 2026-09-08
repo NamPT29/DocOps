@@ -34,6 +34,10 @@ def test_development_settings_keep_compatible_defaults():
     assert configured.heavy_api_rate_window_seconds == 60
     assert configured.project_upload_chunk_rate_limit == 2400
     assert configured.dictionary_cache_ttl_seconds == 30
+    assert configured.access_token_expire_minutes == 24 * 60
+    assert configured.session_idle_timeout_minutes == 30
+    assert configured.session_activity_touch_interval_seconds == 60
+    assert configured.session_close_grace_seconds == 30
     assert configured.redis_url is None
     assert configured.api_docs_enabled is False
 
@@ -87,6 +91,29 @@ def test_dictionary_cache_ttl_must_be_positive():
 
     with pytest.raises(RuntimeError, match="DICTIONARY_CACHE_TTL_SECONDS"):
         Settings.from_env(environment)
+
+
+def test_session_lifecycle_settings_are_configurable_and_positive():
+    configured = Settings.from_env(
+        {
+            "ACCESS_TOKEN_EXPIRE_MINUTES": "480",
+            "SESSION_IDLE_TIMEOUT_MINUTES": "20",
+            "SESSION_ACTIVITY_TOUCH_INTERVAL_SECONDS": "45",
+            "SESSION_CLOSE_GRACE_SECONDS": "15",
+        },
+        generated_secret="d" * 32,
+    )
+
+    assert configured.access_token_expire_minutes == 480
+    assert configured.session_idle_timeout_minutes == 20
+    assert configured.session_activity_touch_interval_seconds == 45
+    assert configured.session_close_grace_seconds == 15
+
+    with pytest.raises(RuntimeError, match="SESSION_IDLE_TIMEOUT_MINUTES"):
+        Settings.from_env(
+            {"SESSION_IDLE_TIMEOUT_MINUTES": "0"},
+            generated_secret="d" * 32,
+        )
 
 
 def test_logging_settings_are_environment_driven():

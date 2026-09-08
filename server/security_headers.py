@@ -10,7 +10,7 @@ _CSP_REPORT_ONLY_POLICY = (
     "object-src 'none'; "
     "frame-ancestors 'self'; "
     "form-action 'self'; "
-    "script-src 'self'; "
+    "script-src 'self' 'wasm-unsafe-eval'; "
     "style-src 'self'; "
     "img-src 'self' data: blob:; "
     "font-src 'self'; "

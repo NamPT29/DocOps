@@ -4,7 +4,7 @@ from __future__ import annotations
 
 
 APP_NAME = "Scan To Excel Host"
-APP_VERSION = "0.1"
+APP_VERSION = "0.2"
 SUPPORTED_POSTGRESQL_MAJOR = 18
 DEFAULT_PUBLIC_HOSTNAME = "nhaplieu1.aivn.net.vn"
 

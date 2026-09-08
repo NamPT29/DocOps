@@ -333,6 +333,19 @@ def test_host_console_uses_public_multiworker_supervisor(monkeypatch):
     monkeypatch.setattr(host_console, "configure_console", lambda: False)
     monkeypatch.setattr(
         host_console,
+        "migrate_database_before_server",
+        lambda: type(
+            "Migration",
+            (),
+            {
+                "previous": "0001_current_schema",
+                "current": "0001_current_schema",
+                "adopted_existing": False,
+            },
+        )(),
+    )
+    monkeypatch.setattr(
+        host_console,
         "configure_server_runtime",
         lambda: type("Runtime", (), {"workers": 3})(),
     )
@@ -349,9 +362,11 @@ def test_host_console_uses_public_multiworker_supervisor(monkeypatch):
     assert calls[0][1]["workers"] == 3
 
 
-def test_server_lifespan_runs_stale_export_cleanup():
+def test_server_lifespan_runs_stale_export_and_upload_cleanup():
     source = Path("server/main.py").read_text(encoding="utf-8")
 
     assert "from server.services.export_job_service import cleanup_stale_export_jobs" in source
+    assert "from server.services.project_upload_service import cleanup_stale_project_uploads" in source
     assert "result = cleanup_stale_export_jobs()" in source
+    assert "cleanup_stale_project_uploads" in source
     assert "lifespan=lifespan" in source

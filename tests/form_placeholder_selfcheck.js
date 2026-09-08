@@ -12,7 +12,7 @@ assert.equal(
         8,
         '',
     ),
-    'Ví dụ: Nguyễn Văn A',
+    '',
 );
 assert.equal(
     sandbox.getConfiguredPlaceholder(
@@ -25,6 +25,14 @@ assert.equal(
 assert.equal(
     sandbox.getConfiguredPlaceholder({}, 8, 'yyyy'),
     'yyyy',
+);
+assert.equal(
+    sandbox.getConfiguredPlaceholder(
+        { placeholder_rules: [{ col: 8, text: 'legacy custom hint' }] },
+        8,
+        'dd/mm/yyyy',
+    ),
+    'dd/mm/yyyy',
 );
 
 const source = fs.readFileSync('frontend/js/form_renderer.js', 'utf8');
