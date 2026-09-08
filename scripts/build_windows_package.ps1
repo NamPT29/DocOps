@@ -158,7 +158,7 @@ try {
         }
 
         Invoke-ExternalCommand -FilePath $iscc -Arguments @(
-            "/DMyAppVersion=$version", "/O$releaseDirectory", "setup.iss"
+            "/DMyAppVersion=$version", "/O$releaseDirectory", (Join-Path $projectRoot "packaging\setup.iss")
         )
         $installerPath = Join-Path $releaseDirectory "ScanToExcelHost-Setup-$version.exe"
         if (-not (Test-Path -LiteralPath $installerPath)) {

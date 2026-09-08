@@ -103,3 +103,4 @@ compose.yaml
 
 .tools/
 docs/
+*.docx

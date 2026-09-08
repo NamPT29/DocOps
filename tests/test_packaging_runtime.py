@@ -135,7 +135,7 @@ def test_launcher_configures_console_before_parsing_help(monkeypatch):
 def test_package_manifest_excludes_embedded_services_and_secrets():
     project_root = Path(__file__).parents[1]
     spec = (project_root / "scan_to_excel.spec").read_text(encoding="utf-8")
-    installer = (project_root / "setup.iss").read_text(encoding="utf-8")
+    installer = (project_root / "packaging/setup.iss").read_text(encoding="utf-8")
 
     assert "database_engine" not in spec
     assert "auto_updater" not in spec
@@ -288,7 +288,7 @@ def test_launcher_configure_mode_exits_before_database_and_uvicorn(monkeypatch, 
 
 def test_release_files_share_version_and_reconfiguration_contract():
     project_root = Path(__file__).parents[1]
-    setup = (project_root / "setup.iss").read_text(encoding="utf-8")
+    setup = (project_root / "packaging/setup.iss").read_text(encoding="utf-8")
     build = (project_root / "scripts/build_windows_package.ps1").read_text(
         encoding="utf-8"
     )
