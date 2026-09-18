@@ -1,5 +1,8 @@
 
+/* global currentEditingId:writable, isEditingFromList:writable */
+
 // --- UTILITIES ---
+
 
 function renderGenericFolderTree(folders, options) {
     const {

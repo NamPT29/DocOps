@@ -1,3 +1,5 @@
+/* global uploadedFilesQueue:writable, iframeCurrentIndex:writable, activeQueueFolderKey:writable, activeDocumentFolderPath:writable */
+
 window.activeProjectId = null;
 window.activeProjectWorkspace = null;
 

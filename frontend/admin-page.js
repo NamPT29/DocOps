@@ -1,3 +1,5 @@
+/* global currentToken:writable, currentUser:writable */
+
 const ADMIN_PAGE_ACTIONS = Object.freeze({
     logout: () => doLogout(),
     'fetch-dashboard': () => fetchDashboardStats(),

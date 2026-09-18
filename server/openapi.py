@@ -67,11 +67,12 @@ def configure_openapi(app: FastAPI) -> None:
         schema = get_openapi(
             title=app.title,
             version=app.version,
-            summary=app.summary,
             description=app.description,
             routes=app.routes,
             tags=app.openapi_tags,
         )
+        if app.summary:
+            schema.setdefault("info", {})["summary"] = app.summary
         components = schema.setdefault("components", {})
         schemes = components.setdefault("securitySchemes", {})
         schemes["BearerAuth"] = {

@@ -1,3 +1,5 @@
+/* global currentEditingId:writable, isEditingFromList:writable, iframeCurrentIndex:writable */
+
 function removeLinkedPdfFromQueue(queueIndex) {
     if (!Number.isInteger(queueIndex) || queueIndex < 0 || queueIndex >= uploadedFilesQueue.length) return;
 

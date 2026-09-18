@@ -1,6 +1,9 @@
+/* global adminUserData:writable */
+
 // ==========================================
 // ACCOUNT MANAGEMENT & PERSONNEL STATISTICS
 // ==========================================
+
 
 function renderPersonnelStatistics(rows) {
     const tbody = document.getElementById('personnelStatsTableBody');

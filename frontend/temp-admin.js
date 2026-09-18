@@ -1,3 +1,5 @@
+/* global currentToken:writable, currentUser:writable, activeReviewFolderPath:writable */
+
 document.addEventListener('DOMContentLoaded', () => {
     const token = localStorage.getItem('token');
     const userStr = localStorage.getItem('user');

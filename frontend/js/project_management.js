@@ -1,3 +1,5 @@
+/* global activeProjectReportsProjectId:writable, activeProjectReportsFolderPath:writable */
+
 // =============================================================================
 // PROJECT MANAGEMENT CORE CONTROLLER (Số hóa All in One)
 // Chuyên trách: Danh sách dự án, phân công nhân sự, quản lý tài nguyên và xóa dự án
