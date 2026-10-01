@@ -15,6 +15,7 @@ const ADMIN_PAGE_ACTIONS = Object.freeze({
     'load-project-list': () => loadProjectList(),
     'upload-template': () => uploadTemplate(),
     'save-project-members': () => saveProjectMembers(),
+    'save-project-workflow': () => saveProjectWorkflow(),
     'reload-project-reports': () => reloadProjectReports(),
     'fetch-template-dictionaries': () => fetchTemplateDictionaries(),
     'create-dictionary': () => createDictionary(),

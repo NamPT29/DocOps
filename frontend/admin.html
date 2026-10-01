@@ -444,6 +444,49 @@
       </div>
     </div>
 
+    <div class="modal fade" id="projectWorkflowModal" tabindex="-1" aria-hidden="true">
+      <div class="modal-dialog modal-xl">
+        <div class="modal-content">
+          <div class="modal-header bg-dark text-white">
+            <h5 class="modal-title"><i class="fas fa-diagram-project"></i> Quy trình số hóa: <span id="projectWorkflowModalTitle"></span></h5>
+            <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Đóng"></button>
+          </div>
+          <div class="modal-body">
+            <ul class="nav nav-tabs mb-3" role="tablist">
+              <li class="nav-item" role="presentation"><button class="nav-link active fw-bold" id="workflow-overview-tab" data-bs-toggle="tab" data-bs-target="#workflow-overview-pane" type="button" role="tab">Tổng quan</button></li>
+              <li class="nav-item" role="presentation"><button class="nav-link fw-bold" id="workflow-cases-tab" data-bs-toggle="tab" data-bs-target="#workflow-cases-pane" type="button" role="tab">Hồ sơ</button></li>
+              <li class="nav-item" role="presentation"><button class="nav-link fw-bold" id="workflow-config-tab" data-bs-toggle="tab" data-bs-target="#workflow-config-pane" type="button" role="tab">Cấu hình</button></li>
+            </ul>
+            <div class="tab-content">
+              <div class="tab-pane fade show active" id="workflow-overview-pane" role="tabpanel">
+                <div id="workflowOverviewSummary" class="alert alert-info small"></div>
+                <div class="table-responsive">
+                  <table class="table table-sm table-bordered align-middle">
+                    <thead class="table-light"><tr><th>Bước</th><th>Sẵn sàng</th><th>Chờ</th><th>Đang làm</th><th>Trả lại</th><th>Xong</th><th>Làm lại</th></tr></thead>
+                    <tbody id="workflowOverviewBody"></tbody>
+                  </table>
+                </div>
+              </div>
+              <div class="tab-pane fade" id="workflow-cases-pane" role="tabpanel">
+                <div class="table-responsive admin-scroll-65vh">
+                  <table class="table table-sm table-bordered align-middle">
+                    <thead class="table-light sticky-top" id="workflowCasesHead"></thead>
+                    <tbody id="workflowCasesBody"></tbody>
+                  </table>
+                </div>
+              </div>
+              <div class="tab-pane fade" id="workflow-config-pane" role="tabpanel">
+                <div class="alert alert-warning small">Chọn các bước áp dụng cho dự án. Bước kiểm tra phải đi kèm bước được kiểm tra. Lần bật đầu tiên sẽ đánh dấu hoàn tất các bước trước nhập liệu cho hồ sơ đã có PDF.</div>
+                <div id="workflowConfigList"></div>
+                <button type="button" class="btn btn-primary" id="saveProjectWorkflowButton" data-admin-action="save-project-workflow"><i class="fas fa-save"></i> Lưu cấu hình quy trình</button>
+              </div>
+            </div>
+          </div>
+          <div class="modal-footer"><button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Đóng</button></div>
+        </div>
+      </div>
+    </div>
+
     <div class="modal fade" id="projectAssetsModal" tabindex="-1" aria-hidden="true">
       <div class="modal-dialog modal-xl">
         <div class="modal-content">
@@ -873,7 +916,8 @@
     <script src="js/admin_panel.js?v=203.06"></script>
     <script src="js/project_upload.js?v=1.00"></script>
     <script src="js/project_reports.js?v=1.00"></script>
-    <script src="js/project_management.js?v=2.08"></script>
+    <script src="js/project_management.js?v=2.09"></script>
+    <script src="js/project_workflow.js?v=1.00"></script>
     <script src="js/ocr_image.js?v=2"></script>
     <script src="js/ocr_config.js?v=4"></script>
     <script src="js/template_config.js?v=101.01"></script>

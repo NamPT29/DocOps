@@ -661,3 +661,12 @@ class ProjectPdfDeletionAudit(Base):
     content_sha256 = Column(String(64), nullable=False)
     deleted_by_user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
     deleted_at = Column(DateTime, nullable=False, default=get_utc_now, index=True)
+
+
+# Post-baseline pipeline tables (revision 0005); registers them on Base.metadata.
+from server.models_workflow import (  # noqa: E402,F401
+    CaseStageEvent,
+    CaseStageState,
+    ProjectStage,
+    ProjectStageMember,
+)

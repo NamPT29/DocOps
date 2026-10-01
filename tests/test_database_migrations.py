@@ -360,8 +360,7 @@ def test_legacy_workflow_revision_is_frozen_and_versioned(monkeypatch):
     with engine.connect() as connection:
         module = _load_legacy_workflow_revision(monkeypatch, connection)
 
-    assert HEAD_REVISION == "0004_normalize_legacy_workflow"
-    assert module.revision == HEAD_REVISION
+    assert module.revision == "0004_normalize_legacy_workflow"
     assert module.down_revision == "0003_submission_metadata"
     source = (
         ROOT

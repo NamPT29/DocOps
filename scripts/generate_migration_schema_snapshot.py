@@ -60,6 +60,9 @@ def _type_spec(column_type) -> dict:
 def build_snapshot() -> dict:
     tables = []
     for table in Base.metadata.sorted_tables:
+        if table.info.get("revision"):
+            # Created by a post-baseline Alembic revision; not part of 0001.
+            continue
         columns = []
         for column in table.columns:
             foreign_keys = [

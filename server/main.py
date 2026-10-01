@@ -111,6 +111,7 @@ OPENAPI_TAGS = [
     {"name": "notifications", "description": "User notifications."},
     {"name": "projects", "description": "Project and membership management."},
     {"name": "project-uploads", "description": "Chunked project asset uploads."},
+    {"name": "workflow", "description": "End-to-end digitization pipeline stages."},
 ]
 
 app = FastAPI(
@@ -133,7 +134,7 @@ register_exception_handlers(app)
 configure_http_middleware(app, settings.cors_origins)
 
 # Include routers
-from server.routers import auth, templates, submissions, documents, processing, dictionaries, notifications, projects, project_uploads
+from server.routers import auth, templates, submissions, documents, processing, dictionaries, notifications, projects, project_uploads, workflow
 app.include_router(auth.router)
 app.include_router(templates.router)
 app.include_router(submissions.router)
@@ -144,6 +145,8 @@ app.include_router(dictionaries.router)
 app.include_router(notifications.router)
 app.include_router(projects.router)
 app.include_router(project_uploads.router)
+app.include_router(workflow.catalog_router)
+app.include_router(workflow.router)
 configure_openapi(app)
 
 PDF_STORAGE_PATH = str(settings.pdf_storage_path)

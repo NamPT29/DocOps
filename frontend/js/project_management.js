@@ -214,6 +214,11 @@ async function loadProjectList() {
                     icon: 'fa-users',
                     handler: () => openProjectMembers(project.id),
                 },
+                {
+                    label: 'Quy trình số hóa',
+                    icon: 'fa-diagram-project',
+                    handler: () => openProjectWorkflow(project.id),
+                },
                 {divider: true},
                 {
                     label: 'Thêm / cập nhật PDF',

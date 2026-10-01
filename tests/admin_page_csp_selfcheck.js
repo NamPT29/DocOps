@@ -16,7 +16,7 @@ assert.match(html, /src="admin-page\.js\?v=2"/i, 'Admin page must load its exter
 
 const actionNames = [...html.matchAll(/data-admin-action="([^"]+)"/g)].map(match => match[1]);
 const changeNames = [...html.matchAll(/data-admin-change="([^"]+)"/g)].map(match => match[1]);
-assert.equal(actionNames.length, 25, 'All current click handlers must be represented by declarative actions.');
+assert.equal(actionNames.length, 26, 'All current click handlers must be represented by declarative actions.');
 assert.equal(changeNames.length, 7, 'All former change handlers must be represented by declarative actions.');
 
 const calls = [];
@@ -38,6 +38,7 @@ const actionFunctions = {
     loadProjectList: [],
     uploadTemplate: [],
     saveProjectMembers: [],
+    saveProjectWorkflow: [],
     reloadProjectReports: [],
     fetchTemplateDictionaries: [],
     createDictionary: [],
