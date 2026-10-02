@@ -36,6 +36,7 @@ def stage_catalog():
             "kind": stage.kind,
             "reviews": stage.reviews,
             "derived": stage.derived,
+            "allowed_roles": list(stage.allowed_roles),
         }
         for stage in engine.STAGE_CATALOG
     ]
@@ -74,6 +75,7 @@ def get_workflow_config(db, *, project_id):
             "kind": stage.kind,
             "reviews": stage.reviews,
             "derived": stage.derived,
+            "allowed_roles": list(stage.allowed_roles),
             "enabled": bool(row and row.is_enabled),
             "member_user_ids": member_ids,
             "members_from_project": stage.member_role is not None,
@@ -110,15 +112,16 @@ def _validate_members(repository, enabled, members):
             continue
         cleaned[stage_key] = sorted({int(user_id) for user_id in user_ids or []})
     users = repository.users_by_ids({uid for ids in cleaned.values() for uid in ids})
-    for ids in cleaned.values():
+    for stage_key, ids in cleaned.items():
+        stage = engine.STAGES_BY_KEY[stage_key]
         for user_id in ids:
             user = users.get(user_id)
             if user is None:
                 raise HTTPException(status_code=400, detail=f"Không tìm thấy người dùng: {user_id}")
-            if user.role == "admin":
+            if user.role != "admin" and "staff" not in stage.allowed_roles:
                 raise HTTPException(
                     status_code=400,
-                    detail="Quản trị viên không được phân làm người thực hiện bước quy trình",
+                    detail=f"Bước '{stage.label}' chỉ dành cho quản trị viên",
                 )
     return cleaned
 
@@ -438,7 +441,8 @@ def transition_case_stage(db, *, project_id, case_id, stage_key, action, actor, 
         stage = engine.STAGES_BY_KEY[stage_key]
         now = get_utc_now()
 
-        if stage.kind == "qc" and not is_admin and action in (
+        # BR-04: nobody checks their own work, administrators included.
+        if stage.kind == "qc" and action in (
             engine.START, engine.COMPLETE, engine.REJECT
         ):
             reviewed_state = stored.get(stage.reviews)
@@ -471,7 +475,10 @@ def transition_case_stage(db, *, project_id, case_id, stage_key, action, actor, 
             if new_status == engine.IN_PROGRESS:
                 state.started_at = state.started_at or now
                 state.completed_at = None
-                if key == stage_key and action == engine.START and not is_admin:
+                # A worker claims the case; an admin keeps an existing assignee.
+                if key == stage_key and action == engine.START and (
+                    not is_admin or state.assigned_user_id is None
+                ):
                     state.assigned_user_id = actor["id"]
             elif new_status == engine.DONE:
                 state.completed_at = now

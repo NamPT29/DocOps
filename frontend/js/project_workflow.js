@@ -49,8 +49,12 @@ function renderWorkflowConfig(config) {
     const container = document.getElementById('workflowConfigList');
     if (!container) return;
     container.replaceChildren();
-    const workers = projectManagementUsers.filter(user => user.role !== 'admin');
     config.stages.forEach(stage => {
+        // BA 3.3: admins may work every stage; some stages are admin-only.
+        const allowed = stage.allowed_roles || ['admin', 'staff'];
+        const workers = projectManagementUsers.filter(
+            user => (user.role === 'admin' ? allowed.includes('admin') : allowed.includes('staff')),
+        );
         const card = document.createElement('div');
         card.className = 'border rounded p-2 mb-2';
         const header = document.createElement('div');
@@ -93,7 +97,7 @@ function renderWorkflowConfig(config) {
                 const name = document.createElement('label');
                 name.className = 'form-check-label';
                 name.htmlFor = input.id;
-                name.textContent = user.username;
+                name.textContent = user.role === 'admin' ? `${user.username} (Admin)` : user.username;
                 wrapper.append(input, name);
                 list.appendChild(wrapper);
             });

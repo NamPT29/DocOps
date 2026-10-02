@@ -36,17 +36,20 @@ class StageDef:
     reviews: str | None = None  # QC stage -> the work stage it verifies
     derived: bool = False  # status comes from existing submissions, not stored
     member_role: str | None = None  # legacy project_members role, if any
+    # Roles allowed to work this stage (BA 3.3): "admin", "staff" (hành chính), "ctv".
+    allowed_roles: tuple = ("admin", "staff")
 
 
 STAGE_CATALOG = (
     StageDef("arrangement", "Chỉnh lý", "work"),
     StageDef("scan", "Scan", "work"),
     StageDef("scan_qc", "Check scan", "qc", reviews="scan"),
-    StageDef("data_entry", "Nhập liệu", "work", derived=True, member_role="input"),
+    StageDef("data_entry", "Nhập liệu", "work", derived=True, member_role="input",
+             allowed_roles=("admin", "staff", "ctv")),
     StageDef("entry_qc", "Check nhập liệu", "qc", reviews="data_entry", derived=True,
              member_role="reviewer"),
-    StageDef("normalization", "Chuẩn hóa", "work"),
-    StageDef("handover", "Bàn giao", "delivery"),
+    StageDef("normalization", "Chuẩn hóa", "work", allowed_roles=("admin",)),
+    StageDef("handover", "Bàn giao", "delivery", allowed_roles=("admin",)),
 )
 STAGES_BY_KEY = {stage.key: stage for stage in STAGE_CATALOG}
 STAGE_KEYS = tuple(stage.key for stage in STAGE_CATALOG)

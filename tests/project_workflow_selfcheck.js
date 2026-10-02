@@ -13,6 +13,8 @@ assert.doesNotMatch(source, /innerHTML|insertAdjacentHTML|document\.write/, 'Wor
 assert.match(html, /src="js\/project_workflow\.js\?v=[\d.]+"/, 'admin.html must load the workflow panel script.');
 assert.match(html, /id="projectWorkflowModal"/);
 assert.match(management, /openProjectWorkflow\(project\.id\)/, 'Project actions must expose the workflow panel.');
+// BA 3.3: stage member pickers follow each stage's allowed roles (admins included).
+assert.match(source, /stage\.allowed_roles/, 'Member pickers must respect stage.allowed_roles.');
 
 const sandbox = { projectManagementUsers: [], projectManagementProjects: [], console };
 vm.createContext(sandbox);

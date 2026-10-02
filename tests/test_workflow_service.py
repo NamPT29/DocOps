@@ -155,9 +155,15 @@ def test_config_requires_admin_and_validates(world):
     assert _configure(world, enabled=["nope"]).status_code == 400
     # a QC stage needs the stage it reviews
     assert _configure(world, enabled=["scan_qc"]).status_code == 400
-    # admins cannot be stage workers
-    bad = _configure(world, members={"scan": [world["admin"].id]})
-    assert bad.status_code == 400
+    # BA 3.3: admins may work any stage; normalization/handover are admin-only
+    assert _configure(world, members={"scan": [world["admin"].id]}).status_code == 200
+    staff_on_admin_stage = _configure(
+        world,
+        enabled=["normalization", "handover"],
+        members={"handover": [world["scanner"].id]},
+    )
+    assert staff_on_admin_stage.status_code == 400
+    assert "chỉ dành cho quản trị viên" in staff_on_admin_stage.json()["detail"]
 
     ok = _configure(world)
     assert ok.status_code == 200
@@ -350,3 +356,30 @@ def test_catalog_and_unknown_project(world):
         "/api/projects/9999/workflow", headers=world["headers"](world["admin"])
     )
     assert missing.status_code == 404
+
+
+def test_admin_is_also_bound_by_no_self_review(world):
+    """BR-04: an admin who scanned a case cannot pass its scan check either."""
+    _configure(world)
+    c1 = world["cases"][0]
+    admin = world["admin"]
+    assert _transition(world, admin, c1, "scan", "start").status_code == 200
+    assert _transition(world, admin, c1, "scan", "complete").status_code == 200
+    blocked = _transition(world, admin, c1, "scan_qc", "start")
+    assert blocked.status_code == 403
+    # a different person can check it
+    assert _transition(world, world["qc"], c1, "scan_qc", "start").status_code == 200
+
+
+def test_admin_start_keeps_existing_assignee(world):
+    _configure(world)
+    c1 = world["cases"][0]
+    url = f"/api/projects/{world['project'].id}/workflow/cases/{c1.id}/stages/scan/assignee"
+    world["client"].put(url, json={"user_id": world["scanner"].id}, headers=world["headers"](world["admin"]))
+    assert _transition(world, world["admin"], c1, "scan", "start").status_code == 200
+    cases = world["client"].get(
+        f"/api/projects/{world['project'].id}/workflow/cases",
+        headers=world["headers"](world["admin"]),
+    ).json()["data"]["items"]
+    scan = next(item for item in cases if item["case_id"] == c1.id)["stages"]["scan"]
+    assert scan["assigned_user_id"] == world["scanner"].id
