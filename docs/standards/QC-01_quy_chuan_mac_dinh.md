@@ -107,6 +107,17 @@ Hai hồ sơ xuất, chọn khi tạo dự án:
 - Diện tích trang vượt khổ chuẩn quá **10%** thì tính lên một khổ. Nhỏ hơn A5 tính A5, lớn hơn A0 tính A0.
 - File không đọc được: số trang `-1`, đưa vào danh sách lỗi, không tính sản lượng.
 
+## QC-08. Kiểm tra chất lượng và hạn xử lý (chi tiết)
+- **Ngưỡng lỗi của hộp (BR-07)**: 5%. Khác với "tỷ lệ lỗi tối đa của biểu mẫu" (xếp *một báo cáo* vào loại lỗi); hai ngưỡng tồn tại song song, đặt tên phân biệt.
+- **Tỷ lệ lấy mẫu check vòng 2**: 30%.
+- **Hạn xử lý hộp**: 2 ngày **lịch**, tính đủ 48 giờ kể từ lúc giao (không trừ thứ Bảy, Chủ nhật, ngày lễ), vì CTV làm cả cuối tuần. *(giả định)*
+- Giới hạn nhập: tỷ lệ 0–100; hạn 1–365 ngày; hệ số > 0 và ≤ 10 (chặn gõ nhầm "13" thay vì "1,3").
+
+## Cách áp dụng giá trị mặc định
+- Trường cấu hình dự án **để trống = theo QC-01 hiện hành**. QC-01 lên phiên bản mới thì mọi dự án chưa đặt riêng tự theo; giá trị Admin đã đặt riêng giữ nguyên.
+- Kết quả đã tính (sản lượng, chi trả, kết luận đạt/trả lại) phải **lưu kèm giá trị tham số tại thời điểm tính**, để đổi QC-01 sau này không làm thay đổi số liệu cũ.
+- Mã cơ quan được để trống khi tạo dự án; **bắt buộc khi sinh mã hồ sơ** ở bước chuẩn hóa/đóng gói.
+
 ## QC-07. Giấy xấu
 - Cờ `giấy xấu` gắn ở **hộp**. Người chỉnh lý đánh dấu khi chỉnh lý, Admin duyệt.
 - Hộp giấy xấu tính công việc loại 2 (Scan Ax2, Nhập liệu 2) với hệ số đơn giá **1,3** (*giả định*).
@@ -171,3 +182,4 @@ Dùng file mẫu `docs/standards/Mau_Muc_luc_chinh_ly.xlsx`:
 | Phiên bản | Ngày | Nội dung |
 |---|---|---|
 | 0.1 | 04/10/2026 | Bản đầu, chốt tạm theo mẫu đã phân tích và giả định |
+| 0.1.1 | 04/10/2026 | Chốt cách áp mặc định, giới hạn nhập, hạn xử lý theo ngày lịch, mã cơ quan bắt buộc ở bước đóng gói |
