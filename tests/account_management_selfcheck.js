@@ -57,6 +57,7 @@ sandbox.checkAuth();
         password: 'password123',
         full_name: '',
         phone_number: '0909',
+        account_type: 'staff',
         max_concurrent_sessions: 2,
     });
 

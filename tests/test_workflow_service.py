@@ -163,7 +163,7 @@ def test_config_requires_admin_and_validates(world):
         members={"handover": [world["scanner"].id]},
     )
     assert staff_on_admin_stage.status_code == 400
-    assert "chỉ dành cho quản trị viên" in staff_on_admin_stage.json()["detail"]
+    assert "chỉ dành cho: Admin" in staff_on_admin_stage.json()["detail"]
 
     ok = _configure(world)
     assert ok.status_code == 200
@@ -171,6 +171,22 @@ def test_config_requires_admin_and_validates(world):
     assert stages["scan"]["enabled"] and stages["scan"]["member_user_ids"] == [world["scanner"].id]
     assert not stages["handover"]["enabled"]
     assert ok.json()["data"]["configured"] is True
+
+
+def test_ctv_only_joins_stages_that_allow_ctv(world):
+    # FR-AUT-03: allowed_roles "staff" means Hành chính, so CTV is excluded.
+    ctv = User(
+        username="wf-ctv", password="x", role="user", account_type="ctv",
+        expires_on=get_utc_now().date() + timedelta(days=30),
+    )
+    world["db"].add(ctv)
+    world["db"].commit()
+
+    refused = _configure(world, members={"scan": [ctv.id], "scan_qc": [world["qc"].id]})
+    assert refused.status_code == 400
+    assert "chỉ dành cho: Admin, Hành chính" in refused.json()["detail"]
+    # Hành chính keeps working the same stage.
+    assert _configure(world).status_code == 200
 
 
 def test_full_cycle_with_reject_rework_and_audit(world):

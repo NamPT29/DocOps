@@ -65,6 +65,9 @@ def build_snapshot() -> dict:
             continue
         columns = []
         for column in table.columns:
+            if column.info.get("revision"):
+                # Column added to a baseline table by a later revision.
+                continue
             foreign_keys = [
                 {
                     "target": foreign_key.target_fullname,
@@ -88,6 +91,8 @@ def build_snapshot() -> dict:
 
         constraints = []
         for constraint in table.constraints:
+            if constraint.info.get("revision"):
+                continue
             if isinstance(constraint, UniqueConstraint):
                 constraints.append({
                     "kind": "unique",

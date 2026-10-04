@@ -10,6 +10,7 @@ from server.models import (
     ProjectCase,
     ProjectMember,
     ProjectPdfDeletionAudit,
+    ProjectStageMember,
     ProjectUploadSession,
     ServerFolderImportJob,
     ServerFolderImportReviewer,
@@ -51,6 +52,30 @@ class UserRepository(BaseRepository[User]):
             user.id: user
             for user in self.session.query(User).filter(User.id.in_(user_ids)).all()
         }
+
+    def ctv_conflict_assignments(
+        self,
+        user_id: int,
+        ctv_stage_keys: tuple[str, ...],
+    ) -> list[tuple[str, str, str | None]]:
+        """Active assignments a CTV may not hold: (project name, kind, stage key)."""
+        reviewer_rows = self.session.query(Project.name).join(
+            ProjectMember, ProjectMember.project_id == Project.id
+        ).filter(
+            ProjectMember.user_id == user_id,
+            ProjectMember.member_role == "reviewer",
+            ProjectMember.is_active.is_(True),
+        ).order_by(Project.name).all()
+        stage_rows = self.session.query(Project.name, ProjectStageMember.stage_key).join(
+            ProjectStageMember, ProjectStageMember.project_id == Project.id
+        ).filter(
+            ProjectStageMember.user_id == user_id,
+            ProjectStageMember.is_active.is_(True),
+            ProjectStageMember.stage_key.not_in(ctv_stage_keys),
+        ).order_by(Project.name, ProjectStageMember.stage_key).all()
+        return [(name, "reviewer", None) for name, in reviewer_rows] + [
+            (name, "stage", stage_key) for name, stage_key in stage_rows
+        ]
 
     def capability_flags(self, user_id: int) -> tuple[bool, bool]:
         can_input = bool(

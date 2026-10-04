@@ -30,6 +30,16 @@ function appendProjectCell(row, text, className = '') {
     return cell;
 }
 
+function projectUserLabel(user) {
+    if (user.role === 'admin') return `${user.username} (Admin)`;
+    return user.account_type === 'ctv' ? `${user.username} (CTV)` : user.username;
+}
+
+// FR-AUT-03 / BA 3.3: check nhập liệu is for Admin and Hành chính, never CTV.
+function projectReviewerCandidates(users) {
+    return users.filter(user => user.role === 'admin' || user.account_type !== 'ctv');
+}
+
 function renderProjectUserOptions(containerId, users, roleName) {
     const container = document.getElementById(containerId);
     if (!container) return;
@@ -52,7 +62,7 @@ function renderProjectUserOptions(containerId, users, roleName) {
         const label = document.createElement('label');
         label.className = 'form-check-label';
         label.htmlFor = input.id;
-        label.textContent = `${user.username}${user.role === 'admin' ? ' (Admin)' : ''}`;
+        label.textContent = projectUserLabel(user);
         wrapper.append(input, label);
         container.appendChild(wrapper);
     });
@@ -83,7 +93,7 @@ async function loadProjectFormOptions() {
         const users = Array.isArray(userData.data) ? userData.data : [];
         projectManagementUsers = users;
         renderProjectUserOptions('projectInputUsers', users.filter(user => user.role !== 'admin'), 'input');
-        renderProjectUserOptions('projectReviewerUsers', users, 'reviewer');
+        renderProjectUserOptions('projectReviewerUsers', projectReviewerCandidates(users), 'reviewer');
     }
 }
 
@@ -348,7 +358,7 @@ function renderProjectMemberEditor(containerId, users, selectedUserIds, classNam
         label.className = 'form-check-label';
         label.htmlFor = input.id;
         const name = document.createElement('span');
-        name.textContent = `${user.username}${user.role === 'admin' ? ' (Admin)' : ''}`;
+        name.textContent = projectUserLabel(user);
         label.appendChild(name);
         if (showReportStats) {
             const stats = statsByUser.get(Number(user.id)) || {};
@@ -380,7 +390,7 @@ function openProjectMembers(projectId) {
     );
     renderProjectMemberEditor(
         'projectMembersReviewerList',
-        projectManagementUsers,
+        projectReviewerCandidates(projectManagementUsers),
         project.reviewer_user_ids,
         'project-member-reviewer',
     );

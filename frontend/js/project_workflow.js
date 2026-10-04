@@ -40,6 +40,11 @@ function workflowTextCell(row, text, className = '') {
     return cell;
 }
 
+function workflowAccountType(user) {
+    if (user.role === 'admin') return 'admin';
+    return user.account_type === 'ctv' ? 'ctv' : 'staff';
+}
+
 function workflowEnabledKeys() {
     return Array.from(document.querySelectorAll('.workflow-stage-enabled:checked'))
         .map(input => input.value);
@@ -50,10 +55,11 @@ function renderWorkflowConfig(config) {
     if (!container) return;
     container.replaceChildren();
     config.stages.forEach(stage => {
-        // BA 3.3: admins may work every stage; some stages are admin-only.
+        // BA 3.3 / FR-AUT-03: pickers follow allowed_roles by account type, so
+        // CTV accounts only appear on stages that allow "ctv".
         const allowed = stage.allowed_roles || ['admin', 'staff'];
         const workers = projectManagementUsers.filter(
-            user => (user.role === 'admin' ? allowed.includes('admin') : allowed.includes('staff')),
+            user => allowed.includes(workflowAccountType(user)),
         );
         const card = document.createElement('div');
         card.className = 'border rounded p-2 mb-2';
@@ -97,7 +103,10 @@ function renderWorkflowConfig(config) {
                 const name = document.createElement('label');
                 name.className = 'form-check-label';
                 name.htmlFor = input.id;
-                name.textContent = user.role === 'admin' ? `${user.username} (Admin)` : user.username;
+                name.textContent = {
+                    admin: `${user.username} (Admin)`,
+                    ctv: `${user.username} (CTV)`,
+                }[workflowAccountType(user)] || user.username;
                 wrapper.append(input, name);
                 list.appendChild(wrapper);
             });

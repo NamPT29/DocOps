@@ -11,6 +11,7 @@ from server.repositories.dictionary_repository import DictionaryRepository
 from server.repositories.project_repository import ProjectRepository
 from server.repositories.template_repository import TemplateRepository
 from server.repositories.user_repository import UserRepository
+from server.services import account_policy_service as account_policy
 from server.services.excel_service import get_form_schema
 
 PROJECT_STATUSES = ("new", "in_progress", "completed", "overdue")
@@ -72,6 +73,9 @@ def _validate_project_members(db, input_user_ids, reviewer_user_ids):
             status_code=400,
             detail="Quản trị viên không được phân làm người nhập",
         )
+    # FR-AUT-03 / BA 3.3: check nhập liệu is for Admin and Hành chính only.
+    if account_policy.ctv_user_ids(users[user_id] for user_id in reviewer_ids):
+        raise HTTPException(status_code=400, detail=account_policy.CTV_REVIEWER_ERROR)
     return sorted(input_ids), sorted(reviewer_ids)
 
 

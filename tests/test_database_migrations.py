@@ -457,6 +457,44 @@ def test_legacy_workflow_revision_normalizes_values_idempotently(monkeypatch):
     ]
 
 
+def test_user_account_type_revision_defaults_existing_users_to_staff():
+    pytest.importorskip("alembic")
+    from alembic import command
+    from sqlalchemy.exc import IntegrityError
+
+    from server.migration_runner import _alembic_config
+
+    source = (
+        ROOT / "migrations" / "versions" / "0006_user_account_type.py"
+    ).read_text(encoding="utf-8")
+    assert "from server" not in source and "import server" not in source
+
+    engine = create_engine("sqlite+pysqlite:///:memory:")
+    config = _alembic_config(ROOT)
+    with engine.begin() as connection:
+        config.attributes["connection"] = connection
+        command.upgrade(config, "0005_workflow_stages")
+        connection.execute(text(
+            "INSERT INTO users (username, password, full_name, role, max_concurrent_sessions) "
+            "VALUES ('legacy', 'x', 'Legacy', 'user', 1)"
+        ))
+
+        command.upgrade(config, "0006_user_account_type")
+        assert current_database_revision(connection) == HEAD_REVISION
+        row = connection.execute(text(
+            "SELECT account_type, expires_on FROM users WHERE username = 'legacy'"
+        )).one()
+        assert tuple(row) == ("staff", None)
+        with pytest.raises(IntegrityError), connection.begin_nested():
+            connection.execute(text("UPDATE users SET account_type = 'boss'"))
+        assert validate_existing_database(connection) == []
+
+        command.downgrade(config, "0005_workflow_stages")
+        columns = {column["name"] for column in inspect(connection).get_columns("users")}
+        assert {"account_type", "expires_on"}.isdisjoint(columns)
+        assert connection.execute(text("SELECT username FROM users")).scalar_one() == "legacy"
+
+
 def test_request_paths_do_not_call_submission_metadata_backfill():
     request_paths = [
         ROOT / "server" / "routers",

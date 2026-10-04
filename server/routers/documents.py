@@ -19,6 +19,7 @@ from server.models import (
     SubmissionReviewAssignment,
     ServerFolderImportJob,
 )
+from server.services import account_policy_service as account_policy
 from server.services.upload_service import save_validated_upload
 from server.utils.folder_utils import (
     NO_FOLDER_SENTINEL,
@@ -184,6 +185,8 @@ def _upload_and_assign_documents_sync(
         raise HTTPException(status_code=400, detail="Danh sách nhân viên không hợp lệ")
     if not set(reviewer_id_list).issubset(valid_reviewer_ids):
         raise HTTPException(status_code=400, detail="Danh sách người kiểm tra không hợp lệ")
+    if account_policy.ctv_user_ids(user_repository.user_map(reviewer_id_list).values()):
+        raise HTTPException(status_code=400, detail=account_policy.CTV_REVIEWER_ERROR)
     if any(not (set(reviewer_id_list) - {user_id}) for user_id in user_id_list):
         raise HTTPException(
             status_code=400,
@@ -397,6 +400,8 @@ def redistribute_folder_reviewers(
     reviewer_map = UserRepository(db).user_map(reviewer_ids)
     if len(reviewer_map) != len(reviewer_ids):
         raise HTTPException(status_code=400, detail="Danh sách người kiểm tra không hợp lệ")
+    if account_policy.ctv_user_ids(reviewer_map.values()):
+        raise HTTPException(status_code=400, detail=account_policy.CTV_REVIEWER_ERROR)
 
     groups = _get_active_reviewer_folder_groups(db)
     reviewer_order = {reviewer_id: index for index, reviewer_id in enumerate(reviewer_ids)}

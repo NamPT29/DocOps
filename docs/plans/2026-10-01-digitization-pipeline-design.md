@@ -49,9 +49,27 @@ Giao diện: Tab **Dự án → Thao tác → Quy trình số hóa** (`frontend/
   `info={"revision": ...}` để bộ sinh snapshot bỏ qua.
 - Router/service không gọi `.query(`; repository không `commit/rollback` (có test bảo vệ).
 - Migration không import `server.*`; mỗi revision mới nâng `HEAD_REVISION`.
-- Quyền nhập/kiểm hiện **suy ra từ phân công** (`UserRepository.capability_flags`), chưa có
-  trường role "Hành chính"/"CTV" rõ ràng. FR-AUT-01/02 (03/10) sẽ thêm loại tài khoản CTV và hạn
-  sử dụng; khi đó `allowed_roles` "staff" sẽ loại CTV.
+- Quyền nhập/kiểm cụ thể vẫn **suy ra từ phân công** (`UserRepository.capability_flags`).
+  Cột thêm sau baseline gắn `info={"revision": ...}` giống bảng mới; bộ sinh snapshot bỏ qua chúng.
+
+## Loại tài khoản và hạn CTV (03/10, FR-AUT-02/03, revision `0006_user_account_type`)
+
+- `users.role` giữ nguyên ('admin' | 'user') làm cờ phân quyền. Thêm `users.account_type`
+  ('staff' = Hành chính | 'ctv') và `users.expires_on` (DATE, chỉ CTV). Tài khoản cũ thành 'staff'.
+- Hàm thuần ở `server/services/account_policy_service.py`. CTV dùng được **hết ngày** `expires_on`
+  theo giờ VN (UTC+7 cố định); từ 00:00 hôm sau: đăng nhập trả 403, phiên đang mở trả 401 và bị thu hồi.
+- Không đặt hạn ở quá khứ (tạo và sửa); giữ nguyên ngày cũ thì vẫn sửa được thông tin khác.
+- `allowed_roles` so theo loại tài khoản: CTV chỉ vào được bước có "ctv" (nhập liệu). CTV không được
+  làm người kiểm tra ở mọi luồng (dự án, nhập thư mục máy chủ, giao tài liệu, chia lại người kiểm tra).
+- Đổi Hành chính → CTV bị từ chối (409) nếu còn phân công không dành cho CTV; hệ thống liệt kê,
+  không tự gỡ. Không đổi qua lại với Admin.
+
+## Ghi chú cho các nhiệm vụ sau
+
+- 04/10 giao/thu hồi hộp (BR-06): Admin cần thấy các hộp đang nằm ở CTV **đã hết hạn** để thu hồi
+  (`account_policy.is_expired`).
+- Chưa có chức năng **khóa tài khoản**. Muốn cắt quyền ngay hiện chỉ có "Giải phóng phiên" + đổi
+  mật khẩu (hạn CTV không đặt được ở quá khứ, nên không dùng hạn để khóa ngay).
 
 ## Lộ trình (BA mục 12.2)
 

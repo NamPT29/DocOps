@@ -514,6 +514,37 @@ function renderPersonnelStatistics(rows) {
     }).join('');
 }
 
+// FR-AUT-02/03: account types (BA mục 3) and the CTV expiry date.
+const ACCOUNT_TYPE_LABELS = { admin: 'Admin', staff: 'Hành chính', ctv: 'CTV' };
+
+function accountTypeOf(user) {
+    if (user && user.role === 'admin') return 'admin';
+    return user && user.account_type === 'ctv' ? 'ctv' : 'staff';
+}
+
+function formatAccountDate(isoDate) {
+    const parts = String(isoDate || '').split('-');
+    return parts.length === 3 ? `${parts[2]}/${parts[1]}/${parts[0]}` : '';
+}
+
+function syncAccountExpiryField(prefix) {
+    const select = document.getElementById(`${prefix}AccountType`);
+    const group = document.getElementById(`${prefix}ExpiresOnGroup`);
+    if (!select || !group) return;
+    group.classList.toggle('d-none', select.disabled || select.value !== 'ctv');
+}
+
+function accountTypeCellHtml(user) {
+    const accountType = accountTypeOf(user);
+    const badgeClass = { admin: 'bg-danger', staff: 'bg-secondary', ctv: 'bg-info text-dark' }[accountType];
+    const parts = [`<span class="badge ${badgeClass}">${ACCOUNT_TYPE_LABELS[accountType]}</span>`];
+    if (accountType === 'ctv' && user.expires_on) {
+        parts.push(`<small class="text-muted">HSD ${escapeHTML(formatAccountDate(user.expires_on))}</small>`);
+    }
+    if (user.is_expired) parts.push('<span class="badge bg-danger">Hết hạn</span>');
+    return parts.join(' ');
+}
+
 async function fetchAdminData() {
     if (currentUser.role !== 'admin') return;
     
@@ -552,6 +583,7 @@ async function fetchAdminData() {
                     <td>${safeUsername}</td>
                     <td>${safeFullName}</td>
                     <td>${safePhoneNumber}</td>
+                    <td><div class="d-flex flex-wrap align-items-center gap-1">${accountTypeCellHtml(u)}</div></td>
                     <td><div class="d-flex flex-wrap gap-1">${badges.join('')}</div></td>
                     <td class="text-center"><span class="badge ${activeSessions >= sessionLimit ? 'bg-warning text-dark' : 'bg-light text-dark border'}">${activeSessions}/${sessionLimit}</span></td>
                     <td>${deleteBtn}${changePwdBtn}${editBtn}${revokeSessionsBtn}</td>
@@ -946,20 +978,28 @@ async function createUser() {
     const fullName = document.getElementById('newFullName').value.trim();
     const phoneNumber = document.getElementById('newPhoneNumber').value.trim();
     const maxConcurrentSessions = Number(document.getElementById('newMaxConcurrentSessions').value) || 1;
+    const accountTypeInput = document.getElementById('newAccountType');
+    const expiresOnInput = document.getElementById('newExpiresOn');
+    const accountType = accountTypeInput && accountTypeInput.value === 'ctv' ? 'ctv' : 'staff';
+    const expiresOn = accountType === 'ctv' && expiresOnInput ? expiresOnInput.value : '';
     if (!u || !p) return alert("Vui lòng nhập tên và mật khẩu");
     if (p.length < 8) return alert("Mật khẩu phải có ít nhất 8 ký tự");
+    if (accountType === 'ctv' && !expiresOn) return alert("Vui lòng chọn ngày hết hạn cho tài khoản CTV");
+    const payload = {
+        username: u,
+        password: p,
+        full_name: fullName,
+        phone_number: phoneNumber,
+        account_type: accountType,
+        max_concurrent_sessions: maxConcurrentSessions,
+    };
+    if (accountType === 'ctv') payload.expires_on = expiresOn;
     const data = await apiCall('/api/users', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({
-            username: u,
-            password: p,
-            full_name: fullName,
-            phone_number: phoneNumber,
-            max_concurrent_sessions: maxConcurrentSessions,
-        })
+        body: JSON.stringify(payload)
     });
-    
+
     if (data) {
         invalidateUsersCache();
         alert("Tạo tài khoản thành công!");
@@ -968,6 +1008,9 @@ async function createUser() {
         document.getElementById('newFullName').value = '';
         document.getElementById('newPhoneNumber').value = '';
         document.getElementById('newMaxConcurrentSessions').value = '1';
+        if (accountTypeInput) accountTypeInput.value = 'staff';
+        if (expiresOnInput) expiresOnInput.value = '';
+        syncAccountExpiryField('new');
         fetchAdminData();
     }
 }
@@ -1002,6 +1045,13 @@ function openEditUserModal(userId) {
     document.getElementById('editFullName').value = userDisplayName(user);
     document.getElementById('editPhoneNumber').value = user.phone_number || '';
     document.getElementById('editMaxConcurrentSessions').value = Number(user.max_concurrent_sessions) || 1;
+    const accountType = accountTypeOf(user);
+    const accountTypeInput = document.getElementById('editAccountType');
+    accountTypeInput.value = accountType === 'ctv' ? 'ctv' : 'staff';
+    accountTypeInput.disabled = accountType === 'admin';
+    document.getElementById('editAccountTypeAdminNote').classList.toggle('d-none', accountType !== 'admin');
+    document.getElementById('editExpiresOn').value = user.expires_on || '';
+    syncAccountExpiryField('edit');
     new bootstrap.Modal(document.getElementById('editUserModal')).show();
 }
 
@@ -1010,14 +1060,24 @@ async function submitEditUser() {
     const fullName = document.getElementById('editFullName').value.trim();
     const phoneNumber = document.getElementById('editPhoneNumber').value.trim();
     const maxConcurrentSessions = Number(document.getElementById('editMaxConcurrentSessions').value) || 1;
+    const payload = {
+        full_name: fullName,
+        phone_number: phoneNumber,
+        max_concurrent_sessions: maxConcurrentSessions,
+    };
+    const accountTypeInput = document.getElementById('editAccountType');
+    if (accountTypeInput && !accountTypeInput.disabled) {
+        payload.account_type = accountTypeInput.value === 'ctv' ? 'ctv' : 'staff';
+        const expiresOn = document.getElementById('editExpiresOn').value;
+        if (payload.account_type === 'ctv' && !expiresOn) {
+            return alert('Vui lòng chọn ngày hết hạn cho tài khoản CTV');
+        }
+        payload.expires_on = payload.account_type === 'ctv' ? expiresOn : null;
+    }
     const data = await apiCall(`/api/users/${userId}`, {
         method: 'PATCH',
         headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({
-            full_name: fullName,
-            phone_number: phoneNumber,
-            max_concurrent_sessions: maxConcurrentSessions,
-        }),
+        body: JSON.stringify(payload),
     });
     if (!data) return;
     invalidateUsersCache();

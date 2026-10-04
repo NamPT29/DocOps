@@ -8,6 +8,7 @@ from server.models import (
     ProjectStageMember,
 )
 from server.repositories.workflow_repository import WorkflowRepository
+from server.services import account_policy_service as account_policy
 from server.services import workflow_engine as engine
 
 _CLIENT_ERROR_CODES = {"unknown_stage", "unknown_action", "reason_required"}
@@ -118,10 +119,14 @@ def _validate_members(repository, enabled, members):
             user = users.get(user_id)
             if user is None:
                 raise HTTPException(status_code=400, detail=f"Không tìm thấy người dùng: {user_id}")
-            if user.role != "admin" and "staff" not in stage.allowed_roles:
+            # FR-AUT-03: "staff" means Hành chính only, so CTV is excluded here.
+            if account_policy.account_type_of(user) not in stage.allowed_roles:
                 raise HTTPException(
                     status_code=400,
-                    detail=f"Bước '{stage.label}' chỉ dành cho quản trị viên",
+                    detail=(
+                        f"Bước '{stage.label}' chỉ dành cho: "
+                        f"{account_policy.role_labels(stage.allowed_roles)}"
+                    ),
                 )
     return cleaned
 

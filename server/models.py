@@ -1,12 +1,24 @@
 from datetime import datetime
 
-from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Boolean, Text, UniqueConstraint, Index
+from sqlalchemy import Column, Integer, String, Date, DateTime, ForeignKey, Boolean, Text, UniqueConstraint, Index, CheckConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 from server.database import Base, get_utc_now
 
+# Columns/constraints added after the frozen baseline carry this marker so the
+# schema 0001 snapshot generator skips them.
+USER_ACCOUNT_REVISION = {"revision": "0006_user_account_type"}
+
+
 class User(Base):
     __tablename__ = "users"
-    
+    __table_args__ = (
+        CheckConstraint(
+            "account_type IN ('staff', 'ctv')",
+            name="ck_users_account_type",
+            info=USER_ACCOUNT_REVISION,
+        ),
+    )
+
     id = Column(Integer, primary_key=True)
     username = Column(String(255), unique=True, index=True, nullable=False)
     password = Column(String(255), nullable=False) # Scrypt hash; legacy values migrate on login
@@ -15,6 +27,17 @@ class User(Base):
     role = Column(String(255), default="user") # 'admin' or 'user'
     max_concurrent_sessions = Column(Integer, nullable=False, default=1)
     created_at = Column(DateTime, default=get_utc_now)
+    # FR-AUT-02/03: non-admin accounts are 'staff' (Hành chính) or 'ctv'.
+    # Admins keep role='admin'; their account_type is not used.
+    account_type = Column(
+        String(16),
+        nullable=False,
+        default="staff",
+        server_default="staff",
+        info=USER_ACCOUNT_REVISION,
+    )
+    # Last day (Vietnam time) a CTV may sign in; NULL for other accounts.
+    expires_on = Column(Date, nullable=True, info=USER_ACCOUNT_REVISION)
 
 
 class UserLoginSession(Base):

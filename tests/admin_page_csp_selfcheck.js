@@ -12,12 +12,12 @@ assert.doesNotMatch(html, /\bon[a-z]+\s*=/i, 'Admin page must not contain inline
 assert.doesNotMatch(html, /<style\b/i, 'Admin page must not contain inline style elements.');
 assert.doesNotMatch(html, /\bstyle\s*=/i, 'Admin page must not contain inline style attributes.');
 assert.match(html, /href="(?:css\/)?admin-page\.css\?v=1"/i, 'Admin page must load its external stylesheet.');
-assert.match(html, /src="admin-page\.js\?v=2"/i, 'Admin page must load its external behavior script.');
+assert.match(html, /src="admin-page\.js\?v=3"/i, 'Admin page must load its external behavior script.');
 
 const actionNames = [...html.matchAll(/data-admin-action="([^"]+)"/g)].map(match => match[1]);
 const changeNames = [...html.matchAll(/data-admin-change="([^"]+)"/g)].map(match => match[1]);
 assert.equal(actionNames.length, 26, 'All current click handlers must be represented by declarative actions.');
-assert.equal(changeNames.length, 7, 'All former change handlers must be represented by declarative actions.');
+assert.equal(changeNames.length, 9, 'All former change handlers must be represented by declarative actions.');
 
 const calls = [];
 const listeners = {};
@@ -30,6 +30,7 @@ const actionFunctions = {
     initializeProjectManagement: [],
     fetchAdminTemplates: [],
     createUser: [],
+    syncAccountExpiryField: [],
     handleProjectFolderSelection: [],
     cancelProjectFolderUpdate: [],
     updateProjectLevelOptions: [],
@@ -115,6 +116,8 @@ assert.equal(typeof listeners.DOMContentLoaded, 'function');
     }
     assert.equal(calls.length, actionNames.length + changeNames.length, 'Every declarative action must resolve to one handler.');
     assert(calls.some(call => call.name === 'saveProjectMembers' && call.args.length === 0));
+    const expirySyncs = calls.filter(call => call.name === 'syncAccountExpiryField').map(call => call.args[0]);
+    assert.deepEqual(expirySyncs.sort(), ['edit', 'new'], 'Account type selects toggle their own expiry field.');
 
     calls.length = 0;
     sandbox.window.location.hash = '#projects';

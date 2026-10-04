@@ -9,10 +9,11 @@ import logging
 import os
 import secrets
 from typing import Literal
-from datetime import timedelta
+from datetime import date, timedelta
 from server.database import get_db, SessionLocal, get_utc_now
 from server.models import User
 from server.repositories import UserRepository
+from server.services import account_policy_service as account_policy
 from server.services.login_rate_limit_service import (
     DatabaseLoginRateLimiter,
     LoginRateLimiter,
@@ -136,6 +137,11 @@ def get_current_user(
             status_code=401,
             detail="Phiên đăng nhập không còn hiệu lực",
         )
+    if account_policy.is_expired(user):
+        # FR-AUT-02: an expired CTV loses open sessions too, not only new logins.
+        revoke_session(db, user_id=user.id, session_id=session_id)
+        db.commit()
+        raise HTTPException(status_code=401, detail=account_policy.expired_message(user))
     return {
         "id": user.id,
         "username": user.username,
@@ -198,6 +204,11 @@ def build_user_payload(
         "full_name": full_name or user.username,
         "phone_number": getattr(user, "phone_number", None),
         "role": user.role,
+        "account_type": account_policy.account_type_of(user),
+        "expires_on": (
+            user.expires_on.isoformat() if getattr(user, "expires_on", None) else None
+        ),
+        "is_expired": account_policy.is_expired(user),
         "max_concurrent_sessions": normalize_session_limit(
             getattr(user, "max_concurrent_sessions", 1)
         ),
@@ -307,6 +318,9 @@ def api_login(
             status_code=503,
             detail="Dịch vụ bảo vệ đăng nhập tạm thời không khả dụng.",
         ) from exc
+
+    if account_policy.is_expired(user):
+        raise HTTPException(status_code=403, detail=account_policy.expired_message(user))
 
     if not user.password.startswith("scrypt$"):
         user.password = hash_password(req.password)
@@ -428,6 +442,8 @@ class CreateUserRequest(BaseModel):
     full_name: str | None = Field(default=None, max_length=255)
     phone_number: str | None = Field(default=None, max_length=50)
     role: Literal["admin", "user"] = "user"
+    account_type: Literal["staff", "ctv"] | None = None
+    expires_on: date | None = None
     max_concurrent_sessions: int = Field(default=1, ge=1, le=20)
 
 @router.post("/users")
@@ -435,12 +451,24 @@ def api_create_user(req: CreateUserRequest, current_user: dict = Depends(get_adm
     repository = UserRepository(db)
     if repository.get_by_username(req.username):
         raise HTTPException(status_code=409, detail="Username already exists")
+    if req.role == "admin" and req.account_type == account_policy.CTV:
+        raise HTTPException(status_code=400, detail="Tài khoản Admin không thể là CTV.")
+    account_type = req.account_type or account_policy.STAFF
+    try:
+        expires_on = account_policy.validate_expiry(
+            account_policy.ADMIN if req.role == "admin" else account_type,
+            req.expires_on,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     user = User(
         username=req.username,
         password=hash_password(req.password),
         full_name=(req.full_name or "").strip() or req.username,
         phone_number=(req.phone_number or "").strip() or None,
         role=req.role,
+        account_type=account_policy.STAFF if req.role == "admin" else account_type,
+        expires_on=expires_on,
         max_concurrent_sessions=req.max_concurrent_sessions,
     )
     repository.add(user)
@@ -490,6 +518,45 @@ class UpdateUserProfileRequest(BaseModel):
     full_name: str | None = Field(default=None, max_length=255)
     phone_number: str | None = Field(default=None, max_length=50)
     max_concurrent_sessions: int | None = Field(default=None, ge=1, le=20)
+    account_type: Literal["staff", "ctv"] | None = None
+    expires_on: date | None = None
+
+
+def _validated_account_change(repository, user, req: UpdateUserProfileRequest):
+    """Return ``(account_type, expires_on)`` to store, or raise ``HTTPException``."""
+    current_type = account_policy.account_type_of(user)
+    if current_type == account_policy.ADMIN:
+        if req.account_type is not None:
+            raise HTTPException(status_code=400, detail="Không đổi loại tài khoản của Admin.")
+        return user.account_type, user.expires_on
+
+    new_type = req.account_type or current_type
+    requested_expiry = (
+        req.expires_on if "expires_on" in req.model_fields_set else user.expires_on
+    )
+    try:
+        expires_on = account_policy.validate_expiry(
+            new_type,
+            requested_expiry,
+            previous=user.expires_on if current_type == account_policy.CTV else None,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    if new_type == account_policy.CTV and current_type != account_policy.CTV:
+        conflicts = account_policy.describe_ctv_conflicts(
+            repository.ctv_conflict_assignments(user.id, account_policy.CTV_STAGE_KEYS)
+        )
+        if conflicts:
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    "Không thể chuyển sang CTV vì đang có phân công không dành cho CTV. "
+                    "Hãy gỡ trước: " + "; ".join(conflicts) + "."
+                ),
+            )
+    return new_type, expires_on
+
 
 @router.put("/users/{user_id}/password")
 def api_change_user_password(
@@ -529,8 +596,11 @@ def api_update_user_profile(
     if not user:
         raise HTTPException(status_code=404, detail="Không tìm thấy người dùng")
 
+    account_type, expires_on = _validated_account_change(repository, user, req)
     user.full_name = (req.full_name or "").strip() or user.username
     user.phone_number = (req.phone_number or "").strip() or None
+    user.account_type = account_type
+    user.expires_on = expires_on
     revoked_sessions = 0
     if req.max_concurrent_sessions is not None:
         user.max_concurrent_sessions = req.max_concurrent_sessions

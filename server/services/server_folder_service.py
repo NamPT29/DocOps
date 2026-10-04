@@ -21,6 +21,7 @@ from server.models import (
     AssignedDocumentPath,
     AssignedDocumentReviewAssignment,
 )
+from server.services import account_policy_service as account_policy
 from server.services.upload_service import DOCUMENT_EXTENSIONS, save_validated_upload
 from server.repositories import (
     DocumentRepository,
@@ -456,6 +457,8 @@ def create_server_folder_import_job(
         raise HTTPException(status_code=400, detail="Danh sách người nhập không hợp lệ")
     if not set(reviewer_user_ids).issubset(valid_reviewer_ids):
         raise HTTPException(status_code=400, detail="Danh sách người kiểm tra không hợp lệ")
+    if account_policy.ctv_user_ids(user_repository.user_map(reviewer_user_ids).values()):
+        raise HTTPException(status_code=400, detail=account_policy.CTV_REVIEWER_ERROR)
     if any(not (set(reviewer_user_ids) - {user_id}) for user_id in input_user_ids):
         raise HTTPException(
             status_code=400,

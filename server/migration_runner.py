@@ -21,7 +21,7 @@ from migrations.schema_0001 import SCHEMA
 
 
 BASELINE_REVISION = "0001_current_schema"
-HEAD_REVISION = "0005_workflow_stages"
+HEAD_REVISION = "0006_user_account_type"
 _POSTGRES_MIGRATION_LOCK_ID = 761_004_001
 
 
