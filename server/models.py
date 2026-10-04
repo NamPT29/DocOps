@@ -923,3 +923,8 @@ from server.models_workflow import (  # noqa: E402,F401
     ProjectStage,
     ProjectStageMember,
 )
+
+from server.models_scan import (  # noqa: E402,F401
+    CaseScanPackage,
+    CaseScanFile,
+)

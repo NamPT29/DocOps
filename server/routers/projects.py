@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Any, Literal
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.orm import Session
 
@@ -363,4 +363,67 @@ def api_delete_project_asset(
             asset_id=asset_id,
             deleted_by_user_id=current_user["id"],
         ),
+    }
+
+
+class ScanPackageCreateRequest(BaseModel):
+    folder_path: str
+    scan_user_name_level: int = 1
+
+
+@router.post("/{project_id}/cases/{case_id}/scan-packages")
+def api_create_scan_package(
+    project_id: int,
+    case_id: int,
+    request: ScanPackageCreateRequest,
+    background_tasks: BackgroundTasks,
+    current_user: dict = Depends(get_admin_user),
+    db: Session = Depends(get_db),
+):
+    from server.services.scan_ingestion_service import submit_scan_package, process_scan_package_background
+
+    pkg = submit_scan_package(
+        db,
+        project_id=project_id,
+        case_id=case_id,
+        folder_path=request.folder_path,
+        scan_user_name_level=request.scan_user_name_level,
+        actor=current_user,
+    )
+    
+    background_tasks.add_task(process_scan_package_background, pkg.id)
+    
+    return {"status": "ok", "package_id": pkg.id}
+
+
+@router.get("/{project_id}/cases/{case_id}/scan-packages")
+def api_list_scan_packages(
+    project_id: int,
+    case_id: int,
+    current_user: dict = Depends(get_admin_user),
+    db: Session = Depends(get_db),
+):
+    from server.repositories.scan_repository import list_scan_packages
+    
+    packages = list_scan_packages(db, case_id)
+    return {
+        "status": "ok",
+        "data": [
+            {
+                "id": p.id,
+                "version": p.version,
+                "status": p.status,
+                "scanned_by_name": p.scanned_by_name,
+                "total_files": p.total_files,
+                "processed_files": p.processed_files,
+                "failed_files": p.failed_files,
+                "total_pages": p.total_pages,
+                "total_a4_equivalent": p.total_a4_equivalent,
+                "warning_flags": p.warning_flags,
+                "error_message": p.error_message,
+                "started_at": p.started_at,
+                "finished_at": p.finished_at,
+            }
+            for p in packages
+        ]
     }

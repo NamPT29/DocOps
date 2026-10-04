@@ -16,3 +16,5 @@ pytest-mock
 cachetools
 redis
 fakeredis
+
+pypdf

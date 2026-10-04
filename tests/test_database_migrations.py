@@ -691,7 +691,7 @@ def test_case_input_assignment_revision_is_additive_and_backfills():
 
         # Upgrade to 0010
         command.upgrade(config, "0010_case_input_assignment")
-        assert current_database_revision(connection) == HEAD_REVISION
+        assert current_database_revision(connection) == "0010_case_input_assignment"
         assert validate_existing_database(connection) == []
 
         # Check backfilled submitted_by_user_id
@@ -749,3 +749,73 @@ def test_request_paths_do_not_call_submission_metadata_backfill():
                 offenders.append(path.relative_to(ROOT).as_posix())
 
     assert offenders == []
+
+
+def test_scan_packages_revision_is_additive():
+    pytest.importorskip("alembic")
+    from alembic import command
+    from sqlalchemy import inspect, text
+    from sqlalchemy.exc import IntegrityError
+    from server.migration_runner import _alembic_config
+
+    engine = create_engine("sqlite+pysqlite:///:memory:")
+    config = _alembic_config(ROOT)
+    with engine.begin() as connection:
+        config.attributes["connection"] = connection
+        command.upgrade(config, "0010_case_input_assignment")
+        
+        command.upgrade(config, "0011_scan_packages")
+        assert current_database_revision(connection) == "0011_scan_packages"
+        assert validate_existing_database(connection) == []
+        
+        # Setup dummy data for constraints test
+        connection.execute(text(
+            "INSERT INTO users (id, username, password, full_name, role, max_concurrent_sessions) "
+            "VALUES (1, 'u1', 'x', 'U1', 'admin', 1)"
+        ))
+        connection.execute(text("INSERT INTO templates (id, name, filename) VALUES (1, 't', 't.xlsx')"))
+        connection.execute(text(
+            "INSERT INTO projects (id, name, root_folder_name, template_id, "
+            "template_name_snapshot, template_filename_snapshot, case_level, report_mode, "
+            "status, created_by_user_id, created_at, updated_at) "
+            "VALUES (1, 'P', 'p', 1, 't', 't.xlsx', 1, 'pdf', 'new', 1, "
+            "CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"
+        ))
+        connection.execute(text(
+            "INSERT INTO project_cases (id, project_id, case_key, display_name, created_at, updated_at) "
+            "VALUES (1, 1, 'c1', 'Hộp 1', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"
+        ))
+        
+        # Insert a processing package
+        connection.execute(text(
+            "INSERT INTO case_scan_packages (case_id, version, submitted_by_user_id, scan_user_name_level, source_path, status, started_at) "
+            "VALUES (1, 1, 1, 1, '/tmp/a', 'processing', CURRENT_TIMESTAMP)"
+        ))
+        
+        # Inserting another processing package for same case should fail (partial unique index)
+        with pytest.raises(IntegrityError), connection.begin_nested():
+            connection.execute(text(
+                "INSERT INTO case_scan_packages (case_id, version, submitted_by_user_id, scan_user_name_level, source_path, status, started_at) "
+                "VALUES (1, 2, 1, 1, '/tmp/b', 'processing', CURRENT_TIMESTAMP)"
+            ))
+            
+        # Updating the first one to 'done' should allow a new 'processing' one
+        connection.execute(text(
+            "UPDATE case_scan_packages SET status = 'done' WHERE case_id = 1 AND version = 1"
+        ))
+        connection.execute(text(
+            "INSERT INTO case_scan_packages (case_id, version, submitted_by_user_id, scan_user_name_level, source_path, status, started_at) "
+            "VALUES (1, 2, 1, 1, '/tmp/b', 'processing', CURRENT_TIMESTAMP)"
+        ))
+        
+        # Test unique constraint on case_id, version
+        with pytest.raises(IntegrityError), connection.begin_nested():
+            connection.execute(text(
+                "INSERT INTO case_scan_packages (case_id, version, submitted_by_user_id, scan_user_name_level, source_path, status, started_at) "
+                "VALUES (1, 2, 1, 1, '/tmp/c', 'failed', CURRENT_TIMESTAMP)"
+            ))
+
+        command.downgrade(config, "0010_case_input_assignment")
+        tables = set(inspect(connection).get_table_names())
+        assert "case_scan_packages" not in tables
+        assert "case_scan_files" not in tables

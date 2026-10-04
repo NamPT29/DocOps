@@ -171,11 +171,23 @@ Giao diện: Tab **Dự án → Thao tác → Quy trình số hóa** (`frontend/
   + Reviewer không được duyệt báo cáo do chính mình tạo (`created_by_user_id`) hoặc nộp (`submitted_by_user_id`).
   + Các câu truy vấn SQL an toàn với NULL (`or_(col.is_(None), col != reviewer_id)`).
 
+## Nộp S (04/10, nhiệm vụ 4b, FR-SCN-01, revision `0011_scan_packages`)
+
+- Người scan **KHÔNG CÓ TÀI KHOẢN**. Danh tính người scan là TÊN đọc từ thư mục (`scanned_by_name`). Lưu nguyên văn, chỉ cắt khoảng trắng đầu/cuối, dùng cho sản lượng QC-06.
+  + Cấu hình vị trí tên: `scan_user_name_level` (mặc định 1 = thư mục cha của thư mục hộp, ví dụ `<Tên người scan>\<Số hộp>\<Số hồ sơ>\*.pdf`; 0 = không có tên). Nếu không tìm thấy tên ở vị trí quy định thì cảnh báo "chưa có tên người scan".
+  + `scanned_by_user_id` là TÙY CHỌN: ghi khi tên (bỏ dấu, khoảng trắng/gạch, không phân biệt hoa thường) khớp đúng MỘT thành viên thuộc `project_stage_members` của bước 'scan'. Không khớp thì để NULL (trường hợp BÌNH THƯỜNG).
+- Máy chủ xử lý trực tiếp thư mục `DOCUMENT_SOURCE_ROOT`, không tải file qua web client. Không bị chặn bởi bước Chỉnh lý (không bật trong quy trình dự án 10/10).
+- Khi bấm Nộp S (START): `assigned_user_id` của bước Scan được gán bằng `scanned_by_user_id` nếu có, ngược lại NULL. Không bao giờ gán bằng người bấm (workflow_service.py). Ngày 05/10 sẽ bổ sung chặn người duyệt CS có tên khớp `scanned_by_name`.
+- Xử lý PDF NHIỀU TRANG: đếm trang bằng `pypdf`, xử lý TUẦN TỰ từng file (không mở song song file lớn), truyền stream file vào `pypdf`. Đọc `MediaBox/Rotate/UserUnit` (`strict=False`), phân loại khổ TỪNG TRANG cộng vào `a0_pages`...`a5_pages` (QC-06). PDF 0 trang/cụt/mã hóa -> page_count = -1 + lỗi (cụt thì báo "có thể chép dở"). Cập nhật tiến độ theo từng file/lô nhỏ.
+- Check scan cho ngày 10/10 (phương án a): Người check kiểm ngoài hệ thống trước khi push lên máy chủ; hệ thống chỉ tự so khớp thư mục (BR-01) và người check bấm "Duyệt". Phương án (b) mở từng file trong hệ thống để sau 10/10. Khác BA v1.0.
+
 ## Việc sau 10/10
 
 - Luồng cũ (giao tài liệu lẻ, nhập thư mục máy chủ) vẫn chỉ nhận tài khoản thường làm người nhập;
   cân nhắc mở cho Admin theo BA 3.3 (đã chốt giữ nguyên trước khi chạy thật).
 - FR-ARR-02: Theo dõi 5 mốc giao nhận hồ sơ giấy (nhận từ khách, giao chỉnh lý, giao scan, trả kho, trả khách).
+- Check scan phương án (b): hiển thị và mở từng file PDF trên web.
+- Chấm công KPI scan theo chuỗi tên người scan (`scanned_by_name`).
 
 ## Lộ trình (BA mục 12.2)
 

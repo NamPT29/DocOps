@@ -73,6 +73,7 @@ a = Analysis(
         'alembic.command',
         'alembic.config',
         'alembic.runtime.migration',
+        'pypdf',
     ],
     hookspath=[],
     hooksconfig={},
