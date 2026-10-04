@@ -267,7 +267,10 @@
             <div class="tab-pane fade" id="projects-pane" role="tabpanel" aria-labelledby="projects-tab">
                 <div class="row g-3">
                     <div class="col-12">
-                        <div class="admin-tab-toolbar d-flex justify-content-end">
+                        <div class="admin-tab-toolbar d-flex justify-content-end align-items-center gap-2">
+                            <button type="button" class="btn btn-outline-warning" id="actionNeededCasesBtn" data-admin-action="open-action-needed-cases">
+                                <i class="fas fa-triangle-exclamation"></i> Hộp cần xử lý
+                            </button>
                             <button type="button" class="btn btn-primary" data-bs-toggle="collapse" data-bs-target="#projectCreatePanel" aria-expanded="false" aria-controls="projectCreatePanel">
                                 <i class="fas fa-folder-plus"></i> Thêm dự án
                             </button>
@@ -470,6 +473,7 @@
             <ul class="nav nav-tabs mb-3" role="tablist">
               <li class="nav-item" role="presentation"><button class="nav-link active fw-bold" id="workflow-overview-tab" data-bs-toggle="tab" data-bs-target="#workflow-overview-pane" type="button" role="tab">Tổng quan</button></li>
               <li class="nav-item" role="presentation"><button class="nav-link fw-bold" id="workflow-cases-tab" data-bs-toggle="tab" data-bs-target="#workflow-cases-pane" type="button" role="tab">Hồ sơ</button></li>
+              <li class="nav-item" role="presentation"><button class="nav-link fw-bold" id="workflow-ready-input-tab" data-bs-toggle="tab" data-bs-target="#workflow-ready-input-pane" type="button" role="tab">Hộp chờ giao nhập</button></li>
               <li class="nav-item" role="presentation"><button class="nav-link fw-bold" id="workflow-config-tab" data-bs-toggle="tab" data-bs-target="#workflow-config-pane" type="button" role="tab">Cấu hình</button></li>
             </ul>
             <div class="tab-content">
@@ -490,6 +494,24 @@
                   </table>
                 </div>
               </div>
+              <div class="tab-pane fade" id="workflow-ready-input-pane" role="tabpanel">
+                <div id="workflowReadyInputSummary" class="alert alert-info small mb-3"></div>
+                <div class="table-responsive admin-scroll-65vh">
+                  <table class="table table-sm table-bordered align-middle">
+                    <thead class="table-light sticky-top">
+                      <tr>
+                        <th>Mã hộp</th>
+                        <th>Tên hộp</th>
+                        <th class="text-center">Số PDF</th>
+                        <th>Bước trước</th>
+                        <th>Người nhập</th>
+                        <th class="text-center">Thao tác</th>
+                      </tr>
+                    </thead>
+                    <tbody id="workflowReadyInputBody"></tbody>
+                  </table>
+                </div>
+              </div>
               <div class="tab-pane fade" id="workflow-config-pane" role="tabpanel">
                 <div class="alert alert-warning small">Chọn các bước áp dụng cho dự án. Bước kiểm tra phải đi kèm bước được kiểm tra. Lần bật đầu tiên sẽ đánh dấu hoàn tất các bước trước nhập liệu cho hồ sơ đã có PDF. Chuẩn hóa và Bàn giao chỉ giao cho quản trị viên; không ai được tự kiểm tra việc của mình.</div>
                 <div id="workflowConfigList"></div>
@@ -498,6 +520,84 @@
             </div>
           </div>
           <div class="modal-footer"><button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Đóng</button></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- HỘP CẦN XỬ LÝ (FR-ENT-01, BR-06) -->
+    <div class="modal fade" id="actionNeededCasesModal" tabindex="-1" aria-hidden="true">
+      <div class="modal-dialog modal-xl modal-dialog-scrollable">
+        <div class="modal-content">
+          <div class="modal-header bg-warning text-dark">
+            <h5 class="modal-title"><i class="fas fa-triangle-exclamation"></i> Hộp cần xử lý (Quá hạn / Trả lại / CTV bị khóa hoặc hết hạn)</h5>
+            <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Đóng"></button>
+          </div>
+          <div class="modal-body">
+            <div id="actionNeededCasesSummary" class="alert alert-info small mb-3"></div>
+            <div class="table-responsive admin-scroll-65vh">
+              <table class="table table-sm table-bordered align-middle">
+                <thead class="table-light sticky-top">
+                  <tr>
+                    <th>Dự án</th>
+                    <th>Mã hộp</th>
+                    <th>Tên hộp</th>
+                    <th>Người giữ hiện tại</th>
+                    <th>Tình trạng</th>
+                    <th>Hạn / Ngày giao</th>
+                    <th class="text-center">Thao tác</th>
+                  </tr>
+                </thead>
+                <tbody id="actionNeededCasesBody">
+                  <tr><td colspan="7" class="text-center">Đang tải...</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Đóng</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- THU HỒI / CHUYỂN HỘP -->
+    <div class="modal fade" id="caseRevokeModal" tabindex="-1" aria-hidden="true">
+      <div class="modal-dialog">
+        <div class="modal-content">
+          <div class="modal-header bg-danger text-white">
+            <h5 class="modal-title"><i class="fas fa-user-xmark"></i> Thu hồi / Chuyển người nhập</h5>
+            <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Đóng"></button>
+          </div>
+          <div class="modal-body">
+            <div class="mb-3">
+              <label class="form-label fw-semibold">Hộp cần thu hồi</label>
+              <div id="caseRevokeTargetInfo" class="form-control-plaintext fw-bold"></div>
+            </div>
+            <div class="mb-3">
+              <label for="caseRevokeReasonSelect" class="form-label fw-semibold">Lý do thu hồi</label>
+              <select id="caseRevokeReasonSelect" class="form-select">
+                <option value="overdue">Quá hạn quy định</option>
+                <option value="rejected_too_much">Trả lại nhiều lần / vượt ngưỡng</option>
+                <option value="member_unavailable">CTV nghỉ / bận / hết hạn</option>
+                <option value="other">Lý do khác (bắt buộc nhập ghi chú)</option>
+              </select>
+            </div>
+            <div class="mb-3">
+              <label for="caseRevokeNoteInput" class="form-label fw-semibold">Ghi chú (tùy chọn hoặc bắt buộc nếu chọn khác)</label>
+              <input type="text" id="caseRevokeNoteInput" class="form-control" maxlength="255" placeholder="Nhập ghi chú...">
+            </div>
+            <div class="mb-3">
+              <label for="caseRevokeNewUserSelect" class="form-label fw-semibold">Giao lại cho</label>
+              <select id="caseRevokeNewUserSelect" class="form-select">
+                <option value="">-- Để trống (đưa về hàng đợi Hộp chờ giao nhập) --</option>
+              </select>
+              <div class="form-text">Nếu để trống, hộp sẽ xuất hiện lại tại tab "Hộp chờ giao nhập".</div>
+            </div>
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Hủy</button>
+            <button type="button" class="btn btn-danger" id="submitCaseRevokeBtn" data-admin-action="submit-case-revoke">Xác nhận thu hồi</button>
+          </div>
         </div>
       </div>
     </div>
@@ -1058,13 +1158,13 @@
     <script src="js/admin_panel.js?v=203.07"></script>
     <script src="js/project_upload.js?v=1.01"></script>
     <script src="js/project_reports.js?v=1.00"></script>
-    <script src="js/project_management.js?v=2.13"></script>
-    <script src="js/project_workflow.js?v=1.02"></script>
+    <script src="js/project_management.js?v=2.14"></script>
+    <script src="js/project_workflow.js?v=1.03"></script>
     <script src="js/project_policy.js?v=1.00"></script>
     <script src="js/arrangement_catalog.js?v=1.00"></script>
     <script src="js/ocr_image.js?v=2"></script>
     <script src="js/ocr_config.js?v=4"></script>
     <script src="js/template_config.js?v=101.01"></script>
-    <script src="admin-page.js?v=5"></script>
+    <script src="admin-page.js?v=6"></script>
 </body>
 </html>

@@ -134,10 +134,48 @@ Giao diện: Tab **Dự án → Thao tác → Quy trình số hóa** (`frontend/
 - 07/10 WorkLog/KPI (FR-KPI-01): thống kê nhân sự hiện bỏ qua tài khoản Admin
   (`personnel_statistics_repository`), nên sản lượng Admin tự nhập chưa được tính.
 
+## Giao / thu hồi hộp nhập liệu (04/10, nhiệm vụ 4a, FR-ENT-01, BR-06, revision `0010_case_input_assignment`)
+
+- Bảng `case_input_assignments`: theo dõi kỳ giao hộp cho người nhập (`assigned_at`, `due_at`, `deadline_days`,
+  `ended_at`, `end_reason`). Index duy nhất một phần (`uq_case_input_assignments_active_case`) đảm bảo
+  mỗi hộp tại một thời điểm chỉ có tối đa một phân công hiệu lực (`ended_at IS NULL`).
+- Hạn xử lý hộp: `due_at = assigned_at + box_deadline_days × 24h` tính cố định tại thời điểm giao
+  theo `get_effective_policy`; lưu kèm `deadline_days`. Đổi chính sách sau đó không làm đổi hạn đã giao.
+- Phân biệt tự giao và "Hộp chờ giao nhập":
+  + Dự án đã bật quy trình: không tự giao người nhập khi upload.
+  + Tự giao khi upload chỉ áp dụng cho dự án chưa bật quy trình và hộp CHƯA TỪNG có dòng `case_input_assignments`
+    nào (kể cả dòng đã đóng).
+  + Khi người nhập bị gỡ khỏi dự án đã bật quy trình: hộp của họ về trạng thái chưa giao (`assigned_input_user_id = NULL`,
+    đóng kỳ giao), hiện lại ở "Hộp chờ giao nhập", không tự chuyển cho người khác.
+  + Cấu hình thành viên chuyển hộp: đóng dòng cũ (`end_reason='member_configuration'`), mở dòng mới với `due_at`
+    tính lại từ lúc chuyển.
+- Danh sách "Hộp chờ giao nhập":
+  + Loại hộp chờ scan (`is_placeholder_box_key`) và hộp chưa có PDF.
+  + Nếu `previous_enabled("data_entry", enabled)` là `None` (nhập liệu là bước đầu được bật) thì mọi hộp
+    có PDF đều sẵn sàng. Nếu có bước trước thì bước đó phải ở trạng thái `done`.
+  + Giao diện chọn người nhập tự động loại trừ người kiểm tra của chính hộp đó (BR-04).
+- Đồng bộ tài liệu khi đổi người giữ hộp:
+  + Mọi thao tác Giao hộp, Thu hồi / giao lại, và chuyển hộp ở Cấu hình thành viên đều gọi
+    `project_workspace_service.sync_project_assets_to_documents` trong CÙNG transaction.
+    Sau thu hồi để trống thì `assigned_documents.assigned_to_user_id = NULL`; giao mới thì nhận ID người mới.
+- Hộp cần xử lý (FR-ENT-01, BR-06):
+  + Quá hạn (`now > due_at` và chưa nộp xong), bị trả lại, hoặc người giữ là CTV bị khóa / hết hạn.
+  + Định nghĩa "Nhập liệu xong": các báo cáo ở trạng thái `rejected`, `pending_review`,
+    `pending_input_confirmation`, `completed` được coi là đã nộp; chỉ `draft` là chưa nộp. Hộp có ít nhất
+    một văn bản chưa nộp (hoặc chưa có báo cáo nào) bị coi là chưa nộp xong.
+  + Admin thu hồi có lý do (`overdue`, `rejected_too_much`, `member_unavailable`, `other`), có thể giao lại ngay
+    hoặc để trống đưa về "Hộp chờ giao nhập".
+- An toàn kiểm tra (R5, R6):
+  + Cột `submissions.submitted_by_user_id`: ghi nhận người thực hiện chuyển draft/rejected -> pending_review
+    (kể cả Admin). Lưu lại văn bản đã pending_review không ghi đè.
+  + Reviewer không được duyệt báo cáo do chính mình tạo (`created_by_user_id`) hoặc nộp (`submitted_by_user_id`).
+  + Các câu truy vấn SQL an toàn với NULL (`or_(col.is_(None), col != reviewer_id)`).
+
 ## Việc sau 10/10
 
 - Luồng cũ (giao tài liệu lẻ, nhập thư mục máy chủ) vẫn chỉ nhận tài khoản thường làm người nhập;
   cân nhắc mở cho Admin theo BA 3.3 (đã chốt giữ nguyên trước khi chạy thật).
+- FR-ARR-02: Theo dõi 5 mốc giao nhận hồ sơ giấy (nhận từ khách, giao chỉnh lý, giao scan, trả kho, trả khách).
 
 ## Lộ trình (BA mục 12.2)
 

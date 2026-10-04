@@ -236,6 +236,11 @@ async function loadProjectList() {
                     handler: () => openProjectPolicy(project.id),
                 },
                 {
+                    label: 'Hộp cần xử lý',
+                    icon: 'fa-triangle-exclamation',
+                    handler: () => openActionNeededCases(project.id),
+                },
+                {
                     label: 'Mục lục chỉnh lý',
                     icon: 'fa-list-ol',
                     handler: () => openArrangementCatalog(project.id),
@@ -536,3 +541,252 @@ function checkedProjectUserIds(className) {
         .map(input => Number(input.value))
         .filter(Number.isInteger);
 }
+
+var activeActionNeededProjectId = null;
+var activeCaseRevokeItem = null;
+
+async function openActionNeededCases(projectId = null) {
+    activeActionNeededProjectId = projectId ? Number(projectId) : null;
+    const modalEl = document.getElementById('actionNeededCasesModal');
+    if (!modalEl) return;
+    const summaryEl = document.getElementById('actionNeededCasesSummary');
+    const bodyEl = document.getElementById('actionNeededCasesBody');
+    if (bodyEl) {
+        bodyEl.replaceChildren();
+        const tr = document.createElement('tr');
+        const td = document.createElement('td');
+        td.colSpan = 7;
+        td.className = 'text-center text-muted';
+        td.textContent = 'Đang tải dữ liệu...';
+        tr.appendChild(td);
+        bodyEl.appendChild(tr);
+    }
+    bootstrap.Modal.getOrCreateInstance(modalEl).show();
+
+    const url = activeActionNeededProjectId
+        ? `/api/projects/action-needed-cases?project_id=${activeActionNeededProjectId}`
+        : '/api/projects/action-needed-cases';
+    const response = await apiCall(url, { cache: 'no-store' });
+    if (!response || !response.data) return;
+
+    renderActionNeededCases(response.data);
+}
+
+function renderActionNeededCases(cases) {
+    const summaryEl = document.getElementById('actionNeededCasesSummary');
+    const bodyEl = document.getElementById('actionNeededCasesBody');
+    if (!bodyEl) return;
+    bodyEl.replaceChildren();
+
+    if (summaryEl) {
+        summaryEl.textContent = cases.length === 0
+            ? 'Hiện không có hộp nào cần xử lý.'
+            : `Có ${cases.length} hộp cần xử lý (quá hạn, bị trả lại, hoặc CTV bị khóa / hết hạn).`;
+    }
+
+    if (!cases.length) {
+        const tr = document.createElement('tr');
+        const td = document.createElement('td');
+        td.colSpan = 7;
+        td.className = 'text-center text-muted';
+        td.textContent = 'Không có hộp nào cần xử lý.';
+        tr.appendChild(td);
+        bodyEl.appendChild(tr);
+        return;
+    }
+
+    cases.forEach(item => {
+        const tr = document.createElement('tr');
+
+        // Dự án
+        const tdProject = document.createElement('td');
+        tdProject.textContent = item.project_name || '';
+        tr.appendChild(tdProject);
+
+        // Mã hộp
+        const tdCaseKey = document.createElement('td');
+        const strongKey = document.createElement('strong');
+        strongKey.textContent = item.case_key || '';
+        tdCaseKey.appendChild(strongKey);
+        tr.appendChild(tdCaseKey);
+
+        // Tên hộp
+        const tdName = document.createElement('td');
+        tdName.textContent = item.display_name || '';
+        tr.appendChild(tdName);
+
+        // Người giữ hiện tại
+        const tdUser = document.createElement('td');
+        if (item.assignee_username) {
+            const userSpan = document.createElement('span');
+            userSpan.textContent = item.assignee_username;
+            tdUser.appendChild(userSpan);
+            if (item.assignee_full_name) {
+                const fnSpan = document.createElement('small');
+                fnSpan.className = 'text-muted ms-1';
+                fnSpan.textContent = `(${item.assignee_full_name})`;
+                tdUser.appendChild(fnSpan);
+            }
+        } else {
+            const unassignedSpan = document.createElement('span');
+            unassignedSpan.className = 'text-muted fst-italic';
+            unassignedSpan.textContent = 'Chưa giao';
+            tdUser.appendChild(unassignedSpan);
+        }
+        tr.appendChild(tdUser);
+
+        // Tình trạng
+        const tdStatus = document.createElement('td');
+        if (item.is_overdue) {
+            const badge = document.createElement('span');
+            badge.className = 'badge bg-danger me-1';
+            badge.textContent = `Quá hạn ${item.overdue_hours}h`;
+            tdStatus.appendChild(badge);
+        }
+        if (item.assignee_locked) {
+            const badge = document.createElement('span');
+            badge.className = 'badge bg-danger me-1';
+            badge.textContent = 'CTV bị khóa';
+            tdStatus.appendChild(badge);
+        }
+        if (item.assignee_expired) {
+            const badge = document.createElement('span');
+            badge.className = 'badge bg-danger me-1';
+            badge.textContent = 'CTV hết hạn';
+            tdStatus.appendChild(badge);
+        }
+        if (item.has_rejected_reports) {
+            const badge = document.createElement('span');
+            badge.className = 'badge bg-warning text-dark me-1';
+            badge.textContent = 'Có bài trả lại';
+            tdStatus.appendChild(badge);
+        }
+        tr.appendChild(tdStatus);
+
+        // Hạn / Ngày giao
+        const tdDates = document.createElement('td');
+        tdDates.className = 'small';
+        if (item.due_at) {
+            const dueDiv = document.createElement('div');
+            dueDiv.textContent = `Hạn: ${item.due_at.substring(0, 16).replace('T', ' ')}`;
+            tdDates.appendChild(dueDiv);
+        }
+        if (item.assigned_at) {
+            const assignDiv = document.createElement('div');
+            assignDiv.className = 'text-muted';
+            assignDiv.textContent = `Giao: ${item.assigned_at.substring(0, 16).replace('T', ' ')}`;
+            tdDates.appendChild(assignDiv);
+        }
+        tr.appendChild(tdDates);
+
+        // Thao tác
+        const tdAction = document.createElement('td');
+        tdAction.className = 'text-center';
+        const revokeBtn = document.createElement('button');
+        revokeBtn.type = 'button';
+        revokeBtn.className = 'btn btn-sm btn-outline-danger';
+        revokeBtn.textContent = 'Thu hồi / Giao lại';
+        revokeBtn.addEventListener('click', () => openCaseRevokeModal(item));
+        tdAction.appendChild(revokeBtn);
+        tr.appendChild(tdAction);
+
+        bodyEl.appendChild(tr);
+    });
+}
+
+async function openCaseRevokeModal(caseItem) {
+    activeCaseRevokeItem = caseItem;
+    const targetInfoEl = document.getElementById('caseRevokeTargetInfo');
+    if (targetInfoEl) {
+        targetInfoEl.textContent = `${caseItem.project_name} - ${caseItem.case_key} (${caseItem.assignee_username || 'Chưa giao'})`;
+    }
+
+    const reasonSelect = document.getElementById('caseRevokeReasonSelect');
+    if (reasonSelect) {
+        if (caseItem.assignee_locked || caseItem.assignee_expired) {
+            reasonSelect.value = 'member_unavailable';
+        } else if (caseItem.is_overdue) {
+            reasonSelect.value = 'overdue';
+        } else if (caseItem.has_rejected_reports) {
+            reasonSelect.value = 'rejected_too_much';
+        } else {
+            reasonSelect.value = 'overdue';
+        }
+    }
+
+    const noteInput = document.getElementById('caseRevokeNoteInput');
+    if (noteInput) noteInput.value = '';
+
+    const newUserSelect = document.getElementById('caseRevokeNewUserSelect');
+    if (newUserSelect) {
+        newUserSelect.replaceChildren();
+        const defaultOpt = document.createElement('option');
+        defaultOpt.value = '';
+        defaultOpt.textContent = '-- Để trống (đưa về hàng đợi Hộp chờ giao nhập) --';
+        newUserSelect.appendChild(defaultOpt);
+
+        const readyResp = await apiCall(`/api/projects/${caseItem.project_id}/workflow/ready-input-cases`, { cache: 'no-store' });
+        if (readyResp && readyResp.data && readyResp.data.eligible_users) {
+            readyResp.data.eligible_users.forEach(u => {
+                if (u.id === caseItem.assignee_user_id) return;
+                const opt = document.createElement('option');
+                opt.value = String(u.id);
+                opt.textContent = `${u.full_name || u.username} (${u.username} - ${u.account_type || 'staff'})`;
+                newUserSelect.appendChild(opt);
+            });
+        }
+    }
+
+    bootstrap.Modal.getOrCreateInstance(document.getElementById('caseRevokeModal')).show();
+}
+
+async function submitCaseRevoke() {
+    if (!activeCaseRevokeItem) return;
+    const reasonSelect = document.getElementById('caseRevokeReasonSelect');
+    const noteInput = document.getElementById('caseRevokeNoteInput');
+    const newUserSelect = document.getElementById('caseRevokeNewUserSelect');
+
+    const reason = reasonSelect ? reasonSelect.value : 'overdue';
+    const note = noteInput ? noteInput.value.trim() : '';
+    const newUserId = (newUserSelect && newUserSelect.value) ? Number(newUserSelect.value) : null;
+
+    if (reason === 'other' && !note) {
+        alert('Vui lòng nhập ghi chú khi chọn lý do khác.');
+        return;
+    }
+
+    const submitBtn = document.getElementById('submitCaseRevokeBtn');
+    if (submitBtn) submitBtn.disabled = true;
+
+    try {
+        const response = await apiCall(
+            `/api/projects/${activeCaseRevokeItem.project_id}/cases/${activeCaseRevokeItem.case_id}/revoke-input`,
+            {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    reason,
+                    note: note || null,
+                    new_user_id: newUserId,
+                }),
+            }
+        );
+        if (!response) return;
+
+        const modalEl = document.getElementById('caseRevokeModal');
+        if (modalEl) {
+            const instance = bootstrap.Modal.getInstance(modalEl);
+            if (instance) instance.hide();
+        }
+
+        alert('Đã thu hồi / chuyển giao hộp thành công.');
+        await openActionNeededCases(activeActionNeededProjectId);
+        if (typeof refreshProjectWorkflow === 'function' && typeof projectWorkflowProjectId !== 'undefined' && projectWorkflowProjectId === activeCaseRevokeItem.project_id) {
+            await refreshProjectWorkflow();
+        }
+        await loadProjectList();
+    } finally {
+        if (submitBtn) submitBtn.disabled = false;
+    }
+}
+

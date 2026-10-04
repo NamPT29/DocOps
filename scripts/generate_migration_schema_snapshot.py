@@ -113,6 +113,7 @@ def build_snapshot() -> dict:
                 "columns": [column.name for column in index.columns],
             }
             for index in sorted(table.indexes, key=lambda item: item.name or "")
+            if not index.info.get("revision")
         ]
         tables.append({
             "name": table.name,

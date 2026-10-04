@@ -21,7 +21,7 @@ from migrations.schema_0001 import SCHEMA
 
 
 BASELINE_REVISION = "0001_current_schema"
-HEAD_REVISION = "0009_arrangement_catalog"
+HEAD_REVISION = "0010_case_input_assignment"
 _POSTGRES_MIGRATION_LOCK_ID = 761_004_001
 
 

@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import Column, Integer, String, Date, DateTime, ForeignKey, Boolean, Text, UniqueConstraint, Index, CheckConstraint
+from sqlalchemy import Column, Integer, String, Date, DateTime, ForeignKey, Boolean, Text, UniqueConstraint, Index, CheckConstraint, text
 from sqlalchemy import Numeric
 from sqlalchemy import false as sql_false
 from sqlalchemy.orm import Mapped, mapped_column
@@ -10,6 +10,7 @@ from server.database import Base, get_utc_now
 # schema 0001 snapshot generator skips them.
 USER_ACCOUNT_REVISION = {"revision": "0006_user_account_type"}
 USER_LOCK_REVISION = {"revision": "0007_user_lock"}
+CASE_INPUT_ASSIGNMENT_REVISION = {"revision": "0010_case_input_assignment"}
 
 
 class User(Base):
@@ -162,6 +163,11 @@ class Submission(Base):
             "folder_path_key",
             "created_at",
         ),
+        Index(
+            "ix_submissions_submitted_by_user_id",
+            "submitted_by_user_id",
+            info=CASE_INPUT_ASSIGNMENT_REVISION,
+        ),
     )
 
     id = Column(Integer, primary_key=True)
@@ -175,6 +181,14 @@ class Submission(Base):
     
     # Track which user created this submission
     created_by_user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
+
+    # Author who submitted this report for review (FR-ENT-01, BR-04, revision 0010).
+    submitted_by_user_id = Column(
+        Integer,
+        ForeignKey("users.id"),
+        nullable=True,
+        info=CASE_INPUT_ASSIGNMENT_REVISION,
+    )
 
     # Indexed metadata used for folder/document queries. `data_json` remains
     # untouched as the source of the dynamic form values and as a compatibility
@@ -845,6 +859,45 @@ class ProjectAssignmentHistory(Base):
             "assignment_role IN ('input', 'reviewer')",
             name="ck_project_assignment_history_role",
         ),
+    )
+
+
+class CaseInputAssignment(Base):
+    """Tracks active and historical input assignments for a project case (FR-ENT-01, BR-06)."""
+
+    __tablename__ = "case_input_assignments"
+
+    id = Column(Integer, primary_key=True)
+    project_id = Column(
+        Integer,
+        ForeignKey("projects.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    case_id = Column(
+        Integer,
+        ForeignKey("project_cases.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    assigned_by_user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    assigned_at = Column(DateTime, nullable=False, default=get_utc_now)
+    due_at = Column(DateTime, nullable=True)
+    deadline_days = Column(Integer, nullable=True)
+    ended_at = Column(DateTime, nullable=True)
+    ended_by_user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    end_reason = Column(String(255), nullable=True)
+
+    __table_args__ = (
+        Index(
+            "uq_case_input_assignments_active_case",
+            "case_id",
+            unique=True,
+            sqlite_where=text("ended_at IS NULL"),
+            postgresql_where=text("ended_at IS NULL"),
+        ),
+        {"info": CASE_INPUT_ASSIGNMENT_REVISION},
     )
 
 

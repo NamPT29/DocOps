@@ -218,17 +218,130 @@ function renderWorkflowCases(data) {
 }
 
 async function refreshProjectWorkflow() {
-    const [config, overview, cases] = await Promise.all([
+    const [config, overview, cases, readyCases] = await Promise.all([
         apiCall(workflowApiBase(), { cache: 'no-store' }),
         apiCall(`${workflowApiBase()}/overview`, { cache: 'no-store' }),
         apiCall(`${workflowApiBase()}/cases?page_size=200`, { cache: 'no-store' }),
+        apiCall(`${workflowApiBase()}/ready-input-cases`, { cache: 'no-store' }),
     ]);
     if (!config || !overview || !cases) return false;
     projectWorkflowConfig = config.data;
     renderWorkflowConfig(config.data);
     renderWorkflowOverview(overview.data);
     renderWorkflowCases(cases.data);
+    if (readyCases && readyCases.data) {
+        renderWorkflowReadyInput(readyCases.data);
+    }
     return true;
+}
+
+function renderWorkflowReadyInput(data) {
+    const summary = document.getElementById('workflowReadyInputSummary');
+    const body = document.getElementById('workflowReadyInputBody');
+    if (!body) return;
+    body.replaceChildren();
+
+    const cases = data.cases || [];
+    const eligibleUsers = data.eligible_users || [];
+    const prevLabel = data.previous_stage_label || 'Đầu quy trình';
+
+    if (summary) {
+        summary.textContent = cases.length === 0
+            ? 'Hiện không có hộp nào đang chờ giao nhập liệu.'
+            : `Có ${cases.length} hộp sẵn sàng giao nhập liệu. Bước liền trước: ${prevLabel}.`;
+    }
+
+    if (!cases.length) {
+        const tr = document.createElement('tr');
+        const td = document.createElement('td');
+        td.colSpan = 6;
+        td.className = 'text-center text-muted';
+        td.textContent = 'Không có hộp nào đang chờ giao nhập.';
+        tr.appendChild(td);
+        body.appendChild(tr);
+        return;
+    }
+
+    cases.forEach(caseItem => {
+        const tr = document.createElement('tr');
+
+        const tdKey = document.createElement('td');
+        const strongKey = document.createElement('strong');
+        strongKey.textContent = caseItem.case_key || '';
+        tdKey.appendChild(strongKey);
+        tr.appendChild(tdKey);
+
+        const tdName = document.createElement('td');
+        tdName.textContent = caseItem.display_name || '';
+        tr.appendChild(tdName);
+
+        const tdPdf = document.createElement('td');
+        tdPdf.className = 'text-center';
+        tdPdf.textContent = String(caseItem.active_pdf_count || 0);
+        tr.appendChild(tdPdf);
+
+        const tdPrev = document.createElement('td');
+        const prevBadge = document.createElement('span');
+        prevBadge.className = 'badge bg-success';
+        prevBadge.textContent = `Đã xong: ${prevLabel}`;
+        tdPrev.appendChild(prevBadge);
+        tr.appendChild(tdPrev);
+
+        const tdUser = document.createElement('td');
+        const select = document.createElement('select');
+        select.className = 'form-select form-select-sm';
+        const defaultOpt = document.createElement('option');
+        defaultOpt.value = '';
+        defaultOpt.textContent = '-- Chọn người nhập --';
+        select.appendChild(defaultOpt);
+
+        eligibleUsers.forEach(u => {
+            if (caseItem.assigned_reviewer_user_id && u.id === caseItem.assigned_reviewer_user_id) {
+                return;
+            }
+            const opt = document.createElement('option');
+            opt.value = String(u.id);
+            opt.textContent = `${u.full_name || u.username} (${u.username} - ${u.account_type || 'staff'})`;
+            select.appendChild(opt);
+        });
+        tdUser.appendChild(select);
+        tr.appendChild(tdUser);
+
+        const tdAction = document.createElement('td');
+        tdAction.className = 'text-center';
+        const assignBtn = document.createElement('button');
+        assignBtn.type = 'button';
+        assignBtn.className = 'btn btn-sm btn-primary';
+        assignBtn.textContent = 'Giao hộp';
+        assignBtn.addEventListener('click', async () => {
+            const selectedUserId = select.value;
+            if (!selectedUserId) {
+                alert('Vui lòng chọn người nhập liệu.');
+                return;
+            }
+            assignBtn.disabled = true;
+            try {
+                const resp = await apiCall(
+                    `/api/projects/${projectWorkflowProjectId}/cases/${caseItem.id}/assign-input`,
+                    {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ user_id: Number(selectedUserId) }),
+                    }
+                );
+                if (resp) {
+                    await refreshProjectWorkflow();
+                    if (typeof loadProjectList === 'function') await loadProjectList();
+                }
+            } finally {
+                assignBtn.disabled = false;
+            }
+        });
+        tdAction.appendChild(assignBtn);
+        tr.appendChild(tdAction);
+
+        body.appendChild(tr);
+    });
 }
 
 async function openProjectWorkflow(projectId) {

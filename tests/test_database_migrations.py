@@ -606,7 +606,7 @@ def test_arrangement_catalog_revision_is_additive():
     with engine.begin() as connection:
         config.attributes["connection"] = connection
         command.upgrade(config, "0009_arrangement_catalog")
-        assert current_database_revision(connection) == HEAD_REVISION
+        assert current_database_revision(connection) == "0009_arrangement_catalog"
         assert validate_existing_database(connection) == []
         connection.execute(text(
             "INSERT INTO users (id, username, password, full_name, role, max_concurrent_sessions) "
@@ -643,6 +643,98 @@ def test_arrangement_catalog_revision_is_additive():
         command.downgrade(config, "0008_project_policies")
         tables = set(inspect(connection).get_table_names())
         assert {"arrangement_dossiers", "arrangement_imports"}.isdisjoint(tables)
+
+
+def test_case_input_assignment_revision_is_additive_and_backfills():
+    pytest.importorskip("alembic")
+    from alembic import command
+    from sqlalchemy.exc import IntegrityError
+
+    from server.migration_runner import _alembic_config
+
+    source = (
+        ROOT / "migrations" / "versions" / "0010_case_input_assignment.py"
+    ).read_text(encoding="utf-8")
+    assert "from server" not in source and "import server" not in source
+
+    engine = create_engine("sqlite+pysqlite:///:memory:")
+    config = _alembic_config(ROOT)
+    with engine.begin() as connection:
+        config.attributes["connection"] = connection
+        command.upgrade(config, "0009_arrangement_catalog")
+
+        # Setup legacy pre-0010 data
+        connection.execute(text(
+            "INSERT INTO users (id, username, password, full_name, role, max_concurrent_sessions) "
+            "VALUES (1, 'u1', 'x', 'U1', 'user', 1), (2, 'u2', 'x', 'U2', 'user', 1)"
+        ))
+        connection.execute(text(
+            "INSERT INTO templates (id, name, filename) VALUES (1, 't', 't.xlsx')"
+        ))
+        connection.execute(text(
+            "INSERT INTO projects (id, name, root_folder_name, template_id, "
+            "template_name_snapshot, template_filename_snapshot, "
+            "case_level, report_mode, status, created_by_user_id, created_at, updated_at) "
+            "VALUES (1, 'P', 'p', 1, 't', 't.xlsx', 1, 'pdf', 'new', 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"
+        ))
+        connection.execute(text(
+            "INSERT INTO project_cases (id, project_id, case_key, display_name, assigned_input_user_id, created_at, updated_at) "
+            "VALUES (1, 1, 'c1', 'Box 1', 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP), "
+            "       (2, 1, 'c2', 'Box 2', NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"
+        ))
+        connection.execute(text(
+            "INSERT INTO submissions (id, template_id, created_by_user_id, data_json, status, created_at) "
+            "VALUES (1, 1, 1, '{}', 'draft', CURRENT_TIMESTAMP), "
+            "       (2, 1, 1, '{}', 'pending_review', CURRENT_TIMESTAMP), "
+            "       (3, 1, 2, '{}', 'completed', CURRENT_TIMESTAMP)"
+        ))
+
+        # Upgrade to 0010
+        command.upgrade(config, "0010_case_input_assignment")
+        assert current_database_revision(connection) == HEAD_REVISION
+        assert validate_existing_database(connection) == []
+
+        # Check backfilled submitted_by_user_id
+        subs = dict(connection.execute(text(
+            "SELECT id, submitted_by_user_id FROM submissions ORDER BY id"
+        )).fetchall())
+        assert subs[1] is None  # draft stays None
+        assert subs[2] == 1     # pending_review backfilled
+        assert subs[3] == 2     # completed backfilled
+
+        # Check backfilled active case_input_assignments
+        assignments = connection.execute(text(
+            "SELECT case_id, user_id, assigned_by_user_id, due_at, deadline_days, ended_at "
+            "FROM case_input_assignments"
+        )).fetchall()
+        assert len(assignments) == 1
+        assert assignments[0][0] == 1  # case_id == 1
+        assert assignments[0][1] == 1  # user_id == 1
+        assert assignments[0][2] is None  # assigned_by_user_id is None
+        assert assignments[0][3] is None  # due_at is None (no deadline)
+        assert assignments[0][4] is None  # deadline_days is None
+        assert assignments[0][5] is None  # ended_at is None (active)
+
+        # Check partial unique constraint on active assignments
+        with pytest.raises(IntegrityError), connection.begin_nested():
+            connection.execute(text(
+                "INSERT INTO case_input_assignments (project_id, case_id, user_id, assigned_at) "
+                "VALUES (1, 1, 2, CURRENT_TIMESTAMP)"
+            ))
+
+        # But an ended assignment on the same case succeeds
+        connection.execute(text(
+            "INSERT INTO case_input_assignments (project_id, case_id, user_id, assigned_at, ended_at) "
+            "VALUES (1, 1, 2, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"
+        ))
+
+        # Downgrade to 0009
+        command.downgrade(config, "0009_arrangement_catalog")
+        tables = set(inspect(connection).get_table_names())
+        assert "case_input_assignments" not in tables
+        sub_cols = {c["name"] for c in inspect(connection).get_columns("submissions")}
+        assert "submitted_by_user_id" not in sub_cols
+
 
 
 def test_request_paths_do_not_call_submission_metadata_backfill():

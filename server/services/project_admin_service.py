@@ -1,3 +1,4 @@
+from datetime import timedelta
 import os
 import shutil
 import uuid
@@ -5,9 +6,13 @@ from pathlib import Path
 
 from fastapi import HTTPException
 
+from server.database import get_utc_now
+from server.models import CaseInputAssignment
 from server.repositories.project_admin_repository import ProjectAdminRepository
+from server.repositories.workflow_repository import WorkflowRepository
 from server.services.arrangement_catalog_parser import is_placeholder_box_key
 from server.services import export_job_service
+from server.services.project_policy_service import get_effective_policy
 from server.services.project_service import _validate_project_members
 from server.services.project_workspace_service import sync_project_assets_to_documents
 
@@ -141,23 +146,38 @@ def update_project_members(
     ]
     pdf_counts = repository.active_pdf_counts_by_case(project.id)
     submission_counts = repository.submission_counts_by_case(project.id)
-    # Adding members may redistribute only untouched cases. Cases with a PDF
-    # or any entered report stay put; assignments belonging to a removed member
-    # are invalid and are transferred regardless of this movable set.
-    movable_case_ids = {
-        case_row.id
-        for case_row in cases
-        if int(pdf_counts.get(case_row.id, 0)) == 0
-        and int(submission_counts.get(case_row.id, 0)) == 0
-    }
-    input_plan = _weighted_assignment_plan(
-        cases,
-        user_ids=input_ids,
-        pdf_counts=pdf_counts,
-        assignment_attribute="assigned_input_user_id",
-        preserve_valid_assignments=True,
-        movable_case_ids=movable_case_ids,
-    )
+    workflow_repo = WorkflowRepository(db)
+    has_workflow = any(r.is_enabled for r in workflow_repo.stage_rows(project.id))
+
+    if has_workflow:
+        # Dự án ĐÃ bật quy trình: bỏ tự giao người nhập. Người bị gỡ khỏi nhóm thì hộp về unassigned.
+        input_plan = {
+            case_row.id: (
+                case_row.assigned_input_user_id
+                if case_row.assigned_input_user_id in input_ids
+                else None
+            )
+            for case_row in cases
+        }
+    else:
+        # Adding members may redistribute only untouched cases. Cases with a PDF
+        # or any entered report stay put; assignments belonging to a removed member
+        # are invalid and are transferred regardless of this movable set.
+        movable_case_ids = {
+            case_row.id
+            for case_row in cases
+            if int(pdf_counts.get(case_row.id, 0)) == 0
+            and int(submission_counts.get(case_row.id, 0)) == 0
+        }
+        input_plan = _weighted_assignment_plan(
+            cases,
+            user_ids=input_ids,
+            pdf_counts=pdf_counts,
+            assignment_attribute="assigned_input_user_id",
+            preserve_valid_assignments=True,
+            movable_case_ids=movable_case_ids,
+        )
+
     reviewer_plan = _weighted_assignment_plan(
         cases,
         user_ids=reviewer_ids,
@@ -165,7 +185,7 @@ def update_project_members(
         assignment_attribute="assigned_reviewer_user_id",
         excluded_user_ids=input_plan,
         preserve_valid_assignments=True,
-        movable_case_ids=movable_case_ids,
+        movable_case_ids=None if has_workflow else movable_case_ids,
     )
     result = {
         "input_cases_transferred": 0,
@@ -175,11 +195,35 @@ def update_project_members(
     }
 
     try:
+        now = get_utc_now()
         for case_row in cases:
             previous_input_id = case_row.assigned_input_user_id
             next_input_id = input_plan.get(case_row.id)
             if previous_input_id != next_input_id:
                 case_row.assigned_input_user_id = next_input_id
+                if previous_input_id is not None:
+                    active_assignment = repository.active_case_input_assignment(case_row.id)
+                    if active_assignment:
+                        active_assignment.ended_at = now
+                        active_assignment.ended_by_user_id = changed_by_user_id
+                        active_assignment.end_reason = "member_configuration"
+
+                if next_input_id is not None:
+                    policy = get_effective_policy(db, project_id=project.id)
+                    deadline_days = policy["box_deadline_days"]
+                    due_at = now + timedelta(days=deadline_days)
+                    repository.add_case_input_assignment(
+                        CaseInputAssignment(
+                            project_id=project.id,
+                            case_id=case_row.id,
+                            user_id=next_input_id,
+                            assigned_by_user_id=changed_by_user_id,
+                            assigned_at=now,
+                            due_at=due_at,
+                            deadline_days=deadline_days,
+                        )
+                    )
+
                 result["submissions_transferred"] += (
                     repository.transfer_case_submission_owner(case_row.id, next_input_id)
                 )

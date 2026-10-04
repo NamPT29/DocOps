@@ -36,6 +36,8 @@ const ADMIN_PAGE_ACTIONS = Object.freeze({
     'save-template-config': () => saveTemplateConfig(),
     'submit-change-password': () => submitChangePassword(),
     'submit-edit-user': () => submitEditUser(),
+    'open-action-needed-cases': () => openActionNeededCases(),
+    'submit-case-revoke': () => submitCaseRevoke(),
 });
 
 function runAdminPageAction(actionName) {

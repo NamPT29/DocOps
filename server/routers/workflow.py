@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 
 from server.database import get_db
 from server.routers.auth import get_admin_user, get_current_user
-from server.services import workflow_service
+from server.services import project_assignment_service, workflow_service
 
 router = APIRouter(prefix="/api/projects/{project_id}/workflow", tags=["workflow"])
 catalog_router = APIRouter(prefix="/api/workflow", tags=["workflow"])
@@ -167,3 +167,18 @@ def api_workflow_assign(
             actor=current_user,
         ),
     }
+
+
+@router.get("/ready-input-cases")
+def api_workflow_ready_input_cases(
+    project_id: int,
+    current_user: dict = Depends(get_admin_user),
+    db: Session = Depends(get_db),
+):
+    return {
+        "status": "ok",
+        "data": project_assignment_service.list_ready_input_cases(
+            db, project_id=project_id
+        ),
+    }
+

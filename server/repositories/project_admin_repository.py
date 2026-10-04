@@ -7,6 +7,7 @@ from server.models import (
     AssignedDocumentFolder,
     AssignedDocumentPath,
     AssignedDocumentReviewAssignment,
+    CaseInputAssignment,
     Project,
     ProjectAssignmentHistory,
     ProjectCase,
@@ -377,3 +378,17 @@ class ProjectAdminRepository:
         else:
             counts["assigned_documents"] = 0
         return counts
+
+    def active_case_input_assignment(self, case_id: int):
+        return (
+            self.session.query(CaseInputAssignment)
+            .filter(
+                CaseInputAssignment.case_id == case_id,
+                CaseInputAssignment.ended_at.is_(None),
+            )
+            .first()
+        )
+
+    def add_case_input_assignment(self, row: CaseInputAssignment):
+        self.session.add(row)
+        return row

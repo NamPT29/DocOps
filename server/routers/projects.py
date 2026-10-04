@@ -22,6 +22,11 @@ from server.services.export_job_service import (
     public_export_job,
     start_export_job,
 )
+from server.services.project_assignment_service import (
+    assign_case_input,
+    list_action_needed_cases,
+    revoke_case_input,
+)
 from server.services.api_rate_limit_service import enforce_heavy_api_rate_limit
 from server.services.project_reporting_service import (
     get_project_or_404,
@@ -54,6 +59,16 @@ class ProjectMembersUpdateRequest(BaseModel):
 
 class ProjectStatusUpdateRequest(BaseModel):
     status: Literal["new", "in_progress", "completed", "overdue"]
+
+
+class CaseAssignInputRequest(BaseModel):
+    user_id: int
+
+
+class CaseRevokeInputRequest(BaseModel):
+    reason: str
+    note: str | None = None
+    new_user_id: int | None = None
 
 
 @router.post("")
@@ -93,6 +108,55 @@ def api_list_my_projects(
     db: Session = Depends(get_db),
 ):
     return {"status": "ok", "data": list_projects(db, current_user=current_user)}
+
+
+@router.get("/action-needed-cases")
+def api_list_action_needed_cases(
+    project_id: int | None = None,
+    limit: int = 100,
+    current_user: dict = Depends(get_admin_user),
+    db: Session = Depends(get_db),
+):
+    return {
+        "status": "ok",
+        "data": list_action_needed_cases(db, project_id=project_id, limit=limit),
+    }
+
+
+@router.post("/{project_id}/cases/{case_id}/assign-input")
+def api_assign_case_input(
+    project_id: int,
+    case_id: int,
+    request: CaseAssignInputRequest,
+    current_user: dict = Depends(get_admin_user),
+    db: Session = Depends(get_db),
+):
+    return assign_case_input(
+        db,
+        project_id=project_id,
+        case_id=case_id,
+        user_id=request.user_id,
+        actor_user_id=current_user["id"],
+    )
+
+
+@router.post("/{project_id}/cases/{case_id}/revoke-input")
+def api_revoke_case_input(
+    project_id: int,
+    case_id: int,
+    request: CaseRevokeInputRequest,
+    current_user: dict = Depends(get_admin_user),
+    db: Session = Depends(get_db),
+):
+    return revoke_case_input(
+        db,
+        project_id=project_id,
+        case_id=case_id,
+        reason_code=request.reason,
+        note=request.note,
+        new_user_id=request.new_user_id,
+        actor_user_id=current_user["id"],
+    )
 
 
 @router.put("/{project_id}")

@@ -678,6 +678,8 @@ def api_update_submission(
                 )
         sub.created_at = datetime.now(timezone.utc).replace(tzinfo=None)
         if req.status:
+            if req.status == "pending_review" and sub.status in ("draft", "rejected"):
+                sub.submitted_by_user_id = current_user["id"]
             sub.status = req.status
         if req.status == "pending_review":
             ReviewWorkflowService.assign_submission_reviewer(

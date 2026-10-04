@@ -157,7 +157,7 @@ class ReviewRepository(BaseRepository[SubmissionReviewAssignment]):
         reviewer_by_submission = {
             submission.id: (
                 explicit_reviewers.get(submission.id)
-                if explicit_reviewers.get(submission.id) != submission.created_by_user_id
+                if explicit_reviewers.get(submission.id) not in (submission.created_by_user_id, submission.submitted_by_user_id)
                 else None
             )
             for submission in submissions
@@ -180,7 +180,7 @@ class ReviewRepository(BaseRepository[SubmissionReviewAssignment]):
             reviewer_id = reviewer_by_document.get(submission.assigned_document_id)
             if (
                 reviewer_id is not None
-                and reviewer_id != submission.created_by_user_id
+                and reviewer_id not in (submission.created_by_user_id, submission.submitted_by_user_id)
             ):
                 reviewer_by_submission[submission.id] = reviewer_id
         return reviewer_by_submission
@@ -217,6 +217,7 @@ class ReviewRepository(BaseRepository[SubmissionReviewAssignment]):
             ).filter(
                 SubmissionReviewAssignment.reviewer_user_id == reviewer_id,
                 Submission.created_by_user_id != reviewer_id,
+                or_(Submission.submitted_by_user_id.is_(None), Submission.submitted_by_user_id != reviewer_id),
                 Submission.status == "pending_review",
                 Submission.assigned_document_id.in_(
                     duplicate_document_ids_query(self.session)
@@ -277,6 +278,7 @@ class ReviewRepository(BaseRepository[SubmissionReviewAssignment]):
         ).filter(
             SubmissionReviewAssignment.reviewer_user_id == reviewer_id,
             Submission.created_by_user_id != reviewer_id,
+            or_(Submission.submitted_by_user_id.is_(None), Submission.submitted_by_user_id != reviewer_id),
             Submission.status == "pending_review",
         )
         if template_id:
@@ -320,6 +322,7 @@ class ReviewRepository(BaseRepository[SubmissionReviewAssignment]):
         ).filter(
             SubmissionReviewAssignment.reviewer_user_id == reviewer_id,
             Submission.created_by_user_id != reviewer_id,
+            or_(Submission.submitted_by_user_id.is_(None), Submission.submitted_by_user_id != reviewer_id),
             Submission.status == "pending_review",
             Submission.folder_path_key == folder_path_key(normalized),
             Submission.folder_path == normalized,
@@ -356,6 +359,7 @@ class ReviewRepository(BaseRepository[SubmissionReviewAssignment]):
         ).filter(
             SubmissionReviewAssignment.reviewer_user_id == reviewer_id,
             Submission.created_by_user_id != reviewer_id,
+            or_(Submission.submitted_by_user_id.is_(None), Submission.submitted_by_user_id != reviewer_id),
             Submission.status == "pending_review",
             Submission.folder_path_key == folder_path_key(normalized),
             Submission.folder_path == normalized,

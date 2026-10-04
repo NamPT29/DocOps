@@ -47,10 +47,10 @@ class ReviewWorkflowService:
         if reviewer_id:
             if not lookup_repository.user_exists(reviewer_id):
                 reviewer_id = None
-        elif assignment and assignment.reviewer_user_id != submission.created_by_user_id:
+        elif assignment and assignment.reviewer_user_id not in (submission.created_by_user_id, submission.submitted_by_user_id):
             if lookup_repository.user_exists(assignment.reviewer_user_id):
                 return assignment
-        if not reviewer_id or reviewer_id == submission.created_by_user_id:
+        if not reviewer_id or reviewer_id in (submission.created_by_user_id, submission.submitted_by_user_id):
             if required:
                 raise HTTPException(
                     status_code=409,
@@ -130,13 +130,13 @@ class ReviewWorkflowService:
                     reviewer_id = None
             elif (
                 assignment
-                and assignment.reviewer_user_id != submission.created_by_user_id
+                and assignment.reviewer_user_id not in (submission.created_by_user_id, submission.submitted_by_user_id)
                 and assignment.reviewer_user_id in valid_user_ids
             ):
                 result[submission.id] = assignment
                 continue
 
-            if reviewer_id is None or reviewer_id == submission.created_by_user_id:
+            if reviewer_id is None or reviewer_id in (submission.created_by_user_id, submission.submitted_by_user_id):
                 if required:
                     raise HTTPException(
                         status_code=409,
@@ -178,14 +178,14 @@ class ReviewWorkflowService:
             reviewer_id = document_reviewers.get(submission.assigned_document_id)
             if (
                 reviewer_id not in valid_user_ids
-                or reviewer_id == submission.created_by_user_id
+                or reviewer_id in (submission.created_by_user_id, submission.submitted_by_user_id)
             ):
                 reviewer_id = None
             if reviewer_id is None and assignment:
                 existing_reviewer_id = assignment.reviewer_user_id
                 if (
                     existing_reviewer_id in valid_user_ids
-                    and existing_reviewer_id != submission.created_by_user_id
+                    and existing_reviewer_id not in (submission.created_by_user_id, submission.submitted_by_user_id)
                 ):
                     continue
             if reviewer_id is None:
@@ -208,15 +208,16 @@ class ReviewWorkflowService:
 
     @staticmethod
     def can_review_submission(submission: Submission, current_user: dict, db: Session) -> bool:
-        if submission.created_by_user_id == current_user.get("id"):
+        user_id = current_user.get("id")
+        if user_id in (submission.created_by_user_id, submission.submitted_by_user_id):
             return False
         if current_user.get('role') == 'admin':
             return True
         assignment = ReviewWorkflowService.get_review_assignment(db, submission.id)
         if (
             assignment
-            and assignment.reviewer_user_id == current_user["id"]
-            and submission.created_by_user_id != current_user["id"]
+            and assignment.reviewer_user_id == user_id
+            and user_id not in (submission.created_by_user_id, submission.submitted_by_user_id)
         ):
             return True
         if submission.status != "pending_review":
@@ -228,8 +229,8 @@ class ReviewWorkflowService:
         )
         return bool(
             assignment
-            and assignment.reviewer_user_id == current_user["id"]
-            and submission.created_by_user_id != current_user["id"]
+            and assignment.reviewer_user_id == user_id
+            and user_id not in (submission.created_by_user_id, submission.submitted_by_user_id)
         )
 
     @staticmethod
@@ -238,7 +239,8 @@ class ReviewWorkflowService:
         current_user: dict,
         db: Session,
     ) -> SubmissionReviewAssignment | None:
-        if submission.created_by_user_id == current_user.get("id"):
+        user_id = current_user.get("id")
+        if user_id in (submission.created_by_user_id, submission.submitted_by_user_id):
             raise HTTPException(
                 status_code=403,
                 detail="Không được tự kiểm tra hồ sơ do chính bạn nhập",
@@ -254,8 +256,8 @@ class ReviewWorkflowService:
             )
         if (
             not assignment
-            or assignment.reviewer_user_id != current_user["id"]
-            or submission.created_by_user_id == current_user["id"]
+            or assignment.reviewer_user_id != user_id
+            or user_id in (submission.created_by_user_id, submission.submitted_by_user_id)
         ):
             raise HTTPException(status_code=403, detail="Hồ sơ không được phân cho bạn kiểm tra")
         return assignment

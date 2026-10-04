@@ -37,7 +37,7 @@ const children = [
   h(1, '4. Các chức năng chính'),
   h(2, '4.1. Quản trị hệ thống và dự án'),
   ...bullets([
-    'Quản lý tài khoản theo 3 vai trò; tài khoản cộng tác viên có ngày hết hạn, tự khóa và tự thu hồi việc khi hết hạn.',
+    'Quản lý tài khoản theo 3 vai trò; tài khoản cộng tác viên có ngày hết hạn, tự khóa khi hết hạn; hệ thống liệt kê hộp cần xử lý để Admin thu hồi hoặc phân lại.',
     'Tạo dự án, cấu hình thư mục gốc, cấu trúc đường dẫn, biểu mẫu nhập liệu, danh mục mã (thời hạn lưu trữ, tên loại văn bản…).',
     'Cấu hình chính sách theo thời gian hiệu lực: KPI, đơn giá, ngưỡng lỗi, tỉ lệ lấy mẫu, hạn giao việc.',
     'Bật/tắt các công đoạn áp dụng cho từng dự án.',

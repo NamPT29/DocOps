@@ -340,6 +340,9 @@ class SubmissionService:
                 )
                 submission.data_json = json.dumps(data_dict, ensure_ascii=False)
                 submission.status = "pending_review"
+                user_id = current_user.get("id") if isinstance(current_user, dict) else getattr(current_user, "id", None)
+                if user_id is not None:
+                    submission.submitted_by_user_id = user_id
                 submission.created_at = submitted_at
                 if document:
                     document.status = "completed"
