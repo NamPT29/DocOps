@@ -35,7 +35,27 @@ assert.match(workflowJs, /caseItem\.assigned_reviewer_user_id && u\.id === caseI
 assert.match(managementJs, /timeZone:\s*'Asia\/Ho_Chi_Minh'/, 'project_management.js must format with Asia/Ho_Chi_Minh');
 assert.doesNotMatch(managementJs, /due_at\.substring\(0,\s*16\)/, 'due_at must not use UTC substring');
 assert.doesNotMatch(managementJs, /assigned_at\.substring\(0,\s*16\)/, 'assigned_at must not use UTC substring');
-assert.match(html, /project_management\.js\?v=2\.15/, 'admin.html must load project_management.js?v=2.15');
-assert.match(html, /project_workflow\.js\?v=1\.04/, 'admin.html must load project_workflow.js?v=1.04');
+assert.match(html, /project_management\.js\?v=2\.16/, 'admin.html must load project_management.js?v=2.16');
+assert.match(html, /project_workflow\.js\?v=1\.05/, 'admin.html must load project_workflow.js?v=1.05');
+
+// 6. Fix infinite recursion in formatVietnamDateTime and verify actual timezone output
+const vm = require('node:vm');
+const ctx = vm.createContext({});
+ctx.window = ctx; // Simulate browser global scope
+ctx.document = { 
+    getElementById: () => null, 
+    querySelectorAll: () => [], 
+    createElement: () => ({ classList: {}, appendChild: () => {}, setAttribute: () => {}, style: {} }) 
+};
+ctx.console = console;
+ctx.Intl = Intl; // Expose Intl for DateTimeFormat
+
+// Try running both scripts sequentially. Should not throw recursion error.
+vm.runInContext(managementJs, ctx);
+vm.runInContext(workflowJs, ctx);
+
+// Verify actual timezone formatting matches Vietnam time UTC+7
+const tzResult = vm.runInContext('formatVietnamDateTime("2026-10-14T08:30:00Z")', ctx);
+assert.strictEqual(tzResult, '2026-10-14 15:30', 'formatVietnamDateTime must convert UTC to VN time correctly (15:30)');
 
 console.log('Case assignment self-check passed.');
