@@ -66,3 +66,53 @@ Cùng một khung VBA, khác cấu hình trường:
 3. Sản lượng chi trả tính theo trang quy đổi A4 hay theo từng khổ có đơn giá riêng?
 4. Mã cơ quan (ví dụ `H05.02.02`) và ký hiệu hồ sơ (`HC`) lấy từ đâu: khách hàng cấp hay đơn vị tự đặt?
 5. Còn thiếu: file **mục lục chỉnh lý** mẫu (đầu vào cho import mục lục).
+
+---
+
+# Đợt 2 (04/10)
+
+| File | Nội dung |
+|---|---|
+| `12. BM-TKDA-01-12_UBKTHB.xls` (thực chất là xlsx) | Sổ theo dõi dự án của PM: định mức, chấm công, năng suất, chi phí nhân công, bảng lương |
+| `Dem trang PDF ed3 ... A4_check.xlsm`, `..._bao_cao_da_doi_ten.xlsm` | Công cụ đếm trang theo khổ giấy và quy đổi A4 |
+| `RenameFile - CopyFile.xlsm` | Đổi tên/sao chép hàng loạt theo cặp đường dẫn cũ → mới |
+| Ảnh hướng dẫn Total Commander | Sắp xếp tên file kiểu tự nhiên (1, 2, …, 10) |
+| 4 file `CSDL_SOHOA_Metadata_*.xlsx` | Metadata thật đã bàn giao của 4 dự án (dữ liệu nhạy cảm, chỉ ghi số liệu thống kê) |
+
+## 5. Đếm trang và quy đổi A4 (trả lời câu hỏi 3)
+
+- Kích thước chuẩn theo point (ISO 216): A0 2384×3370, A1 1684×2384, A2 1190×1684, A3 842×1190, A4 595×842.
+- OverSize = 1,1: trang vượt khổ chuẩn quá 10% thì tính lên một khổ.
+- **Tổng quy đổi A4 = A4×1 + A3×2 + A2×4 + A1×8 + A0×16.** Sổ dự án cũng dùng đúng hệ số này cho mục Scan.
+- Kết quả đếm lưu theo từng file (số trang, dung lượng, số trang mỗi khổ); file lỗi có số trang -1.
+
+## 6. Sổ theo dõi dự án BM-TKDA-01-12
+
+- **Danh mục công việc** có định mức/8h và đơn vị (hồ sơ, trang, file, hộp, bộ). Có tách theo loại giấy:
+  Scan A3/A4/A5 × (1 = giấy thường, 2 = giấy xấu); Check SC V1/V2; Nhập liệu 1 (thường) / 2 (xấu); Check NL V1/V2.
+  Ngoài ra: Setup mặt bằng, nhập hồ sơ lên phần mềm, ghép file mềm, upload, xuất dữ liệu, tích hợp hệ thống KH, bàn giao, ký nghiệm thu.
+- **Chấm công hằng ngày:** mỗi người tối đa 4 công việc/ngày; mỗi việc gồm thời gian (giờ), loại `NS` (tính năng suất), `CC` (chấm công), `NS.OT`, `CC.OT`, nội dung, khối lượng.
+  Hệ số OT 1,2; hệ số Chủ nhật 1,4. Nhân sự chia Lead / nhân viên chính thức / thời vụ, mỗi người có lương cơ bản 8h và lương dự án 8h.
+- **Các lỗi bắt khi nhập:** thiếu thời gian/loại/nội dung; có dữ liệu nhưng không có tên; việc có ĐVT mà sản lượng ≤ 0 hoặc là chữ; chấm sản lượng cho việc không có ĐVT; nội dung không có trong danh mục; thời gian sai; loại không thuộc 4 loại; NS mà không có sản lượng; CC mà không có thời gian; **tổng thời gian một người trong ngày > 14 giờ**.
+- Báo cáo: tiến độ theo hạng mục (khối lượng hợp đồng, lũy kế, % hoàn thành, năng suất định mức và thực tế, ngày dự kiến xong), năng suất từng người, chi phí nhân công, bảng lương, theo dõi chi phí so với dự toán. Mọi thay đổi ghi vào sheet Log.
+
+**Hệ quả:** đây chính là đặc tả cho module WorkLog/KPI (FR-KPI-01/02). WorkType nên có thêm *định mức/8h*, *đơn vị*, *loại giấy (thường/xấu)*; WorkLog có *loại NS/CC/OT*, hệ số OT và Chủ nhật; các quy tắc kiểm tra ở trên dùng nguyên làm validation. Phần lương và chi phí chi tiết để sau 10/10.
+
+## 7. Đổi tên và sắp xếp
+
+- Đổi tên hàng loạt theo cặp *đường dẫn cũ → đường dẫn mới*, ghi trạng thái từng dòng. Ví dụ tách thư mục bìa sang cây riêng (`..._01_BIA`). Công đoạn chuẩn hóa cần làm được việc này và có nhật ký.
+- **Mọi danh sách file/thư mục phải sắp xếp tự nhiên** (1, 2, …, 10 chứ không phải 1, 10, 2), cả khi hiển thị lẫn khi đánh số thứ tự văn bản.
+
+## 8. Metadata thật đã bàn giao (4 dự án)
+
+- Định dạng **khác** `Metadata_Tong`: một sheet phẳng 49 cột, mỗi dòng một văn bản kèm lặp lại thông tin hồ sơ. Dòng 2 là tên trường tiếng Anh. Có cột `Path đổi theo HD40`, tức chuẩn theo hướng dẫn metadata của khối Đảng.
+  → Có ít nhất **2 chuẩn đầu ra**: khối Nhà nước (`Metadata_Tong`, gói SIP) và khối Đảng (49 cột, HD40). Hệ thống cần cấu hình xuất theo dự án. Câu hỏi 1 (Bộ Y tế dùng chuẩn nào) càng quan trọng.
+- Ngày tài liệu đều dạng `dd/mm/yyyy` (một ô).
+- Cấu trúc cây thư mục đều 8–9 lớp.
+- Quy mô: khoảng **61.600 văn bản**, khoảng 59.400 văn bản có đủ tên loại, ngày, cơ quan ban hành, trích yếu. Tên loại phổ biến: Báo cáo, Biên bản, Quyết định, Thông báo, Tờ trình, Kế hoạch.
+- **Giá trị cho đồ án:** đây là nhãn đúng (đã qua kiểm tra và bàn giao) cho bài toán OCR trích xuất 5 trường. Nếu có PDF tương ứng (theo cột Path), có thể dựng bộ đánh giá mà không cần gán nhãn thủ công. Dữ liệu là của khách hàng: chỉ dùng trên máy nội bộ, không đưa lên Git hay cloud, ảnh minh họa trong báo cáo phải che thông tin.
+
+## Câu hỏi bổ sung
+
+6. Hệ số giấy xấu (Scan A42, Nhập liệu 2) có đơn giá riêng không, và ai quyết định một hộp là giấy xấu?
+7. Có được dùng PDF + metadata của 4 dự án trên (chỉ trên máy nội bộ) làm dữ liệu đánh giá OCR cho đồ án không? Cần xin phép Duy Vũ/khách hàng không?
