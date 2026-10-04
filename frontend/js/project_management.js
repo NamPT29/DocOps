@@ -235,6 +235,11 @@ async function loadProjectList() {
                     icon: 'fa-sliders',
                     handler: () => openProjectPolicy(project.id),
                 },
+                {
+                    label: 'Mục lục chỉnh lý',
+                    icon: 'fa-list-ol',
+                    handler: () => openArrangementCatalog(project.id),
+                },
                 {divider: true},
                 {
                     label: 'Thêm / cập nhật PDF',

@@ -1,6 +1,7 @@
 from sqlalchemy import func
 
 from server.models import (
+    ArrangementDossier,
     CaseStageEvent,
     CaseStageState,
     Project,
@@ -24,6 +25,12 @@ class WorkflowRepository:
     # -- project / configuration -------------------------------------------------
     def get_project(self, project_id):
         return self.session.get(Project, project_id)
+
+    def catalog_dossier_count(self, case_id):
+        """Arrangement catalogue rows of one box (FR-ARR-01)."""
+        return self.session.query(func.count(ArrangementDossier.id)).filter(
+            ArrangementDossier.case_id == case_id
+        ).scalar() or 0
 
     def stage_rows(self, project_id):
         return (

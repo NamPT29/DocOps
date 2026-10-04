@@ -1,6 +1,7 @@
 from collections import Counter
 
 from server.repositories.project_assignment_repository import ProjectAssignmentRepository
+from server.services.arrangement_catalog_parser import is_placeholder_box_key
 
 
 def _least_loaded_user(eligible_user_ids, counts):
@@ -17,7 +18,12 @@ def assign_unassigned_project_cases(db, *, project_id, changed_by_user_id):
 
     input_user_ids = repository.active_member_ids(project_id, "input")
     reviewer_user_ids = repository.active_member_ids(project_id, "reviewer")
-    cases = repository.lock_cases(project_id)
+    # Boxes still awaiting their scan (created from the arrangement catalogue)
+    # are handed out later, once they hold PDFs.
+    cases = [
+        case_row for case_row in repository.lock_cases(project_id)
+        if not is_placeholder_box_key(case_row.case_key)
+    ]
     pdf_counts = repository.active_pdf_counts_by_case(project_id)
     case_weights = {
         case_row.id: max(1, pdf_counts.get(case_row.id, 0))

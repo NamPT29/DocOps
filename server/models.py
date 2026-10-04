@@ -474,6 +474,100 @@ class Project(Base):
     )
 
 
+ARRANGEMENT_REVISION = {"revision": "0009_arrangement_catalog"}
+
+
+class ArrangementImport(Base):
+    """One applied import of an arrangement catalogue (FR-ARR-01)."""
+
+    __tablename__ = "arrangement_imports"
+    __table_args__ = ({"info": ARRANGEMENT_REVISION},)
+
+    id = Column(Integer, primary_key=True)
+    project_id = Column(
+        Integer,
+        ForeignKey("projects.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    file_name = Column(String(255), nullable=False)
+    file_sha256 = Column(String(64), nullable=False)
+    row_count = Column(Integer, nullable=False, default=0)
+    added = Column(Integer, nullable=False, default=0)
+    updated = Column(Integer, nullable=False, default=0)
+    unchanged = Column(Integer, nullable=False, default=0)
+    removed = Column(Integer, nullable=False, default=0)
+    kept = Column(Integer, nullable=False, default=0)
+    imported_by_user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
+    created_at = Column(DateTime, nullable=False, default=get_utc_now)
+
+
+class ArrangementDossier(Base):
+    """One catalogue row: a hồ sơ inside a box (hộp = ProjectCase), QC-16."""
+
+    __tablename__ = "arrangement_dossiers"
+    __table_args__ = (
+        UniqueConstraint(
+            "project_id", "box_number", "dossier_number", "dossier_suffix",
+            name="uq_arrangement_dossiers_key",
+        ),
+        CheckConstraint(
+            "box_number >= 1 AND dossier_number >= 1 AND sheet_count >= 1",
+            name="ck_arrangement_dossiers_numbers",
+        ),
+        {"info": ARRANGEMENT_REVISION},
+    )
+
+    id = Column(Integer, primary_key=True)
+    project_id = Column(
+        Integer,
+        ForeignKey("projects.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    case_id = Column(
+        Integer,
+        ForeignKey("project_cases.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    box_number = Column(Integer, nullable=False)
+    dossier_number = Column(Integer, nullable=False)
+    # Optional letter after the number ("12a"), stored lower case; "" if none.
+    dossier_suffix = Column(String(1), nullable=False, default="")
+    fonds_code = Column(String(50), nullable=False)
+    fonds_name = Column(String(255), nullable=False)
+    catalog_number = Column(String(50), nullable=False)
+    file_notation = Column(String(20), nullable=True)
+    title = Column(String(1000), nullable=False)
+    # QC-05 text dates: dd/mm/yyyy, 00 for an unknown day or month.
+    start_date = Column(String(10), nullable=False)
+    end_date = Column(String(10), nullable=False)
+    start_year = Column(Integer, nullable=False)
+    maintenance_code = Column(String(2), nullable=False)
+    sheet_count = Column(Integer, nullable=False)
+    term = Column(String(100), nullable=True)
+    bad_paper = Column(Boolean, nullable=False, default=False)
+    note = Column(String(1000), nullable=True)
+    source_row = Column(Integer, nullable=False)
+    import_id = Column(
+        Integer,
+        ForeignKey("arrangement_imports.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    # Set when a later import of this box no longer lists the row but the box
+    # had already started scanning, so the row was kept (QC-16 re-import).
+    missing_from_import_id = Column(
+        Integer,
+        ForeignKey("arrangement_imports.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    created_at = Column(DateTime, nullable=False, default=get_utc_now)
+    updated_at = Column(DateTime, nullable=False, default=get_utc_now, onupdate=get_utc_now)
+
+
 PROJECT_POLICY_REVISION = {"revision": "0008_project_policies"}
 
 

@@ -285,6 +285,8 @@
                                 <label for="projectFolderPicker" class="form-label fw-semibold">1. Chọn folder trên máy admin</label>
                                 <input type="file" id="projectFolderPicker" class="form-control" accept=".pdf,application/pdf" webkitdirectory directory multiple data-admin-change="handle-project-folder">
                                 <div id="projectFolderSummary" class="form-text">Chưa chọn folder.</div>
+                                <label for="projectRootFolderInput" class="form-label small fw-semibold mt-2 mb-1">Hoặc tạo dự án chưa có PDF (chỉnh lý trước scan): tên folder gốc sẽ tải lên sau</label>
+                                <input type="text" id="projectRootFolderInput" class="form-control form-control-sm" maxlength="255" placeholder="Ví dụ: Phong01" autocomplete="off" data-admin-change="update-project-level-options">
                                 <div id="projectUpdateTargetBanner" class="alert alert-warning mt-2 mb-0 d-none">
                                     <div class="d-flex justify-content-between align-items-center gap-2">
                                         <span><i class="fas fa-sync-alt"></i> Đang cập nhật: <strong id="projectUpdateTargetName"></strong></span>
@@ -315,6 +317,7 @@
                                 <div class="col-md-6">
                                     <label for="projectCaseLevel" class="form-label fw-semibold">3. Cấp hồ sơ</label>
                                     <select id="projectCaseLevel" class="form-select" data-admin-change="update-project-level-options"><option value="">Chọn folder trước</option></select>
+                                    <div class="form-text">Dự án dùng mục lục chỉnh lý: chọn cấp của thư mục <strong>Hộp</strong> (gốc\Hộp\Hồ sơ\*.pdf → cấp 1; gốc\Phông\Hộp\Hồ sơ\*.pdf → cấp 2).</div>
                                 </div>
                                 <div class="col-md-6">
                                     <label for="projectReportMode" class="form-label fw-semibold">Cách tạo báo cáo</label>
@@ -569,6 +572,45 @@
             <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Hủy</button>
             <button type="button" class="btn btn-primary" id="saveProjectPolicyButton" data-admin-action="save-project-policy"><i class="fas fa-save"></i> Lưu chính sách</button>
           </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- MỤC LỤC CHỈNH LÝ (FR-ARR-01, QC-16) -->
+    <div class="modal fade" id="arrangementCatalogModal" tabindex="-1" aria-hidden="true">
+      <div class="modal-dialog modal-xl modal-dialog-scrollable">
+        <div class="modal-content">
+          <div class="modal-header bg-primary text-white">
+            <h5 class="modal-title"><i class="fas fa-list-ol"></i> Mục lục chỉnh lý: <span id="arrangementCatalogTitle"></span></h5>
+            <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Đóng"></button>
+          </div>
+          <div class="modal-body">
+            <div class="alert alert-info small">File .xlsx theo mẫu QC-16 (sheet <strong>Muc_luc</strong>, mỗi dòng một hồ sơ), tối đa 5 MB / 10.000 hồ sơ. Chỉ các hộp có trong file được cập nhật; hồ sơ bị bỏ khỏi file được xóa nếu hộp chưa scan, còn hộp đã scan thì giữ lại và gắn cờ. File còn lỗi thì không ghi gì.</div>
+            <div class="row g-2 align-items-end mb-3">
+              <div class="col-md-8">
+                <label class="form-label fw-semibold" for="arrangementCatalogFile">File mục lục</label>
+                <input type="file" class="form-control" id="arrangementCatalogFile" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet">
+              </div>
+              <div class="col-md-4 d-flex gap-2">
+                <button type="button" class="btn btn-outline-primary w-100" id="arrangementPreviewButton" data-admin-action="preview-arrangement-catalog"><i class="fas fa-eye"></i> Xem trước</button>
+                <button type="button" class="btn btn-success w-100" id="arrangementImportButton" data-admin-action="import-arrangement-catalog" disabled><i class="fas fa-check"></i> Xác nhận ghi</button>
+              </div>
+            </div>
+            <div id="arrangementPreview" class="mb-3" aria-live="polite"></div>
+            <h6 class="text-primary">Hộp trong mục lục <span id="arrangementCatalogTotals" class="text-muted small"></span></h6>
+            <div class="table-responsive">
+              <table class="table table-sm table-bordered align-middle mb-2">
+                <thead class="table-light">
+                  <tr><th>Hộp số</th><th>Thư mục scan</th><th class="text-center">Số hồ sơ</th><th>Giấy xấu (đề xuất)</th><th>Cảnh báo</th><th></th></tr>
+                </thead>
+                <tbody id="arrangementBoxesBody"></tbody>
+              </table>
+            </div>
+            <div id="arrangementBoxDetail" class="mb-3"></div>
+            <h6 class="text-primary">Lịch sử import</h6>
+            <ul id="arrangementImportHistory" class="list-unstyled small mb-0"></ul>
+          </div>
+          <div class="modal-footer"><button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Đóng</button></div>
         </div>
       </div>
     </div>
@@ -1014,14 +1056,15 @@
     <script src="js/submission.js?v=100.05"></script>
     <script src="js/admin_operations.js?v=1.00"></script>
     <script src="js/admin_panel.js?v=203.07"></script>
-    <script src="js/project_upload.js?v=1.00"></script>
+    <script src="js/project_upload.js?v=1.01"></script>
     <script src="js/project_reports.js?v=1.00"></script>
-    <script src="js/project_management.js?v=2.12"></script>
+    <script src="js/project_management.js?v=2.13"></script>
     <script src="js/project_workflow.js?v=1.02"></script>
     <script src="js/project_policy.js?v=1.00"></script>
+    <script src="js/arrangement_catalog.js?v=1.00"></script>
     <script src="js/ocr_image.js?v=2"></script>
     <script src="js/ocr_config.js?v=4"></script>
     <script src="js/template_config.js?v=101.01"></script>
-    <script src="admin-page.js?v=4"></script>
+    <script src="admin-page.js?v=5"></script>
 </body>
 </html>

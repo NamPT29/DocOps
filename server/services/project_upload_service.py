@@ -18,6 +18,10 @@ from server.models import (
     ProjectUploadSession,
 )
 from server.repositories.project_upload_repository import ProjectUploadRepository
+from server.services.arrangement_catalog_service import (
+    adopt_box_awaiting_scan,
+    require_catalog_upload_structure,
+)
 from server.services.project_assignment_service import assign_unassigned_project_cases
 from server.services.project_workspace_service import sync_project_assets_to_documents
 from server.services.project_manifest_service import (
@@ -127,6 +131,9 @@ def create_or_resume_upload_session(
         )
     except ProjectManifestError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
+    require_catalog_upload_structure(
+        db, project, [item["relative_path"] for item in prepared["items"]]
+    )
 
     session_key = str(client_session_key or "").strip()
     if not session_key or len(session_key) > 100:
@@ -469,6 +476,11 @@ def _get_or_create_case(db, repository, project, grouping):
     case_row = repository.find_case(project.id, grouping["case_key"])
     if case_row:
         return case_row
+    # A box imported from the arrangement catalogue before its scan existed
+    # keeps its identity (and pipeline state) when its folder arrives.
+    case_row = adopt_box_awaiting_scan(db, project, grouping)
+    if case_row:
+        return case_row
     case_row = ProjectCase(
         project_id=project.id,
         case_key=grouping["case_key"],
@@ -504,6 +516,8 @@ def finalize_upload_session(db, *, session_id):
 
     project = repository.lock_project(session.project_id)
     upload_files = repository.list_session_files(session.id)
+    # A catalogue may have been imported after this session was opened.
+    require_catalog_upload_structure(db, project, [item.relative_path for item in upload_files])
     incomplete = [item.relative_path for item in upload_files if item.status != "uploaded"]
     if incomplete:
         raise HTTPException(

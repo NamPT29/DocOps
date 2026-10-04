@@ -446,6 +446,23 @@ def transition_case_stage(db, *, project_id, case_id, stage_key, action, actor, 
         stage = engine.STAGES_BY_KEY[stage_key]
         now = get_utc_now()
 
+        # BA: Chỉnh lý is complete once the box's catalogue was imported.
+        if (
+            stage_key == "arrangement"
+            and action == engine.COMPLETE
+            and not repository.catalog_dossier_count(case_id)
+        ):
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "code": "catalog_required",
+                    "message": (
+                        "Hộp chưa có mục lục chỉnh lý (FR-ARR-01). Hãy import mục lục "
+                        "của hộp trước khi hoàn tất bước Chỉnh lý."
+                    ),
+                },
+            )
+
         # BR-04: nobody checks their own work, administrators included.
         if stage.kind == "qc" and action in (
             engine.START, engine.COMPLETE, engine.REJECT

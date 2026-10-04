@@ -96,7 +96,33 @@ Giao diện: Tab **Dự án → Thao tác → Quy trình số hóa** (`frontend/
 - "Ngưỡng lỗi của hộp (BR-07)" khác "tỷ lệ lỗi tối đa của biểu mẫu" (xếp *một báo cáo* vào loại lỗi).
 - Giao diện: Dự án → Thao tác → Chính sách dự án.
 
+## Mục lục chỉnh lý (03/10, FR-ARR-01, revision `0009_arrangement_catalog`)
+
+- Bảng `arrangement_dossiers` (mỗi dòng mục lục = một hồ sơ, gắn với hộp = `ProjectCase`) và
+  `arrangement_imports` (nhật ký mỗi lần ghi: file, SHA-256, ai, khi nào, số thêm/sửa/xóa/giữ lại).
+- Đọc theo QC-16: sheet `Muc_luc`, cột theo tên tiêu đề; Hộp số là số nguyên ("0020" = 20); Hồ sơ số
+  là số + tối đa 1 chữ cái (12, 12a; lưu hậu tố chữ thường, sắp 12 < 12a < 13); ngày QC-05 (chữ
+  dd/mm/yyyy kể cả 00, hoặc ô ngày Excel); THBQ theo QC-13; giấy xấu `x` → hộp *đề xuất* giấy xấu
+  (QC-07, Admin duyệt ở 07/10). Tối đa 5 MB / 10.000 hồ sơ; lỗi báo theo dòng Excel và cột.
+- Xem trước rồi mới ghi (mã xem trước chống ghi đè khi dữ liệu đổi giữa hai bước). File còn lỗi thì
+  không ghi gì. Chỉ các hộp có trong file bị ảnh hưởng: dòng bị bỏ → xóa nếu hộp chưa scan, giữ lại
+  + gắn cờ nếu hộp đã scan (có PDF hoặc bước Scan đã rời "Chờ").
+- Dự án tạo được khi chưa có PDF (nhập tên folder gốc). Hộp chưa có thư mục scan được tạo dạng
+  "hộp chờ scan" (khóa `::muc-luc/hop-N`), chưa tự giao người nhập/kiểm tra.
+- Cấp thư mục (QC-16): thư mục ở cấp `case_level` = Hộp (tên là số), cấp dưới = Hồ sơ, PDF nằm
+  trong thư mục hồ sơ. Dự án có mục lục: upload sai cấp (PDF ngay trong thư mục cấp hồ sơ → cấp hồ sơ
+  đang là HỒ SƠ; sâu hơn → có vẻ là PHÔNG; tên hộp không phải số; một hộp ở nhiều thư mục) bị từ chối
+  cả lần tải; upload đúng thì thư mục hộp gắn vào hộp chờ scan cùng số. Import vào dự án đã có PDF
+  sai cấu trúc cũng bị từ chối.
+- Bước Chỉnh lý không tự "xong"; chỉ chặn Hoàn tất khi hộp chưa có mục lục. Chỉ Admin import (UC-04
+  cho Hành chính để sau).
+
 ## Ghi chú cho các nhiệm vụ sau
+
+- 05/10 so khớp (BR-01): so thư mục hồ sơ (cấp `case_level + 1`) với Hồ sơ số + hậu tố của mục lục
+  theo giá trị (bỏ số 0 đầu, hậu tố không phân biệt hoa thường); `BIA.pdf` không là văn bản (QC-03).
+  Xử lý các hồ sơ bị gắn cờ "không còn trong mục lục mới".
+- 07/10: duyệt "giấy xấu" của hộp (đề xuất = có hồ sơ đánh `x` trong mục lục).
 
 - 04/10 giao/thu hồi hộp (BR-06): Admin cần thấy các hộp đang nằm ở CTV **đã hết hạn** hoặc ở
   tài khoản **bị khóa** để thu hồi (`account_policy.access_block_message`).

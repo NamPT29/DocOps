@@ -6,6 +6,7 @@ from pathlib import Path
 from fastapi import HTTPException
 
 from server.repositories.project_admin_repository import ProjectAdminRepository
+from server.services.arrangement_catalog_parser import is_placeholder_box_key
 from server.services import export_job_service
 from server.services.project_service import _validate_project_members
 from server.services.project_workspace_service import sync_project_assets_to_documents
@@ -133,7 +134,11 @@ def update_project_members(
         input_user_ids=input_ids,
         reviewer_user_ids=reviewer_ids,
     )
-    cases = repository.lock_cases(project.id)
+    # Boxes awaiting their scan (arrangement catalogue) get no members yet.
+    cases = [
+        case_row for case_row in repository.lock_cases(project.id)
+        if not is_placeholder_box_key(case_row.case_key)
+    ]
     pdf_counts = repository.active_pdf_counts_by_case(project.id)
     submission_counts = repository.submission_counts_by_case(project.id)
     # Adding members may redistribute only untouched cases. Cases with a PDF

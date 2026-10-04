@@ -7,6 +7,13 @@ var selectedProjectFileRows = [];
 var selectedProjectRootName = '';
 var selectedProjectMaximumDepth = 0;
 var projectUpdateTargetId = null;
+// FR-ARR-01: a project may start before scanning (arrangement first). Without a
+// folder the admin types the root folder name the scan will be uploaded under.
+const NO_PDF_FOLDER_LEVELS = 3;
+
+function projectNoPdfRootName() {
+    return String(document.getElementById('projectRootFolderInput')?.value || '').trim();
+}
 
 function setProjectUploadStatus(message, tone = 'muted') {
     const status = document.getElementById('projectUploadStatus');
@@ -92,27 +99,30 @@ function updateProjectLevelOptions() {
     const reportSelect = document.getElementById('projectReportLevel');
     if (!caseSelect || !reportSelect) return;
     const previousCase = Number(caseSelect.value || 0);
+    const maximumDepth = selectedProjectFileRows.length || !projectNoPdfRootName()
+        ? selectedProjectMaximumDepth
+        : NO_PDF_FOLDER_LEVELS;
     caseSelect.replaceChildren();
-    if (selectedProjectMaximumDepth < 1) {
+    if (maximumDepth < 1) {
         const option = document.createElement('option');
         option.value = '';
         option.textContent = 'Folder cần ít nhất 1 cấp hồ sơ';
         caseSelect.appendChild(option);
     } else {
-        for (let level = 1; level <= selectedProjectMaximumDepth; level += 1) {
+        for (let level = 1; level <= maximumDepth; level += 1) {
             const option = document.createElement('option');
             option.value = String(level);
             option.textContent = `Cấp ${level}`;
             caseSelect.appendChild(option);
         }
         caseSelect.value = String(
-            previousCase >= 1 && previousCase <= selectedProjectMaximumDepth ? previousCase : 1,
+            previousCase >= 1 && previousCase <= maximumDepth ? previousCase : 1,
         );
     }
 
     const caseLevel = Number(caseSelect.value || 0);
     reportSelect.replaceChildren();
-    for (let level = caseLevel + 1; level <= selectedProjectMaximumDepth; level += 1) {
+    for (let level = caseLevel + 1; level <= maximumDepth; level += 1) {
         const option = document.createElement('option');
         option.value = String(level);
         option.textContent = `Cấp ${level}`;
@@ -298,8 +308,59 @@ function projectDateValue(elementId) {
     return value ? `${value}T00:00:00` : null;
 }
 
+async function createProjectWithoutPdf(rootName) {
+    const templateId = Number(document.getElementById('projectTemplateSelect')?.value || 0);
+    const caseLevel = Number(document.getElementById('projectCaseLevel')?.value || 0);
+    const reportMode = document.getElementById('projectReportMode')?.value || 'folder_level';
+    const reportLevel = reportMode === 'folder_level'
+        ? Number(document.getElementById('projectReportLevel')?.value || 0)
+        : null;
+    if (!templateId) return alert('Vui lòng chọn biểu mẫu.');
+    if (!caseLevel) return alert('Vui lòng chọn cấp hồ sơ.');
+    if (reportMode === 'folder_level' && (!reportLevel || reportLevel <= caseLevel)) {
+        return alert('Cấp báo cáo phải sâu hơn cấp hồ sơ.');
+    }
+    const button = document.getElementById('createProjectButton');
+    if (button) button.disabled = true;
+    try {
+        const created = await apiCall('/api/projects', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({
+                name: document.getElementById('projectNameInput')?.value.trim() || rootName,
+                root_folder_name: rootName,
+                template_id: templateId,
+                start_date: projectDateValue('projectStartDate'),
+                end_date: projectDateValue('projectEndDate'),
+                case_level: caseLevel,
+                report_mode: reportMode,
+                report_level: reportLevel,
+                input_user_ids: typeof checkedProjectUserIds === 'function' ? checkedProjectUserIds('project-input-user') : [],
+                reviewer_user_ids: typeof checkedProjectUserIds === 'function' ? checkedProjectUserIds('project-reviewer-user') : [],
+            }),
+        });
+        if (!created) return;
+        document.getElementById('projectRootFolderInput').value = '';
+        updateProjectLevelOptions();
+        setProjectUploadStatus(
+            `Đã tạo dự án chưa có PDF. Import mục lục ở Thao tác → Mục lục chỉnh lý; khi có bản scan, `
+            + `dùng "Thêm / cập nhật PDF" và chọn đúng folder “${rootName}”.`,
+            'success',
+        );
+        if (typeof loadProjectList === 'function') await loadProjectList();
+    } finally {
+        if (button) button.disabled = false;
+    }
+}
+
 async function createAndUploadProject() {
-    if (!selectedProjectFileRows.length) return alert('Vui lòng chọn folder có PDF.');
+    if (!selectedProjectFileRows.length) {
+        const rootName = projectNoPdfRootName();
+        if (projectUpdateTargetId || !rootName) {
+            return alert('Vui lòng chọn folder có PDF, hoặc nhập tên folder gốc để tạo dự án chưa có PDF.');
+        }
+        return createProjectWithoutPdf(rootName);
+    }
     const projectsList = typeof projectManagementProjects !== 'undefined' ? projectManagementProjects : [];
     const updateProject = projectUpdateTargetId
         ? projectsList.find(project => Number(project.id) === Number(projectUpdateTargetId))

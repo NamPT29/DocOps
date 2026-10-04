@@ -555,7 +555,7 @@ def test_project_policy_revision_is_additive_and_checks_limits():
     with engine.begin() as connection:
         config.attributes["connection"] = connection
         command.upgrade(config, "0008_project_policies")
-        assert current_database_revision(connection) == HEAD_REVISION
+        assert current_database_revision(connection) == "0008_project_policies"
         assert validate_existing_database(connection) == []
         connection.execute(text(
             "INSERT INTO users (id, username, password, full_name, role, max_concurrent_sessions) "
@@ -587,6 +587,62 @@ def test_project_policy_revision_is_additive_and_checks_limits():
         command.downgrade(config, "0007_user_lock")
         assert "project_policies" not in inspect(connection).get_table_names()
         assert connection.execute(text("SELECT COUNT(*) FROM projects")).scalar_one() == 1
+
+
+def test_arrangement_catalog_revision_is_additive():
+    pytest.importorskip("alembic")
+    from alembic import command
+    from sqlalchemy.exc import IntegrityError
+
+    from server.migration_runner import _alembic_config
+
+    source = (
+        ROOT / "migrations" / "versions" / "0009_arrangement_catalog.py"
+    ).read_text(encoding="utf-8")
+    assert "from server" not in source and "import server" not in source
+
+    engine = create_engine("sqlite+pysqlite:///:memory:")
+    config = _alembic_config(ROOT)
+    with engine.begin() as connection:
+        config.attributes["connection"] = connection
+        command.upgrade(config, "0009_arrangement_catalog")
+        assert current_database_revision(connection) == HEAD_REVISION
+        assert validate_existing_database(connection) == []
+        connection.execute(text(
+            "INSERT INTO users (id, username, password, full_name, role, max_concurrent_sessions) "
+            "VALUES (1, 'pm', 'x', 'PM', 'admin', 1)"
+        ))
+        connection.execute(text("INSERT INTO templates (id, name, filename) VALUES (1, 't', 't.xlsx')"))
+        connection.execute(text(
+            "INSERT INTO projects (id, name, root_folder_name, template_id, "
+            "template_name_snapshot, template_filename_snapshot, case_level, report_mode, "
+            "status, created_by_user_id, created_at, updated_at) "
+            "VALUES (1, 'P', 'p', 1, 't', 't.xlsx', 1, 'pdf', 'new', 1, "
+            "CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"
+        ))
+        connection.execute(text(
+            "INSERT INTO project_cases (id, project_id, case_key, display_name, created_at, updated_at) "
+            "VALUES (1, 1, '::muc-luc/hop-20', 'Hộp 20', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"
+        ))
+        insert = (
+            "INSERT INTO arrangement_dossiers (project_id, case_id, box_number, dossier_number, "
+            "dossier_suffix, fonds_code, fonds_name, catalog_number, title, start_date, end_date, "
+            "start_year, maintenance_code, sheet_count, bad_paper, source_row, created_at, updated_at) "
+            "VALUES (1, 1, 20, {number}, '{suffix}', '01', 'Phông', '1', 'Hồ sơ', '05/01/2020', "
+            "'28/12/2020', 2020, '01', {sheets}, 0, 2, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"
+        )
+        connection.execute(text(insert.format(number=12, suffix="", sheets=5)))
+        connection.execute(text(insert.format(number=12, suffix="a", sheets=5)))
+        for bad in (
+            insert.format(number=12, suffix="a", sheets=5),  # duplicate key
+            insert.format(number=13, suffix="", sheets=0),  # sheet count must be >= 1
+        ):
+            with pytest.raises(IntegrityError), connection.begin_nested():
+                connection.execute(text(bad))
+
+        command.downgrade(config, "0008_project_policies")
+        tables = set(inspect(connection).get_table_names())
+        assert {"arrangement_dossiers", "arrangement_imports"}.isdisjoint(tables)
 
 
 def test_request_paths_do_not_call_submission_metadata_backfill():
