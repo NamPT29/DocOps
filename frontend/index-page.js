@@ -4,15 +4,26 @@
     // Immediate auth check prevents protected-page flicker before app startup.
     const token = localStorage.getItem('token');
     const userStr = localStorage.getItem('user');
+    const urlParams = new URLSearchParams(window.location.search);
+    const hasCheckId = urlParams.has('check_id');
+    // BA 3.3: admins may enter data; the admin page opens this page with ?mode=input.
+    const isAdminInputMode = urlParams.get('mode') === 'input';
+    let isAdmin = false;
     if (!token || !userStr) {
         window.location.href = '/login.html';
     } else {
-        const user = JSON.parse(userStr);
-        const urlParams = new URLSearchParams(window.location.search);
-        const hasCheckId = urlParams.has('check_id');
-        if (user.role === 'admin' && !hasCheckId) {
+        isAdmin = JSON.parse(userStr).role === 'admin';
+        if (isAdmin && !hasCheckId && !isAdminInputMode) {
             window.location.href = '/admin.html';
         }
+    }
+
+    function showAdminReturnLink() {
+        if (!isAdmin || hasCheckId) return;
+        const backButton = document.getElementById('backToAdminBtn');
+        if (!backButton) return;
+        backButton.href = '/admin.html#projects';
+        backButton.classList.remove('d-none');
     }
 
     const clickActions = Object.freeze({
@@ -52,6 +63,7 @@
     function bindIndexPageActions() {
         document.addEventListener('click', event => dispatchAction(clickActions, event));
         document.addEventListener('change', event => dispatchAction(changeActions, event));
+        showAdminReturnLink();
     }
 
     if (document.readyState === 'loading') {

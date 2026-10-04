@@ -132,6 +132,8 @@ async function fetchSubmissions(page = 1) {
     let url = new URL('/api/submissions', window.location.origin);
     url.searchParams.set('page', submissionsCurrentPage);
     url.searchParams.set('page_size', submissionsPageSize);
+    // On the input page an admin lists only their own work (BA 3.3).
+    if (!window.location.pathname.includes('admin.html')) url.searchParams.set('mine', 'true');
 
     const filterTid = document.getElementById('filterTemplateId');
     if (filterTid && filterTid.value) {

@@ -376,7 +376,7 @@ function setSubmissionUnreadBadge(value) {
 }
 
 async function refreshSubmissionUnreadBadge() {
-    const response = await apiCall('/api/submissions?page=1&page_size=1');
+    const response = await apiCall('/api/submissions?page=1&page_size=1&mine=true');
     if (response) setSubmissionUnreadBadge(response.unread_review_count);
     return response;
 }

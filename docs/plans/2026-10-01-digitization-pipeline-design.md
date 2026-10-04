@@ -64,12 +64,25 @@ Giao diện: Tab **Dự án → Thao tác → Quy trình số hóa** (`frontend/
 - Đổi Hành chính → CTV bị từ chối (409) nếu còn phân công không dành cho CTV; hệ thống liệt kê,
   không tự gỡ. Không đổi qua lại với Admin.
 
+## Admin nhập liệu (03/10, BA 3.3, BR-04)
+
+- Admin được phân làm người nhập trong dự án (bỏ quy tắc cũ "Quản trị viên không được phân làm
+  người nhập").
+- Admin vào trang nhập liệu bằng nút **Nhập liệu** trên trang quản trị (`index.html?mode=input`);
+  trang chỉ hiện dự án Admin được phân nhập và hồ sơ của chính Admin (`GET /api/submissions?mine=true`).
+  Hồ sơ Admin nhập có đủ phần phản hồi chất lượng và xác nhận chỉnh sửa như người nhập khác.
+- BR-04 giữ nguyên: chia hộp không giao người kiểm tra trùng người nhập; mọi thao tác duyệt chặn
+  người tạo hồ sơ, kể cả Admin; "hồ sơ tiếp theo" bỏ qua hồ sơ của chính người duyệt.
+- Luồng cũ (giao tài liệu lẻ, nhập thư mục máy chủ) vẫn chỉ nhận tài khoản thường làm người nhập.
+
 ## Ghi chú cho các nhiệm vụ sau
 
 - 04/10 giao/thu hồi hộp (BR-06): Admin cần thấy các hộp đang nằm ở CTV **đã hết hạn** để thu hồi
   (`account_policy.is_expired`).
 - Chưa có chức năng **khóa tài khoản**. Muốn cắt quyền ngay hiện chỉ có "Giải phóng phiên" + đổi
-  mật khẩu (hạn CTV không đặt được ở quá khứ, nên không dùng hạn để khóa ngay).
+  mật khẩu (hạn CTV không đặt được ở quá khứ, nên không dùng hạn để khóa ngay). Làm ở nhiệm vụ 1c.
+- 07/10 WorkLog/KPI (FR-KPI-01): thống kê nhân sự hiện bỏ qua tài khoản Admin
+  (`personnel_statistics_repository`), nên sản lượng Admin tự nhập chưa được tính.
 
 ## Lộ trình (BA mục 12.2)
 

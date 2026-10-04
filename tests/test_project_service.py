@@ -146,8 +146,10 @@ def test_create_project_rejects_invalid_dates_levels_and_users(database):
                 "end_date": datetime(2026, 8, 1),
             },
         )
-    with pytest.raises(HTTPException, match="Quản trị viên"):
-        create_project(database, **{**common, "input_user_ids": [admin.id]})
+    # Admins may now enter data (BA 3.3, see test_admin_data_entry.py); unknown
+    # accounts are still rejected.
+    with pytest.raises(HTTPException, match="Không tìm thấy người dùng"):
+        create_project(database, **{**common, "input_user_ids": [999999]})
 
 
 def test_project_listing_scopes_employee_and_calculates_metrics(database):

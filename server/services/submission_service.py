@@ -826,9 +826,13 @@ class SubmissionService:
         page: int,
         page_size: int,
         duplicate_only: bool = False,
+        mine: bool = False,
     ) -> dict:
         repository = SubmissionRepository(db)
-        if current_user["role"] == "admin":
+        # ``mine`` lets an admin who enters data (BA 3.3) list only the reports
+        # of their own assignment, exactly like other input users.
+        list_everything = current_user["role"] == "admin" and not mine
+        if list_everything:
             submissions, total, total_pages, current_page = repository.paginate(
                 owner_id=None,
                 status=status,
@@ -869,7 +873,7 @@ class SubmissionService:
             SubmissionReviewHistoryRepository(db).unread_submission_ids(
                 current_user["id"]
             )
-            if current_user["role"] != "admin"
+            if not list_everything
             else set()
         )
         for result in results:

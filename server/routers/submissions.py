@@ -178,6 +178,7 @@ def api_get_submissions(
     page: int = 1,
     page_size: int = 20,
     duplicate_only: bool = False,
+    mine: bool = False,
     current_user: dict = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
@@ -186,8 +187,9 @@ def api_get_submissions(
             raise HTTPException(status_code=400, detail="Số trang phải lớn hơn hoặc bằng 1")
         if page_size < 1 or page_size > 100:
             raise HTTPException(status_code=400, detail="Số hồ sơ mỗi trang phải từ 1 đến 100")
-            
+
         return SubmissionService.get_paginated_submissions_payload(
+            mine=mine,
             db=db,
             current_user=current_user,
             template_id=template_id,
@@ -496,6 +498,8 @@ def api_get_next_review_submission(
             submission
             for submission in candidates
             if (submission.created_at, submission.id) < current_key
+            # BR-04: nobody reviews their own entry, admins included.
+            and submission.created_by_user_id != current_user["id"]
         ),
         None,
     )
@@ -515,10 +519,9 @@ def api_get_submission(sub_id: int, current_user: dict = Depends(get_current_use
         can_review = ReviewWorkflowService.can_review_submission(sub, current_user, db)
         if current_user["role"] != "admin" and sub.status == "pending_review":
             db.commit()
-        is_active_input = (
-            current_user["role"] != "admin"
-            and repository.is_active_input_assignee(sub, current_user["id"])
-        )
+        # Admins may enter data too (BA 3.3), so their own assigned reports get
+        # the same input-user view (quality feedback, correction confirmation).
+        is_active_input = repository.is_active_input_assignee(sub, current_user["id"])
         if (
             current_user["role"] != "admin"
             and not is_active_input

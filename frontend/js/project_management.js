@@ -92,7 +92,8 @@ async function loadProjectFormOptions() {
     if (userData) {
         const users = Array.isArray(userData.data) ? userData.data : [];
         projectManagementUsers = users;
-        renderProjectUserOptions('projectInputUsers', users.filter(user => user.role !== 'admin'), 'input');
+        // BA 3.3: every account type may enter data, admins included.
+        renderProjectUserOptions('projectInputUsers', users, 'input');
         renderProjectUserOptions('projectReviewerUsers', projectReviewerCandidates(users), 'reviewer');
     }
 }
@@ -383,7 +384,7 @@ function openProjectMembers(projectId) {
     document.getElementById('projectMembersModalTitle').textContent = project.name;
     renderProjectMemberEditor(
         'projectMembersInputList',
-        projectManagementUsers.filter(user => user.role !== 'admin'),
+        projectManagementUsers,
         project.input_user_ids,
         'project-member-input',
         project.member_report_stats,

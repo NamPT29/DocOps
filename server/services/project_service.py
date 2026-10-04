@@ -65,14 +65,9 @@ def _validate_project_members(db, input_user_ids, reviewer_user_ids):
             status_code=400,
             detail=f"Không tìm thấy người dùng: {', '.join(map(str, missing_ids))}",
         )
-    invalid_input_ids = sorted(
-        user_id for user_id in input_ids if users[user_id].role == "admin"
-    )
-    if invalid_input_ids:
-        raise HTTPException(
-            status_code=400,
-            detail="Quản trị viên không được phân làm người nhập",
-        )
+    # BA 3.3: Admin, Hành chính and CTV may all enter data. BR-04 (no
+    # self-review) is enforced per case and per submission, so an admin who
+    # enters a case is never its reviewer.
     # FR-AUT-03 / BA 3.3: check nhập liệu is for Admin and Hành chính only.
     if account_policy.ctv_user_ids(users[user_id] for user_id in reviewer_ids):
         raise HTTPException(status_code=400, detail=account_policy.CTV_REVIEWER_ERROR)
