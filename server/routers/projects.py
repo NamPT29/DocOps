@@ -113,13 +113,12 @@ def api_list_my_projects(
 @router.get("/action-needed-cases")
 def api_list_action_needed_cases(
     project_id: int | None = None,
-    limit: int = 100,
     current_user: dict = Depends(get_admin_user),
     db: Session = Depends(get_db),
 ):
     return {
         "status": "ok",
-        "data": list_action_needed_cases(db, project_id=project_id, limit=limit),
+        "data": list_action_needed_cases(db, project_id=project_id),
     }
 
 

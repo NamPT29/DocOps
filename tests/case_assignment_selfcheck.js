@@ -31,4 +31,11 @@ assert.match(workflowJs, /\/cases\/\$\{caseItem\.id\}\/assign-input/, 'project_w
 // 4. BR-04: Reviewer cannot be assigned as data entry input user
 assert.match(workflowJs, /caseItem\.assigned_reviewer_user_id && u\.id === caseItem\.assigned_reviewer_user_id/, 'project_workflow.js must filter reviewer from input candidate options (BR-04)');
 
+// 5. R9: Timezone formatting with Asia/Ho_Chi_Minh and ?v= bumps
+assert.match(managementJs, /timeZone:\s*'Asia\/Ho_Chi_Minh'/, 'project_management.js must format with Asia/Ho_Chi_Minh');
+assert.doesNotMatch(managementJs, /due_at\.substring\(0,\s*16\)/, 'due_at must not use UTC substring');
+assert.doesNotMatch(managementJs, /assigned_at\.substring\(0,\s*16\)/, 'assigned_at must not use UTC substring');
+assert.match(html, /project_management\.js\?v=2\.15/, 'admin.html must load project_management.js?v=2.15');
+assert.match(html, /project_workflow\.js\?v=1\.04/, 'admin.html must load project_workflow.js?v=1.04');
+
 console.log('Case assignment self-check passed.');

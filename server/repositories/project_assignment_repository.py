@@ -81,16 +81,19 @@ class ProjectAssignmentRepository:
             if not account_policy.is_expired(u)
         ]
 
-    def member_ids(self, project_id: int, member_role: str) -> list[int]:
-        return [
-            row[0]
-            for row in self.session.query(ProjectMember.user_id)
-            .filter(
-                ProjectMember.project_id == project_id,
-                ProjectMember.member_role == member_role,
-            )
-            .all()
-        ]
+    def member_ids(
+        self,
+        project_id: int,
+        member_role: str,
+        active_only: bool = True,
+    ) -> list[int]:
+        query = self.session.query(ProjectMember.user_id).filter(
+            ProjectMember.project_id == project_id,
+            ProjectMember.member_role == member_role,
+        )
+        if active_only:
+            query = query.filter(ProjectMember.is_active.is_(True))
+        return [row[0] for row in query.all()]
 
     def lock_cases(self, project_id):
         return (

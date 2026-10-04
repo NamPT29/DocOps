@@ -232,7 +232,7 @@ def assign_case_input(db, *, project_id: int, case_id: int, user_id: int, actor_
     if not user:
         raise HTTPException(status_code=404, detail="Không tìm thấy người dùng")
 
-    input_ids = repository.member_ids(project_id, "input")
+    input_ids = repository.member_ids(project_id, "input", active_only=True)
     if user_id not in input_ids:
         raise HTTPException(
             status_code=409,
@@ -333,7 +333,7 @@ def revoke_case_input(
         if not new_user:
             raise HTTPException(status_code=404, detail="Không tìm thấy người nhận mới")
 
-        input_ids = repository.member_ids(project_id, "input")
+        input_ids = repository.member_ids(project_id, "input", active_only=True)
         if new_user_id not in input_ids:
             raise HTTPException(
                 status_code=409,

@@ -21,6 +21,30 @@ const WORKFLOW_STATUS_CLASSES = {
     rejected: 'bg-danger',
 };
 
+function formatVietnamDateTime(isoString) {
+    if (typeof window !== 'undefined' && typeof window.formatVietnamDateTime === 'function') {
+        return window.formatVietnamDateTime(isoString);
+    }
+    if (!isoString) return '';
+    try {
+        const date = new Date(isoString);
+        if (isNaN(date.getTime())) return String(isoString);
+        const parts = new Intl.DateTimeFormat('en-GB', {
+            timeZone: 'Asia/Ho_Chi_Minh',
+            year: 'numeric',
+            month: '2-digit',
+            day: '2-digit',
+            hour: '2-digit',
+            minute: '2-digit',
+            hour12: false,
+        }).formatToParts(date);
+        const values = Object.fromEntries(parts.map(p => [p.type, p.value]));
+        return `${values.year}-${values.month}-${values.day} ${values.hour}:${values.minute}`;
+    } catch {
+        return String(isoString).substring(0, 16).replace('T', ' ');
+    }
+}
+
 function workflowApiBase() {
     return `/api/projects/${projectWorkflowProjectId}/workflow`;
 }

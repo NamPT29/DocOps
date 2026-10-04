@@ -130,7 +130,10 @@ def execute_revoke_user_assignments(db: Session, target_user_id: int, assignment
             target_user_id
         )
         for assignment, submission in active_reviews:
-            if submission.created_by_user_id == current_user_id:
+            if (
+                submission.created_by_user_id == current_user_id
+                or submission.submitted_by_user_id == current_user_id
+            ):
                 result["reviews_blocked"] += 1
                 continue
             assignment.reviewer_user_id = current_user_id

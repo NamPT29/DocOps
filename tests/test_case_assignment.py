@@ -36,7 +36,9 @@ from server.services.project_policy_service import update_project_policy
 from server.services.review_workflow_service import ReviewWorkflowService
 from server.repositories.review_repository import ReviewRepository
 from server.repositories.submission_view_repository import SubmissionViewRepository
-from server.routers.submissions import api_update_submission, SubmitRequest
+from server.routers.projects import api_list_action_needed_cases
+from server.routers.submissions import api_get_next_review_submission, api_update_submission, SubmitRequest
+from server.services.document_assignment_service import execute_revoke_user_assignments
 
 
 @pytest.fixture()
@@ -573,3 +575,196 @@ def test_assign_case_input_validations_br04_and_account_policy(database):
         )
     assert exc_info.value.status_code == 409
     assert "hết hạn" in exc_info.value.detail
+
+
+def test_api_list_action_needed_cases_direct(database):
+    admin, input1, input2, reviewer, project, cases, _ = seed_test_project(database, name="P_Action", case_count=3)
+    c1, c2, c3 = cases
+    # c1: overdue
+    assign_case_input(database, project_id=project.id, case_id=c1.id, user_id=input1.id, actor_user_id=admin.id)
+    assignment = database.query(CaseInputAssignment).filter(
+        CaseInputAssignment.case_id == c1.id,
+        CaseInputAssignment.ended_at.is_(None),
+    ).first()
+    assignment.due_at = datetime.now(timezone.utc) - timedelta(days=2)
+    database.commit()
+
+    # c2: assignee locked
+    assign_case_input(database, project_id=project.id, case_id=c2.id, user_id=input2.id, actor_user_id=admin.id)
+    input2.is_locked = True
+    database.commit()
+
+    # c3: CTV expired
+    ctv = create_user(database, "ctv-action", account_type="ctv", expires_on=date.today() - timedelta(days=1))
+    database.add(ProjectMember(project_id=project.id, user_id=ctv.id, member_role="input", is_active=True))
+    database.commit()
+    c3.assigned_input_user_id = ctv.id
+    database.add(CaseInputAssignment(
+        project_id=project.id,
+        case_id=c3.id,
+        user_id=ctv.id,
+        assigned_by_user_id=admin.id,
+        deadline_days=7,
+        due_at=datetime.now(timezone.utc) + timedelta(days=5),
+    ))
+    database.commit()
+
+    res = api_list_action_needed_cases(
+        project_id=project.id,
+        current_user={"id": admin.id, "role": "admin", "username": admin.username},
+        db=database,
+    )
+    assert res["status"] == "ok"
+    items = res["data"]
+    assert len(items) == 3
+    case_ids = {it["case_id"] for it in items}
+    assert case_ids == {c1.id, c2.id, c3.id}
+
+    issues_by_case = {it["case_id"]: it["issues"] for it in items}
+    assert "overdue" in issues_by_case[c1.id]
+    assert "user_locked" in issues_by_case[c2.id]
+    assert "ctv_expired" in issues_by_case[c3.id]
+
+
+def test_assign_and_revoke_reassign_rejects_inactive_member(database):
+    admin, input1, input2, reviewer, project, cases, _ = seed_test_project(database, name="P_Inactive", case_count=2)
+    c1, c2 = cases
+
+    member_input2 = database.query(ProjectMember).filter(
+        ProjectMember.project_id == project.id,
+        ProjectMember.user_id == input2.id,
+        ProjectMember.member_role == "input",
+    ).first()
+    member_input2.is_active = False
+    database.commit()
+
+    # 1. assign_case_input to input2 (is_active=False) -> 409
+    with pytest.raises(HTTPException) as exc_info:
+        assign_case_input(
+            database,
+            project_id=project.id,
+            case_id=c1.id,
+            user_id=input2.id,
+            actor_user_id=admin.id,
+        )
+    assert exc_info.value.status_code == 409
+    assert "không thuộc nhóm nhập liệu" in exc_info.value.detail
+
+    # 2. assign to input1 first, then revoke and reassign to input2 (is_active=False) -> 409
+    assign_case_input(
+        database,
+        project_id=project.id,
+        case_id=c1.id,
+        user_id=input1.id,
+        actor_user_id=admin.id,
+    )
+    with pytest.raises(HTTPException) as exc_info:
+        revoke_case_input(
+            database,
+            project_id=project.id,
+            case_id=c1.id,
+            new_user_id=input2.id,
+            actor_user_id=admin.id,
+            reason_code="member_unavailable",
+            note=None,
+        )
+    assert exc_info.value.status_code == 409
+    assert "không thuộc nhóm nhập liệu" in exc_info.value.detail
+
+
+def test_document_assignment_service_revoke_reviews_blocked_for_self_review(database):
+    admin = create_user(database, "admin-doc-assign", role="admin")
+    reviewer1 = create_user(database, "rev1-doc-assign")
+    creator = create_user(database, "creator-doc-assign")
+
+    sub1 = Submission(
+        id=9001,
+        data_json="{}",
+        status="pending_review",
+        created_by_user_id=admin.id,
+        submitted_by_user_id=None,
+    )
+    sub2 = Submission(
+        id=9002,
+        data_json="{}",
+        status="pending_review",
+        created_by_user_id=creator.id,
+        submitted_by_user_id=admin.id,
+    )
+    sub3 = Submission(
+        id=9003,
+        data_json="{}",
+        status="pending_review",
+        created_by_user_id=creator.id,
+        submitted_by_user_id=creator.id,
+    )
+    database.add_all([sub1, sub2, sub3])
+    database.flush()
+
+    database.add_all([
+        SubmissionReviewAssignment(submission_id=sub1.id, reviewer_user_id=reviewer1.id),
+        SubmissionReviewAssignment(submission_id=sub2.id, reviewer_user_id=reviewer1.id),
+        SubmissionReviewAssignment(submission_id=sub3.id, reviewer_user_id=reviewer1.id),
+    ])
+    database.commit()
+
+    result = execute_revoke_user_assignments(
+        database,
+        target_user_id=reviewer1.id,
+        assignment_type="review",
+        folder_path="",
+        current_user_id=admin.id,
+    )
+    assert result["reviews_blocked"] == 2
+    assert result["reviews_transferred_to_admin"] == 1
+
+
+def test_next_submission_skips_submitted_by_user_id(database):
+    admin = create_user(database, "admin-next-sub", role="admin")
+    user1 = create_user(database, "user1-next-sub")
+    user2 = create_user(database, "user2-next-sub")
+
+    sub_curr = Submission(
+        id=9100,
+        data_json="{}",
+        status="pending_review",
+        created_by_user_id=user1.id,
+        submitted_by_user_id=user1.id,
+        created_at=datetime(2026, 10, 4, 12, 0, 0),
+    )
+    sub_next_self = Submission(
+        id=9099,
+        data_json="{}",
+        status="pending_review",
+        created_by_user_id=user1.id,
+        submitted_by_user_id=user2.id,
+        created_at=datetime(2026, 10, 4, 11, 0, 0),
+    )
+    sub_next_valid = Submission(
+        id=9098,
+        data_json="{}",
+        status="pending_review",
+        created_by_user_id=user1.id,
+        submitted_by_user_id=user1.id,
+        created_at=datetime(2026, 10, 4, 10, 0, 0),
+    )
+    database.add_all([sub_curr, sub_next_self, sub_next_valid])
+    database.flush()
+
+    database.add_all([
+        SubmissionReviewAssignment(submission_id=sub_curr.id, reviewer_user_id=user2.id),
+        SubmissionReviewAssignment(submission_id=sub_next_self.id, reviewer_user_id=user2.id),
+        SubmissionReviewAssignment(submission_id=sub_next_valid.id, reviewer_user_id=user2.id),
+    ])
+    database.commit()
+
+    res = api_get_next_review_submission(
+        current_id=sub_curr.id,
+        folder_path=None,
+        current_user={"id": user2.id, "role": "user", "username": user2.username},
+        db=database,
+    )
+    assert res["status"] == "ok"
+    assert res["data"] is not None
+    assert res["data"]["id"] == sub_next_valid.id
+

@@ -482,6 +482,7 @@ def api_get_next_review_submission(
                 current_user["id"]
             )
             if submission.created_by_user_id != current_user["id"]
+            and submission.submitted_by_user_id != current_user["id"]
             and (
                 normalized_folder is None
                 or normalize_folder_path(submission.folder_path) == normalized_folder
@@ -500,6 +501,7 @@ def api_get_next_review_submission(
             if (submission.created_at, submission.id) < current_key
             # BR-04: nobody reviews their own entry, admins included.
             and submission.created_by_user_id != current_user["id"]
+            and submission.submitted_by_user_id != current_user["id"]
         ),
         None,
     )

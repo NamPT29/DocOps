@@ -35,9 +35,32 @@ function projectUserLabel(user) {
     return user.account_type === 'ctv' ? `${user.username} (CTV)` : user.username;
 }
 
-// FR-AUT-03 / BA 3.3: check nhập liệu is for Admin and Hành chính, never CTV.
 function projectReviewerCandidates(users) {
     return users.filter(user => user.role === 'admin' || user.account_type !== 'ctv');
+}
+
+function formatVietnamDateTime(isoString) {
+    if (!isoString) return '';
+    try {
+        const date = new Date(isoString);
+        if (isNaN(date.getTime())) return String(isoString);
+        const parts = new Intl.DateTimeFormat('en-GB', {
+            timeZone: 'Asia/Ho_Chi_Minh',
+            year: 'numeric',
+            month: '2-digit',
+            day: '2-digit',
+            hour: '2-digit',
+            minute: '2-digit',
+            hour12: false,
+        }).formatToParts(date);
+        const values = Object.fromEntries(parts.map(p => [p.type, p.value]));
+        return `${values.year}-${values.month}-${values.day} ${values.hour}:${values.minute}`;
+    } catch {
+        return String(isoString).substring(0, 16).replace('T', ' ');
+    }
+}
+if (typeof window !== 'undefined') {
+    window.formatVietnamDateTime = formatVietnamDateTime;
 }
 
 function renderProjectUserOptions(containerId, users, roleName) {
@@ -668,13 +691,13 @@ function renderActionNeededCases(cases) {
         tdDates.className = 'small';
         if (item.due_at) {
             const dueDiv = document.createElement('div');
-            dueDiv.textContent = `Hạn: ${item.due_at.substring(0, 16).replace('T', ' ')}`;
+            dueDiv.textContent = `Hạn: ${formatVietnamDateTime(item.due_at)}`;
             tdDates.appendChild(dueDiv);
         }
         if (item.assigned_at) {
             const assignDiv = document.createElement('div');
             assignDiv.className = 'text-muted';
-            assignDiv.textContent = `Giao: ${item.assigned_at.substring(0, 16).replace('T', ' ')}`;
+            assignDiv.textContent = `Giao: ${formatVietnamDateTime(item.assigned_at)}`;
             tdDates.appendChild(assignDiv);
         }
         tr.appendChild(tdDates);
