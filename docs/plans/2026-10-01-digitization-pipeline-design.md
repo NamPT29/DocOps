@@ -84,10 +84,27 @@ Giao diện: Tab **Dự án → Thao tác → Quy trình số hóa** (`frontend/
 - Người bị khóa chỉ thấy "Tài khoản đã bị khóa. Liên hệ quản trị viên." (đăng nhập 403, phiên cũ
   401); lý do chỉ Admin xem trong nhật ký (cửa sổ Sửa tài khoản). Khóa được ưu tiên hơn hết hạn CTV.
 
+## Chính sách dự án (03/10, FR-PRJ-01/03, revision `0008_project_policies`)
+
+- Bảng `project_policies` (một dòng mỗi dự án, mọi cột cho phép NULL): QC-08 (ngưỡng lỗi của hộp
+  BR-07, tỷ lệ lấy mẫu check vòng 2, hạn xử lý hộp), QC-02/03 (mã cơ quan, ký hiệu hồ sơ), QC-01
+  (chuẩn xuất `NN-SIP` / `DANG-HD40`), QC-07/09 (hệ số giấy xấu, ngoài giờ, Chủ nhật).
+- NULL = theo QC-01 hiện hành (`project_policy_service.QC01_DEFAULTS`, `QC_VERSION`). Các bước sau
+  đọc giá trị áp dụng bằng `get_effective_policy(db, project_id=...)`.
+- Giới hạn (cả API lẫn CHECK ở DB): tỷ lệ 0–100, tối đa 2 chữ số thập phân; hạn 1–365 ngày; hệ số
+  > 0 và ≤ 10; mã cơ quan / ký hiệu theo bộ ký tự QC-04.
+- "Ngưỡng lỗi của hộp (BR-07)" khác "tỷ lệ lỗi tối đa của biểu mẫu" (xếp *một báo cáo* vào loại lỗi).
+- Giao diện: Dự án → Thao tác → Chính sách dự án.
+
 ## Ghi chú cho các nhiệm vụ sau
 
 - 04/10 giao/thu hồi hộp (BR-06): Admin cần thấy các hộp đang nằm ở CTV **đã hết hạn** hoặc ở
   tài khoản **bị khóa** để thu hồi (`account_policy.access_block_message`).
+- 04/10: hạn xử lý hộp tính theo **ngày lịch**, đủ `box_deadline_days × 24` giờ kể từ lúc giao
+  (mặc định 48 giờ), không trừ cuối tuần/ngày lễ.
+- KPI, check vòng 2, chi trả: kết quả đã tính phải **lưu kèm giá trị tham số tại thời điểm tính**
+  (ngưỡng, tỷ lệ mẫu, hệ số), để đổi QC-01 hay chính sách dự án không làm đổi số liệu cũ.
+- Đóng gói: mã cơ quan **bắt buộc** khi sinh mã hồ sơ (QC-03).
 - 07/10 WorkLog/KPI (FR-KPI-01): thống kê nhân sự hiện bỏ qua tài khoản Admin
   (`personnel_statistics_repository`), nên sản lượng Admin tự nhập chưa được tính.
 

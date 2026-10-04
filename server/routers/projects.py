@@ -1,8 +1,8 @@
 from datetime import datetime
-from typing import Literal
+from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.orm import Session
 
 from server.database import get_db
@@ -15,6 +15,7 @@ from server.services.project_admin_service import (
     list_project_assets,
     update_project_members,
 )
+from server.services.project_policy_service import get_project_policy, update_project_policy
 from server.services.project_workspace_service import get_project_workspace
 from server.services.export_job_service import (
     ExportJobBusyError,
@@ -224,6 +225,53 @@ def api_update_project_members(
             input_user_ids=request.input_user_ids,
             reviewer_user_ids=request.reviewer_user_ids,
             changed_by_user_id=current_user["id"],
+        ),
+    }
+
+
+class ProjectPolicyRequest(BaseModel):
+    """Every project setting; null or empty = follow QC-01 (FR-PRJ-03).
+
+    Values stay loosely typed so the service reports range and format errors
+    in Vietnamese, field by field.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    error_threshold_percent: Any = None
+    sample_rate_percent: Any = None
+    box_deadline_days: Any = None
+    organ_code: Any = None
+    file_notation: Any = None
+    export_profile: Any = None
+    bad_paper_factor: Any = None
+    overtime_factor: Any = None
+    sunday_factor: Any = None
+
+
+@router.get("/{project_id}/policy")
+def api_get_project_policy(
+    project_id: int,
+    current_user: dict = Depends(get_admin_user),
+    db: Session = Depends(get_db),
+):
+    return {"status": "ok", "data": get_project_policy(db, project_id=project_id)}
+
+
+@router.put("/{project_id}/policy")
+def api_update_project_policy(
+    project_id: int,
+    request: ProjectPolicyRequest,
+    current_user: dict = Depends(get_admin_user),
+    db: Session = Depends(get_db),
+):
+    return {
+        "status": "ok",
+        "data": update_project_policy(
+            db,
+            project_id=project_id,
+            values=request.model_dump(),
+            actor_user_id=current_user["id"],
         ),
     }
 

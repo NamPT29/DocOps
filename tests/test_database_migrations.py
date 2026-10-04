@@ -516,7 +516,7 @@ def test_user_lock_revision_adds_unlocked_flag_and_event_log():
         ))
 
         command.upgrade(config, "0007_user_lock")
-        assert current_database_revision(connection) == HEAD_REVISION
+        assert current_database_revision(connection) == "0007_user_lock"
         assert connection.execute(text(
             "SELECT is_locked FROM users WHERE username = 'legacy'"
         )).scalar_one() in (False, 0)
@@ -536,6 +536,57 @@ def test_user_lock_revision_adds_unlocked_flag_and_event_log():
         assert "user_lock_events" not in inspect(connection).get_table_names()
         columns = {column["name"] for column in inspect(connection).get_columns("users")}
         assert "is_locked" not in columns and "account_type" in columns
+
+
+def test_project_policy_revision_is_additive_and_checks_limits():
+    pytest.importorskip("alembic")
+    from alembic import command
+    from sqlalchemy.exc import IntegrityError
+
+    from server.migration_runner import _alembic_config
+
+    source = (
+        ROOT / "migrations" / "versions" / "0008_project_policies.py"
+    ).read_text(encoding="utf-8")
+    assert "from server" not in source and "import server" not in source
+
+    engine = create_engine("sqlite+pysqlite:///:memory:")
+    config = _alembic_config(ROOT)
+    with engine.begin() as connection:
+        config.attributes["connection"] = connection
+        command.upgrade(config, "0008_project_policies")
+        assert current_database_revision(connection) == HEAD_REVISION
+        assert validate_existing_database(connection) == []
+        connection.execute(text(
+            "INSERT INTO users (id, username, password, full_name, role, max_concurrent_sessions) "
+            "VALUES (1, 'pm', 'x', 'PM', 'admin', 1)"
+        ))
+        connection.execute(text(
+            "INSERT INTO templates (id, name, filename) VALUES (1, 't', 't.xlsx')"
+        ))
+        connection.execute(text(
+            "INSERT INTO projects (id, name, root_folder_name, template_id, "
+            "template_name_snapshot, template_filename_snapshot, case_level, report_mode, "
+            "status, created_by_user_id, created_at, updated_at) "
+            "VALUES (1, 'P', 'p', 1, 't', 't.xlsx', 1, 'pdf', 'new', 1, "
+            "CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"
+        ))
+        # An all-NULL row (follow QC-01 everywhere) is valid.
+        connection.execute(text(
+            "INSERT INTO project_policies (project_id, updated_at) VALUES (1, CURRENT_TIMESTAMP)"
+        ))
+        for bad_value in (
+            "error_threshold_percent = 101",
+            "box_deadline_days = 0",
+            "sunday_factor = 0",
+            "export_profile = 'XYZ'",
+        ):
+            with pytest.raises(IntegrityError), connection.begin_nested():
+                connection.execute(text(f"UPDATE project_policies SET {bad_value}"))
+
+        command.downgrade(config, "0007_user_lock")
+        assert "project_policies" not in inspect(connection).get_table_names()
+        assert connection.execute(text("SELECT COUNT(*) FROM projects")).scalar_one() == 1
 
 
 def test_request_paths_do_not_call_submission_metadata_backfill():

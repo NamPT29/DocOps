@@ -499,6 +499,80 @@
       </div>
     </div>
 
+    <!-- CHÍNH SÁCH DỰ ÁN (FR-PRJ-03, QC-01) -->
+    <div class="modal fade" id="projectPolicyModal" tabindex="-1" aria-hidden="true">
+      <div class="modal-dialog modal-lg modal-dialog-scrollable">
+        <div class="modal-content">
+          <div class="modal-header bg-primary text-white">
+            <h5 class="modal-title"><i class="fas fa-sliders"></i> Chính sách dự án: <span id="projectPolicyModalTitle"></span></h5>
+            <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Đóng"></button>
+          </div>
+          <div class="modal-body">
+            <p class="small text-muted mb-3">Ô để trống dùng giá trị mặc định của <strong id="projectPolicyQcVersion">QC-01</strong> và tự cập nhật khi QC-01 đổi phiên bản. Giá trị nhập riêng cho dự án được giữ nguyên.</p>
+            <h6 class="text-primary">Kiểm tra chất lượng (QC-08)</h6>
+            <div class="row g-3 mb-3">
+              <div class="col-md-4">
+                <label class="form-label fw-semibold" for="policy-error_threshold_percent">Ngưỡng lỗi của hộp (BR-07)</label>
+                <div class="input-group"><input type="number" class="form-control" id="policy-error_threshold_percent" data-policy-key="error_threshold_percent" min="0" max="100" step="0.01" inputmode="decimal"><span class="input-group-text">%</span></div>
+                <div class="form-text">Vượt ngưỡng thì trả lại cả hộp. Khác "tỷ lệ lỗi tối đa của biểu mẫu".</div>
+              </div>
+              <div class="col-md-4">
+                <label class="form-label fw-semibold" for="policy-sample_rate_percent">Tỷ lệ lấy mẫu check vòng 2</label>
+                <div class="input-group"><input type="number" class="form-control" id="policy-sample_rate_percent" data-policy-key="sample_rate_percent" min="0" max="100" step="0.01" inputmode="decimal"><span class="input-group-text">%</span></div>
+              </div>
+              <div class="col-md-4">
+                <label class="form-label fw-semibold" for="policy-box_deadline_days">Hạn xử lý hộp</label>
+                <div class="input-group"><input type="number" class="form-control" id="policy-box_deadline_days" data-policy-key="box_deadline_days" min="1" max="365" step="1" inputmode="numeric"><span class="input-group-text">ngày</span></div>
+                <div class="form-text">Ngày lịch, tính đủ 24 giờ mỗi ngày kể từ lúc giao.</div>
+              </div>
+            </div>
+            <h6 class="text-primary">Định danh hồ sơ (QC-02/03)</h6>
+            <div class="row g-3 mb-3">
+              <div class="col-md-6">
+                <label class="form-label fw-semibold" for="policy-organ_code">Mã cơ quan</label>
+                <input type="text" class="form-control" id="policy-organ_code" data-policy-key="organ_code" maxlength="50" placeholder="Ví dụ: H05.02.02" autocomplete="off">
+                <div class="form-text">Được để trống; bắt buộc khi sinh mã hồ sơ ở bước đóng gói.</div>
+              </div>
+              <div class="col-md-6">
+                <label class="form-label fw-semibold" for="policy-file_notation">Ký hiệu hồ sơ (tùy chọn)</label>
+                <input type="text" class="form-control" id="policy-file_notation" data-policy-key="file_notation" maxlength="20" placeholder="Ví dụ: HC" autocomplete="off">
+              </div>
+            </div>
+            <h6 class="text-primary">Chuẩn xuất dữ liệu (QC-01)</h6>
+            <div class="mb-3">
+              <label class="form-label fw-semibold" for="policy-export_profile">Hồ sơ xuất</label>
+              <select class="form-select" id="policy-export_profile" data-policy-key="export_profile">
+                <option value="">Theo mặc định QC-01</option>
+                <option value="NN-SIP">Khối Nhà nước (NN-SIP)</option>
+                <option value="DANG-HD40">Khối Đảng (DANG-HD40)</option>
+              </select>
+            </div>
+            <h6 class="text-primary">Hệ số đơn giá (QC-07/09)</h6>
+            <div class="row g-3">
+              <div class="col-md-4">
+                <label class="form-label fw-semibold" for="policy-bad_paper_factor">Giấy xấu</label>
+                <div class="input-group"><span class="input-group-text">×</span><input type="number" class="form-control" id="policy-bad_paper_factor" data-policy-key="bad_paper_factor" min="0.01" max="10" step="0.01" inputmode="decimal"></div>
+              </div>
+              <div class="col-md-4">
+                <label class="form-label fw-semibold" for="policy-overtime_factor">Ngoài giờ (OT)</label>
+                <div class="input-group"><span class="input-group-text">×</span><input type="number" class="form-control" id="policy-overtime_factor" data-policy-key="overtime_factor" min="0.01" max="10" step="0.01" inputmode="decimal"></div>
+              </div>
+              <div class="col-md-4">
+                <label class="form-label fw-semibold" for="policy-sunday_factor">Chủ nhật</label>
+                <div class="input-group"><span class="input-group-text">×</span><input type="number" class="form-control" id="policy-sunday_factor" data-policy-key="sunday_factor" min="0.01" max="10" step="0.01" inputmode="decimal"></div>
+              </div>
+            </div>
+          </div>
+          <div class="modal-footer">
+            <span id="projectPolicyStatus" class="small text-muted me-auto" aria-live="polite"></span>
+            <button type="button" class="btn btn-outline-secondary" data-admin-action="reset-project-policy">Dùng toàn bộ mặc định QC-01</button>
+            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Hủy</button>
+            <button type="button" class="btn btn-primary" id="saveProjectPolicyButton" data-admin-action="save-project-policy"><i class="fas fa-save"></i> Lưu chính sách</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <div class="modal fade" id="projectAssetsModal" tabindex="-1" aria-hidden="true">
       <div class="modal-dialog modal-xl">
         <div class="modal-content">
@@ -942,11 +1016,12 @@
     <script src="js/admin_panel.js?v=203.07"></script>
     <script src="js/project_upload.js?v=1.00"></script>
     <script src="js/project_reports.js?v=1.00"></script>
-    <script src="js/project_management.js?v=2.11"></script>
+    <script src="js/project_management.js?v=2.12"></script>
     <script src="js/project_workflow.js?v=1.02"></script>
+    <script src="js/project_policy.js?v=1.00"></script>
     <script src="js/ocr_image.js?v=2"></script>
     <script src="js/ocr_config.js?v=4"></script>
     <script src="js/template_config.js?v=101.01"></script>
-    <script src="admin-page.js?v=3"></script>
+    <script src="admin-page.js?v=4"></script>
 </body>
 </html>

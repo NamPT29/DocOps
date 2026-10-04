@@ -1,6 +1,7 @@
 from datetime import datetime
 
 from sqlalchemy import Column, Integer, String, Date, DateTime, ForeignKey, Boolean, Text, UniqueConstraint, Index, CheckConstraint
+from sqlalchemy import Numeric
 from sqlalchemy import false as sql_false
 from sqlalchemy.orm import Mapped, mapped_column
 from server.database import Base, get_utc_now
@@ -471,6 +472,61 @@ class Project(Base):
             name="ck_projects_report_level",
         ),
     )
+
+
+PROJECT_POLICY_REVISION = {"revision": "0008_project_policies"}
+
+
+class ProjectPolicy(Base):
+    """Per-project policy (FR-PRJ-03). NULL = follow the current QC-01 default."""
+
+    __tablename__ = "project_policies"
+    __table_args__ = (
+        CheckConstraint(
+            "error_threshold_percent >= 0 AND error_threshold_percent <= 100",
+            name="ck_project_policies_error_threshold",
+        ),
+        CheckConstraint(
+            "sample_rate_percent >= 0 AND sample_rate_percent <= 100",
+            name="ck_project_policies_sample_rate",
+        ),
+        CheckConstraint(
+            "box_deadline_days >= 1 AND box_deadline_days <= 365",
+            name="ck_project_policies_box_deadline",
+        ),
+        CheckConstraint(
+            "export_profile IN ('NN-SIP', 'DANG-HD40')",
+            name="ck_project_policies_export_profile",
+        ),
+        CheckConstraint(
+            "bad_paper_factor > 0 AND bad_paper_factor <= 10 "
+            "AND overtime_factor > 0 AND overtime_factor <= 10 "
+            "AND sunday_factor > 0 AND sunday_factor <= 10",
+            name="ck_project_policies_factors",
+        ),
+        {"info": PROJECT_POLICY_REVISION},
+    )
+
+    project_id = Column(
+        Integer,
+        ForeignKey("projects.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    # QC-08
+    error_threshold_percent = Column(Numeric(5, 2), nullable=True)
+    sample_rate_percent = Column(Numeric(5, 2), nullable=True)
+    box_deadline_days = Column(Integer, nullable=True)
+    # QC-02/03
+    organ_code = Column(String(50), nullable=True)
+    file_notation = Column(String(20), nullable=True)
+    # QC-01
+    export_profile = Column(String(16), nullable=True)
+    # QC-07/09
+    bad_paper_factor = Column(Numeric(4, 2), nullable=True)
+    overtime_factor = Column(Numeric(4, 2), nullable=True)
+    sunday_factor = Column(Numeric(4, 2), nullable=True)
+    updated_at = Column(DateTime, nullable=False, default=get_utc_now, onupdate=get_utc_now)
+    updated_by_user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
 
 
 class ProjectMember(Base):

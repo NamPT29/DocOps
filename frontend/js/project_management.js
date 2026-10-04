@@ -230,6 +230,11 @@ async function loadProjectList() {
                     icon: 'fa-diagram-project',
                     handler: () => openProjectWorkflow(project.id),
                 },
+                {
+                    label: 'Chính sách dự án',
+                    icon: 'fa-sliders',
+                    handler: () => openProjectPolicy(project.id),
+                },
                 {divider: true},
                 {
                     label: 'Thêm / cập nhật PDF',
