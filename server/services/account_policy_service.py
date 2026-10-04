@@ -24,6 +24,9 @@ CTV_STAGE_KEYS = tuple(
 
 CTV_REVIEWER_ERROR = "CTV không được làm người kiểm tra (chỉ Admin và Hành chính)."
 
+# Shown to the locked person; the reason stays in the admin-only lock log.
+LOCKED_MESSAGE = "Tài khoản đã bị khóa. Liên hệ quản trị viên."
+
 
 def vietnam_today() -> date:
     return datetime.now(VIETNAM_TZ).date()
@@ -57,6 +60,19 @@ def expired_message(user) -> str:
         f"Tài khoản CTV đã hết hạn sử dụng từ ngày {expires_on:%d/%m/%Y}. "
         "Liên hệ quản trị viên để gia hạn."
     )
+
+
+def is_locked(user) -> bool:
+    return bool(getattr(user, "is_locked", False))
+
+
+def access_block_message(user, today: date | None = None) -> str | None:
+    """Why ``user`` may not sign in or keep a session, or ``None`` if allowed."""
+    if is_locked(user):
+        return LOCKED_MESSAGE
+    if is_expired(user, today):
+        return expired_message(user)
+    return None
 
 
 def validate_expiry(account_type, expires_on, *, previous=None, today: date | None = None):

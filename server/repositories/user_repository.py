@@ -1,4 +1,5 @@
 from sqlalchemy import func, literal, or_
+from sqlalchemy.orm import aliased
 
 from server.models import (
     AssignedDocument,
@@ -23,6 +24,7 @@ from server.models import (
     Task,
     User,
     UserCapability,
+    UserLockEvent,
     UserLoginSession,
 )
 from server.repositories.base import BaseRepository
@@ -52,6 +54,26 @@ class UserRepository(BaseRepository[User]):
             user.id: user
             for user in self.session.query(User).filter(User.id.in_(user_ids)).all()
         }
+
+    def active_admins_for_update(self) -> list[User]:
+        """Unlocked admins, row-locked so two admins cannot lock each other at once."""
+        return self.session.query(User).filter(
+            User.role == "admin",
+            User.is_locked.is_(False),
+        ).with_for_update().all()
+
+    def add_lock_event(self, event: UserLockEvent) -> UserLockEvent:
+        self.session.add(event)
+        return event
+
+    def lock_events(self, user_id: int) -> list[tuple[UserLockEvent, str | None]]:
+        """Lock log of one account, newest first, with the actor's username."""
+        actor = aliased(User)
+        return self.session.query(UserLockEvent, actor.username).outerjoin(
+            actor, actor.id == UserLockEvent.actor_user_id
+        ).filter(
+            UserLockEvent.user_id == user_id
+        ).order_by(UserLockEvent.created_at.desc(), UserLockEvent.id.desc()).all()
 
     def ctv_conflict_assignments(
         self,
@@ -186,6 +208,14 @@ class UserRepository(BaseRepository[User]):
                 "nhật ký xóa PDF",
                 ProjectPdfDeletionAudit.id,
                 ProjectPdfDeletionAudit.deleted_by_user_id == user_id,
+            ),
+            (
+                "nhật ký khóa tài khoản",
+                UserLockEvent.id,
+                or_(
+                    UserLockEvent.user_id == user_id,
+                    UserLockEvent.actor_user_id == user_id,
+                ),
             ),
         )
         return [

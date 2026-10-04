@@ -9,9 +9,9 @@ import logging
 import os
 import secrets
 from typing import Literal
-from datetime import date, timedelta
+from datetime import date, timedelta, timezone
 from server.database import get_db, SessionLocal, get_utc_now
-from server.models import User
+from server.models import User, UserLockEvent
 from server.repositories import UserRepository
 from server.services import account_policy_service as account_policy
 from server.services.login_rate_limit_service import (
@@ -137,11 +137,13 @@ def get_current_user(
             status_code=401,
             detail="Phiên đăng nhập không còn hiệu lực",
         )
-    if account_policy.is_expired(user):
-        # FR-AUT-02: an expired CTV loses open sessions too, not only new logins.
+    blocked = account_policy.access_block_message(user)
+    if blocked:
+        # Locked accounts (1c) and expired CTVs (FR-AUT-02) lose open sessions
+        # too, not only new logins.
         revoke_session(db, user_id=user.id, session_id=session_id)
         db.commit()
-        raise HTTPException(status_code=401, detail=account_policy.expired_message(user))
+        raise HTTPException(status_code=401, detail=blocked)
     return {
         "id": user.id,
         "username": user.username,
@@ -209,6 +211,7 @@ def build_user_payload(
             user.expires_on.isoformat() if getattr(user, "expires_on", None) else None
         ),
         "is_expired": account_policy.is_expired(user),
+        "is_locked": account_policy.is_locked(user),
         "max_concurrent_sessions": normalize_session_limit(
             getattr(user, "max_concurrent_sessions", 1)
         ),
@@ -319,8 +322,9 @@ def api_login(
             detail="Dịch vụ bảo vệ đăng nhập tạm thời không khả dụng.",
         ) from exc
 
-    if account_policy.is_expired(user):
-        raise HTTPException(status_code=403, detail=account_policy.expired_message(user))
+    blocked = account_policy.access_block_message(user)
+    if blocked:
+        raise HTTPException(status_code=403, detail=blocked)
 
     if not user.password.startswith("scrypt$"):
         user.password = hash_password(req.password)
@@ -661,6 +665,104 @@ def api_revoke_user_sessions(
     )
     db.commit()
     return {"status": "ok", "revoked_sessions": revoked}
+
+
+class LockUserRequest(BaseModel):
+    reason: str = Field(max_length=500)
+
+
+class UnlockUserRequest(BaseModel):
+    reason: str | None = Field(default=None, max_length=500)
+
+
+@router.post("/users/{user_id}/lock")
+def api_lock_user(
+    user_id: int,
+    req: LockUserRequest,
+    current_user: dict = Depends(get_admin_user),
+    db: Session = Depends(get_db),
+):
+    reason = req.reason.strip()
+    if not reason:
+        raise HTTPException(status_code=400, detail="Cần nêu lý do khóa tài khoản.")
+    if current_user["id"] == user_id:
+        raise HTTPException(status_code=409, detail="Không thể tự khóa tài khoản của chính mình.")
+    repository = UserRepository(db)
+    user = repository.get(user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="Không tìm thấy người dùng")
+    if account_policy.is_locked(user):
+        raise HTTPException(status_code=409, detail="Tài khoản này đã bị khóa.")
+    if user.role == "admin":
+        active_admin_ids = {admin.id for admin in repository.active_admins_for_update()}
+        if active_admin_ids <= {user.id}:
+            raise HTTPException(
+                status_code=409,
+                detail="Không thể khóa Admin cuối cùng còn hoạt động.",
+            )
+
+    user.is_locked = True
+    revoked = revoke_user_sessions(db, user_id=user.id)
+    repository.add_lock_event(UserLockEvent(
+        user_id=user.id,
+        action="lock",
+        actor_user_id=current_user["id"],
+        reason=reason,
+    ))
+    db.commit()
+    return {
+        "status": "ok",
+        "user": build_user_payload(user, db, active_session_count=0),
+        "revoked_sessions": revoked,
+    }
+
+
+@router.post("/users/{user_id}/unlock")
+def api_unlock_user(
+    user_id: int,
+    req: UnlockUserRequest,
+    current_user: dict = Depends(get_admin_user),
+    db: Session = Depends(get_db),
+):
+    repository = UserRepository(db)
+    user = repository.get(user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="Không tìm thấy người dùng")
+    if not account_policy.is_locked(user):
+        raise HTTPException(status_code=409, detail="Tài khoản này không bị khóa.")
+    user.is_locked = False
+    repository.add_lock_event(UserLockEvent(
+        user_id=user.id,
+        action="unlock",
+        actor_user_id=current_user["id"],
+        reason=(req.reason or "").strip() or None,
+    ))
+    db.commit()
+    return {"status": "ok", "user": build_user_payload(user, db, active_session_count=0)}
+
+
+@router.get("/users/{user_id}/lock-events")
+def api_get_user_lock_events(
+    user_id: int,
+    current_user: dict = Depends(get_admin_user),
+    db: Session = Depends(get_db),
+):
+    repository = UserRepository(db)
+    if not repository.get(user_id):
+        raise HTTPException(status_code=404, detail="Không tìm thấy người dùng")
+    return {
+        "status": "ok",
+        "data": [
+            {
+                "action": event.action,
+                "actor": actor_username,
+                "reason": event.reason,
+                # Stored as naive UTC; the explicit offset lets browsers show local time.
+                "created_at": event.created_at.replace(tzinfo=timezone.utc).isoformat(),
+            }
+            for event, actor_username in repository.lock_events(user_id)
+        ],
+    }
 
 
 @router.get("/users/personnel-stats")

@@ -480,7 +480,7 @@ def test_user_account_type_revision_defaults_existing_users_to_staff():
         ))
 
         command.upgrade(config, "0006_user_account_type")
-        assert current_database_revision(connection) == HEAD_REVISION
+        assert current_database_revision(connection) == "0006_user_account_type"
         row = connection.execute(text(
             "SELECT account_type, expires_on FROM users WHERE username = 'legacy'"
         )).one()
@@ -493,6 +493,49 @@ def test_user_account_type_revision_defaults_existing_users_to_staff():
         columns = {column["name"] for column in inspect(connection).get_columns("users")}
         assert {"account_type", "expires_on"}.isdisjoint(columns)
         assert connection.execute(text("SELECT username FROM users")).scalar_one() == "legacy"
+
+
+def test_user_lock_revision_adds_unlocked_flag_and_event_log():
+    pytest.importorskip("alembic")
+    from alembic import command
+    from sqlalchemy.exc import IntegrityError
+
+    from server.migration_runner import _alembic_config
+
+    source = (ROOT / "migrations" / "versions" / "0007_user_lock.py").read_text(encoding="utf-8")
+    assert "from server" not in source and "import server" not in source
+
+    engine = create_engine("sqlite+pysqlite:///:memory:")
+    config = _alembic_config(ROOT)
+    with engine.begin() as connection:
+        config.attributes["connection"] = connection
+        command.upgrade(config, "0006_user_account_type")
+        connection.execute(text(
+            "INSERT INTO users (username, password, full_name, role, max_concurrent_sessions) "
+            "VALUES ('legacy', 'x', 'Legacy', 'user', 1)"
+        ))
+
+        command.upgrade(config, "0007_user_lock")
+        assert current_database_revision(connection) == HEAD_REVISION
+        assert connection.execute(text(
+            "SELECT is_locked FROM users WHERE username = 'legacy'"
+        )).scalar_one() in (False, 0)
+        # Revision 0006's CHECK constraint survives (no table rebuild).
+        with pytest.raises(IntegrityError), connection.begin_nested():
+            connection.execute(text("UPDATE users SET account_type = 'boss'"))
+        with pytest.raises(IntegrityError), connection.begin_nested():
+            connection.execute(text(
+                "INSERT INTO user_lock_events (user_id, action, created_at) "
+                "VALUES (1, 'delete', CURRENT_TIMESTAMP)"
+            ))
+        assert validate_existing_database(connection) == []
+        indexes = {index["name"] for index in inspect(connection).get_indexes("user_lock_events")}
+        assert indexes == {"ix_user_lock_events_user_id", "ix_user_lock_events_actor_user_id"}
+
+        command.downgrade(config, "0006_user_account_type")
+        assert "user_lock_events" not in inspect(connection).get_table_names()
+        columns = {column["name"] for column in inspect(connection).get_columns("users")}
+        assert "is_locked" not in columns and "account_type" in columns
 
 
 def test_request_paths_do_not_call_submission_metadata_backfill():

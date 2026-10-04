@@ -114,6 +114,7 @@ def test_get_users_query_count_is_bounded_and_payload_is_unchanged(user_count):
         "account_type": "admin",
         "expires_on": None,
         "is_expired": False,
+        "is_locked": False,
         "max_concurrent_sessions": 1,
         "active_session_count": 1,
         "can_input": True,

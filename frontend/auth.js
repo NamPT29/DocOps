@@ -542,7 +542,76 @@ function accountTypeCellHtml(user) {
         parts.push(`<small class="text-muted">HSD ${escapeHTML(formatAccountDate(user.expires_on))}</small>`);
     }
     if (user.is_expired) parts.push('<span class="badge bg-danger">Hết hạn</span>');
+    if (user.is_locked) parts.push('<span class="badge bg-dark">Đã khóa</span>');
     return parts.join(' ');
+}
+
+// Nhiệm vụ 1c: lock / unlock accounts. The reason is logged for admins only.
+const LOCK_ACTION_LABELS = { lock: 'Khóa', unlock: 'Mở khóa' };
+
+async function lockUser(userId, username) {
+    const reason = window.prompt(`Lý do khóa tài khoản ${username} (bắt buộc, chỉ Admin xem được):`, '');
+    if (reason === null) return;
+    if (!reason.trim()) return alert('Cần nêu lý do khóa tài khoản.');
+    const data = await apiCall(`/api/users/${Number(userId)}/lock`, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ reason: reason.trim() }),
+    });
+    if (!data) return;
+    invalidateUsersCache();
+    await fetchAdminData();
+    alert(`Đã khóa ${username} và thu hồi ${Number(data.revoked_sessions) || 0} phiên đăng nhập.`);
+}
+
+async function unlockUser(userId, username) {
+    const reason = window.prompt(`Mở khóa tài khoản ${username}? Lý do (không bắt buộc):`, '');
+    if (reason === null) return;
+    const data = await apiCall(`/api/users/${Number(userId)}/unlock`, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ reason: reason.trim() || null }),
+    });
+    if (!data) return;
+    invalidateUsersCache();
+    await fetchAdminData();
+    alert(`Đã mở khóa ${username}.`);
+}
+
+function formatLockEventTime(value) {
+    const date = new Date(value);
+    return Number.isNaN(date.getTime()) ? '' : date.toLocaleString('vi-VN');
+}
+
+function renderUserLockHistory(events) {
+    const list = document.getElementById('editUserLockHistory');
+    if (!list) return;
+    list.replaceChildren();
+    if (!events.length) {
+        const empty = document.createElement('li');
+        empty.className = 'text-muted';
+        empty.textContent = 'Chưa có lần khóa / mở khóa nào.';
+        list.appendChild(empty);
+        return;
+    }
+    events.forEach(event => {
+        const item = document.createElement('li');
+        item.className = 'mb-1';
+        const parts = [
+            formatLockEventTime(event.created_at),
+            `${LOCK_ACTION_LABELS[event.action] || event.action} bởi ${event.actor || 'không rõ'}`,
+        ];
+        if (event.reason) parts.push(`Lý do: ${event.reason}`);
+        item.textContent = parts.filter(Boolean).join(' – ');
+        list.appendChild(item);
+    });
+}
+
+async function loadUserLockHistory(userId) {
+    const list = document.getElementById('editUserLockHistory');
+    if (list) list.replaceChildren();
+    const data = await apiCall(`/api/users/${Number(userId)}/lock-events`);
+    if (data) renderUserLockHistory(Array.isArray(data.data) ? data.data : []);
 }
 
 async function fetchAdminData() {
@@ -574,6 +643,12 @@ async function fetchAdminData() {
             let deleteBtn = safeId === currentUser.id ? '' : `<button class="btn btn-sm btn-danger" data-auth-action="delete-user" data-user-id="${safeId}"><i class="fas fa-trash"></i> Xóa</button>`;
             let changePwdBtn = `<button class="btn btn-sm btn-warning ms-1" data-auth-action="change-user-password" data-user-id="${safeId}" data-username="${safeUsername}"><i class="fas fa-key"></i> Đổi MK</button>`;
             let editBtn = `<button class="btn btn-sm btn-outline-primary ms-1" data-auth-action="edit-user" data-user-id="${safeId}"><i class="fas fa-user-pen"></i> Sửa</button>`;
+            let lockBtn = '';
+            if (safeId !== currentUser.id) {
+                lockBtn = u.is_locked
+                    ? `<button class="btn btn-sm btn-outline-success ms-1" data-auth-action="unlock-user" data-user-id="${safeId}" data-username="${safeUsername}"><i class="fas fa-lock-open"></i> Mở khóa</button>`
+                    : `<button class="btn btn-sm btn-outline-dark ms-1" data-auth-action="lock-user" data-user-id="${safeId}" data-username="${safeUsername}"><i class="fas fa-lock"></i> Khóa</button>`;
+            }
             let revokeSessionsBtn = activeSessions > 0
                 ? `<button class="btn btn-sm btn-outline-danger ms-1" data-auth-action="revoke-user-sessions" data-user-id="${safeId}" data-username="${safeUsername}"><i class="fas fa-right-from-bracket"></i> Giải phóng phiên</button>`
                 : '';
@@ -586,7 +661,7 @@ async function fetchAdminData() {
                     <td><div class="d-flex flex-wrap align-items-center gap-1">${accountTypeCellHtml(u)}</div></td>
                     <td><div class="d-flex flex-wrap gap-1">${badges.join('')}</div></td>
                     <td class="text-center"><span class="badge ${activeSessions >= sessionLimit ? 'bg-warning text-dark' : 'bg-light text-dark border'}">${activeSessions}/${sessionLimit}</span></td>
-                    <td>${deleteBtn}${changePwdBtn}${editBtn}${revokeSessionsBtn}</td>
+                    <td>${deleteBtn}${changePwdBtn}${editBtn}${lockBtn}${revokeSessionsBtn}</td>
                 </tr>
             `;
         });
@@ -627,7 +702,10 @@ async function submitChangePassword() {
 }
 
 function invalidateUsersCache() {
-    delete apiCache['/api/users'];
+    // Covers the user list and per-user data such as the lock log.
+    Object.keys(apiCache).forEach(key => {
+        if (key.startsWith('/api/users')) delete apiCache[key];
+    });
 }
 
 async function deleteUser(userId) {
@@ -1053,6 +1131,7 @@ function openEditUserModal(userId) {
     document.getElementById('editExpiresOn').value = user.expires_on || '';
     syncAccountExpiryField('edit');
     new bootstrap.Modal(document.getElementById('editUserModal')).show();
+    loadUserLockHistory(user.id);
 }
 
 async function submitEditUser() {
@@ -1228,6 +1307,8 @@ const AUTH_GENERATED_ACTIONS = Object.freeze({
     'change-user-password': trigger => openChangePasswordModal(Number(trigger.dataset.userId), trigger.dataset.username),
     'edit-user': trigger => openEditUserModal(Number(trigger.dataset.userId)),
     'revoke-user-sessions': trigger => revokeUserSessions(Number(trigger.dataset.userId), trigger.dataset.username),
+    'lock-user': trigger => lockUser(Number(trigger.dataset.userId), trigger.dataset.username),
+    'unlock-user': trigger => unlockUser(Number(trigger.dataset.userId), trigger.dataset.username),
     'configure-template': trigger => openConfigModal(Number(trigger.dataset.templateId), decodeURIComponent(trigger.dataset.templateName)),
     'delete-template': trigger => deleteTemplate(Number(trigger.dataset.templateId), decodeURIComponent(trigger.dataset.templateName)),
 });

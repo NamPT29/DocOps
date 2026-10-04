@@ -75,14 +75,26 @@ Giao diện: Tab **Dự án → Thao tác → Quy trình số hóa** (`frontend/
   người tạo hồ sơ, kể cả Admin; "hồ sơ tiếp theo" bỏ qua hồ sơ của chính người duyệt.
 - Luồng cũ (giao tài liệu lẻ, nhập thư mục máy chủ) vẫn chỉ nhận tài khoản thường làm người nhập.
 
+## Khóa / mở khóa tài khoản (03/10, nhiệm vụ 1c, revision `0007_user_lock`)
+
+- `users.is_locked` + bảng `user_lock_events` chỉ ghi thêm (tài khoản, khóa/mở, người làm, thời
+  điểm UTC, lý do). Tài khoản có nhật ký khóa không xóa được (giữ truy vết, như các lịch sử khác).
+- Khóa: lý do bắt buộc; thu hồi mọi phiên ngay; cấm tự khóa và cấm khóa Admin cuối cùng còn hoạt
+  động (409, có khóa dòng để hai Admin không khóa lẫn nhau cùng lúc). Mở khóa: lý do không bắt buộc.
+- Người bị khóa chỉ thấy "Tài khoản đã bị khóa. Liên hệ quản trị viên." (đăng nhập 403, phiên cũ
+  401); lý do chỉ Admin xem trong nhật ký (cửa sổ Sửa tài khoản). Khóa được ưu tiên hơn hết hạn CTV.
+
 ## Ghi chú cho các nhiệm vụ sau
 
-- 04/10 giao/thu hồi hộp (BR-06): Admin cần thấy các hộp đang nằm ở CTV **đã hết hạn** để thu hồi
-  (`account_policy.is_expired`).
-- Chưa có chức năng **khóa tài khoản**. Muốn cắt quyền ngay hiện chỉ có "Giải phóng phiên" + đổi
-  mật khẩu (hạn CTV không đặt được ở quá khứ, nên không dùng hạn để khóa ngay). Làm ở nhiệm vụ 1c.
+- 04/10 giao/thu hồi hộp (BR-06): Admin cần thấy các hộp đang nằm ở CTV **đã hết hạn** hoặc ở
+  tài khoản **bị khóa** để thu hồi (`account_policy.access_block_message`).
 - 07/10 WorkLog/KPI (FR-KPI-01): thống kê nhân sự hiện bỏ qua tài khoản Admin
   (`personnel_statistics_repository`), nên sản lượng Admin tự nhập chưa được tính.
+
+## Việc sau 10/10
+
+- Luồng cũ (giao tài liệu lẻ, nhập thư mục máy chủ) vẫn chỉ nhận tài khoản thường làm người nhập;
+  cân nhắc mở cho Admin theo BA 3.3 (đã chốt giữ nguyên trước khi chạy thật).
 
 ## Lộ trình (BA mục 12.2)
 

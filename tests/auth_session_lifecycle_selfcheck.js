@@ -15,8 +15,8 @@ assert(authSource.includes("localStorage.removeItem('token')"));
 assert(loginSource.includes("localStorage.setItem('sessionIdleTimeoutMinutes'"));
 
 for (const [page, version] of [
-    ['frontend/admin.html', 'auth.js?v=102.02'],
-    ['frontend/index.html', 'auth.js?v=102.02'],
+    ['frontend/admin.html', 'auth.js?v=102.03'],
+    ['frontend/index.html', 'auth.js?v=102.03'],
 ]) {
     assert(fs.readFileSync(page, 'utf8').includes(version));
 }

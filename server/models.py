@@ -1,12 +1,14 @@
 from datetime import datetime
 
 from sqlalchemy import Column, Integer, String, Date, DateTime, ForeignKey, Boolean, Text, UniqueConstraint, Index, CheckConstraint
+from sqlalchemy import false as sql_false
 from sqlalchemy.orm import Mapped, mapped_column
 from server.database import Base, get_utc_now
 
 # Columns/constraints added after the frozen baseline carry this marker so the
 # schema 0001 snapshot generator skips them.
 USER_ACCOUNT_REVISION = {"revision": "0006_user_account_type"}
+USER_LOCK_REVISION = {"revision": "0007_user_lock"}
 
 
 class User(Base):
@@ -38,6 +40,31 @@ class User(Base):
     )
     # Last day (Vietnam time) a CTV may sign in; NULL for other accounts.
     expires_on = Column(Date, nullable=True, info=USER_ACCOUNT_REVISION)
+    # Locked by an admin: no sign-in, every session revoked (revision 0007).
+    is_locked = Column(
+        Boolean,
+        nullable=False,
+        default=False,
+        server_default=sql_false(),
+        info=USER_LOCK_REVISION,
+    )
+
+
+class UserLockEvent(Base):
+    """Append-only log of account locks and unlocks (who, when, why)."""
+
+    __tablename__ = "user_lock_events"
+    __table_args__ = (
+        CheckConstraint("action IN ('lock', 'unlock')", name="ck_user_lock_events_action"),
+        {"info": USER_LOCK_REVISION},
+    )
+
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    action = Column(String(16), nullable=False)
+    actor_user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
+    reason = Column(String(500), nullable=True)
+    created_at = Column(DateTime, nullable=False, default=get_utc_now)
 
 
 class UserLoginSession(Base):
