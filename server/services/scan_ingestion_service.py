@@ -6,6 +6,7 @@ import json
 import unicodedata
 import re
 from pathlib import Path
+from fastapi import HTTPException
 from sqlalchemy.orm import Session
 from sqlalchemy import text
 
@@ -33,23 +34,23 @@ except ImportError:
     pypdf = None
 
 
-def _normalize_name(name: str) -> str:
+def _normalize_name(name: str | None) -> str:
+    if not name:
+        return ""
+    name = name.replace('đ', 'd').replace('Đ', 'd')
     n = unicodedata.normalize('NFD', name).encode('ascii', 'ignore').decode('utf-8')
     return re.sub(r'[\s_\-]', '', n).lower()
 
 
-def _get_scanned_by_name(source_path: Path, level: int) -> str | None:
-    if level <= 0:
+def _extract_box_number(s: str | None) -> int | None:
+    if not s:
         return None
-    try:
-        current = source_path
-        for _ in range(level):
-            current = current.parent
-        if current.name:
-            return current.name.strip()
-    except Exception:
-        pass
-    return None
+    if "::muc-luc/hop-" in s:
+        match = re.search(r"::muc-luc/hop-(\d+)", s)
+        if match:
+            return int(match.group(1))
+    match = re.search(r"\d+", s)
+    return int(match.group()) if match else None
 
 
 def submit_scan_package(
@@ -63,26 +64,47 @@ def submit_scan_package(
 ) -> CaseScanPackage:
     project = get_project_by_id(db, project_id)
     if not project:
-        raise ValueError("Dự án không tồn tại.")
+        raise HTTPException(status_code=404, detail="Dự án không tồn tại.")
         
     case = get_case_by_id(db, project_id, case_id)
     if not case:
-        raise ValueError("Hộp không tồn tại.")
+        raise HTTPException(status_code=404, detail="Hộp không tồn tại.")
 
-    _, source_dir, _ = resolve_server_source_directory(folder_path)
-    box_number_str = case.display_name.split()[-1] if " " in case.display_name else case.display_name
-    if box_number_str not in source_dir.name:
-        raise ValueError(f"Thư mục đã chọn ({source_dir.name}) không khớp với hộp {case.display_name}.")
+    if scan_user_name_level < 0:
+        raise HTTPException(status_code=400, detail="Mức thư mục tên người scan không hợp lệ.")
 
-    stage = WorkflowRepository(db).get_state(case_id, "scan")
-    if not stage:
-        raise ValueError("Dự án không bật bước Scan.")
+    try:
+        _, source_dir, norm_path = resolve_server_source_directory(folder_path)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
-    check_scan_stage = WorkflowRepository(db).get_state(case_id, "check_scan")
+    case_box = _extract_box_number(case.case_key) or _extract_box_number(case.display_name)
+    folder_box = _extract_box_number(source_dir.name)
+    
+    if case_box is None or folder_box is None or case_box != folder_box:
+        raise HTTPException(status_code=409, detail=f"Thư mục đã chọn ({source_dir.name}) không khớp số hộp với hộp {case.display_name}.")
+
+    workflow_repo = WorkflowRepository(db)
+    enabled_stages = {s.stage_key for s in workflow_repo.stage_rows(project_id) if s.is_enabled}
+    if "scan" not in enabled_stages:
+        raise HTTPException(status_code=409, detail="Dự án không bật bước Scan.")
+
+    stage = workflow_repo.get_state(case_id, "scan")
+    # If there is no state yet but it's enabled, it acts as pending.
+    stage_status = stage.status if stage else "pending"
+
+    if stage_status not in ("pending", "in_progress", "rejected"):
+        raise HTTPException(status_code=409, detail=f"Không thể nộp gói scan khi trạng thái bước Scan là: {stage_status}")
+
+    check_scan_stage = workflow_repo.get_state(case_id, "scan_qc")
     if check_scan_stage and check_scan_stage.status != "pending":
-        raise ValueError("Bước Kiểm tra scan đã bắt đầu, không thể nộp thêm gói.")
+        raise HTTPException(status_code=409, detail="Bước Kiểm tra scan đã bắt đầu, không thể nộp thêm gói.")
 
-    if stage.status in ("pending", "rejected"):
+    if get_processing_scan_package(db, case_id):
+        raise HTTPException(status_code=409, detail="Hộp đang có một gói scan khác đang xử lý.")
+
+    # Execute workflow changes
+    if stage_status in ("pending", "rejected"):
         transition_case_stage(
             db, 
             project_id=project_id, 
@@ -92,12 +114,18 @@ def submit_scan_package(
             actor=actor,
             reason="Nộp gói scan mới"
         )
-    elif stage.status == "in_progress":
-        pass
-    else:
-        raise ValueError(f"Không thể nộp gói scan khi trạng thái bước Scan là: {stage.status}")
 
-    scanned_by_name = _get_scanned_by_name(source_dir, scan_user_name_level)
+    # Calculate scanned_by_name
+    parts = Path(norm_path).parts
+    scanned_by_name = None
+    warning_flags = set()
+    
+    if scan_user_name_level > 0:
+        if len(parts) > scan_user_name_level:
+            scanned_by_name = parts[-(scan_user_name_level + 1)]
+        else:
+            warning_flags.add("missing_scan_user")
+
     matched_user_id = None
     if scanned_by_name:
         scan_member_ids = get_scan_stage_member_ids(db, project_id)
@@ -108,10 +136,7 @@ def submit_scan_package(
             if len(matches) == 1:
                 matched_user_id = matches[0].id
                 
-        update_assigned_user_for_scan_stage(db, case_id, matched_user_id)
-
-    if get_processing_scan_package(db, case_id):
-        raise ValueError("Hộp đang có một gói scan khác đang xử lý.")
+    update_assigned_user_for_scan_stage(db, case_id, matched_user_id)
 
     version = lock_and_get_latest_scan_package_version(db, case_id)
 
@@ -122,8 +147,9 @@ def submit_scan_package(
         scanned_by_user_id=matched_user_id,
         submitted_by_user_id=actor["id"],
         scan_user_name_level=scan_user_name_level,
-        source_path=folder_path,
+        source_path=norm_path,
         status="processing",
+        warning_flags=json.dumps(list(warning_flags)) if warning_flags else None,
         started_at=get_utc_now()
     )
     create_scan_package(db, pkg)
@@ -135,27 +161,24 @@ def submit_scan_package(
 
 def _calculate_a4_equivalent(width: float, height: float, rotate: int) -> int:
     """Classify page size and return (a0, a1, a2, a3, a4, a5)."""
-    # A4 standard is roughly 595 x 842 points.
     if rotate in (90, 270):
         width, height = height, width
         
     area = width * height
-    # Very rough bounds: A4 area = 595 * 842 = 500,990.
-    # 110% bound is roughly 1.1x in each dimension -> 1.21x area.
-    A4_AREA = 595.28 * 841.89
+    # Bảng khổ (điểm) theo QC-06
+    sizes = [
+        (420 * 595, (0, 0, 0, 0, 0, 1)),   # A5
+        (595 * 842, (0, 0, 0, 0, 1, 0)),   # A4
+        (842 * 1190, (0, 0, 0, 1, 0, 0)),  # A3
+        (1190 * 1684, (0, 0, 1, 0, 0, 0)), # A2
+        (1684 * 2384, (0, 1, 0, 0, 0, 0)), # A1
+        (2384 * 3370, (1, 0, 0, 0, 0, 0)), # A0
+    ]
     
-    if area < A4_AREA * 0.5 * 1.1:
-        return 0, 0, 0, 0, 0, 1  # A5
-    elif area <= A4_AREA * 1.1:
-        return 0, 0, 0, 0, 1, 0  # A4
-    elif area <= A4_AREA * 2 * 1.1:
-        return 0, 0, 0, 1, 0, 0  # A3
-    elif area <= A4_AREA * 4 * 1.1:
-        return 0, 0, 1, 0, 0, 0  # A2
-    elif area <= A4_AREA * 8 * 1.1:
-        return 0, 1, 0, 0, 0, 0  # A1
-    else:
-        return 1, 0, 0, 0, 0, 0  # A0
+    for ref_area, result in sizes:
+        if ref_area * 1.10 >= area:
+            return result
+    return (1, 0, 0, 0, 0, 0)  # Lớn hơn A0 thì tính A0
 
 
 def process_scan_package_background(package_id: int, session_factory=SessionLocal):
@@ -268,8 +291,7 @@ def process_scan_package_background(package_id: int, session_factory=SessionLoca
                     scan_file.a4_pages = file_a4
                     scan_file.a5_pages = file_a5
                     
-                    # 1 A3 = 2 A4, 1 A2 = 4 A4, 1 A1 = 8 A4, 1 A0 = 16 A4. 1 A5 = 0 (Wait, A5 equivalent? A5 usually counts as A4? No, standard A4 equivalent: A5 is 0.5 A4, but user said integer. 1 A4 = 1. A5 doesn't add to A4 equivalent in standard? Let's use standard integer sum: A4 + 2*A3 + 4*A2 + 8*A1 + 16*A0. A5 can be ignored for A4 eq, or wait, usually A5 is half A4, but A4 equivalent must be integer. "số nguyên". So A5 contributes 0 to integer A4 equivalent? Or we sum all area and divide? Area of A5 is 0.5. So a5_pages // 2? No, normally A4 eq = A4 + 2*A3 + 4*A2 + 8*A1 + 16*A0.)
-                    file_a4_eq = file_a4 + (file_a3 * 2) + (file_a2 * 4) + (file_a1 * 8) + (file_a0 * 16)
+                    file_a4_eq = file_a5 + file_a4 + (file_a3 * 2) + (file_a2 * 4) + (file_a1 * 8) + (file_a0 * 16)
                     scan_file.a4_equivalent = file_a4_eq
                     
                     total_pages += num_pages

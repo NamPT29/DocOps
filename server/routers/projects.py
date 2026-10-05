@@ -403,7 +403,12 @@ def api_list_scan_packages(
     current_user: dict = Depends(get_admin_user),
     db: Session = Depends(get_db),
 ):
-    from server.repositories.scan_repository import list_scan_packages
+    from server.repositories.scan_repository import get_case_by_id, list_scan_packages
+    import json
+    
+    case = get_case_by_id(db, project_id, case_id)
+    if not case:
+        raise HTTPException(status_code=404, detail="Hộp không thuộc dự án này hoặc không tồn tại.")
     
     packages = list_scan_packages(db, case_id)
     return {
@@ -419,7 +424,7 @@ def api_list_scan_packages(
                 "failed_files": p.failed_files,
                 "total_pages": p.total_pages,
                 "total_a4_equivalent": p.total_a4_equivalent,
-                "warning_flags": p.warning_flags,
+                "warning_flags": json.loads(p.warning_flags) if p.warning_flags else [],
                 "error_message": p.error_message,
                 "started_at": p.started_at,
                 "finished_at": p.finished_at,
