@@ -14,11 +14,11 @@ from server.models_scan import CaseScanPackage, CaseScanFile
 from server.services.server_folder_service import resolve_server_source_directory
 from server.services.workflow_service import transition_case_stage
 from server.repositories.workflow_repository import WorkflowRepository
-from server.models_workflow import ProjectStageMember
 from server.repositories.scan_repository import (
     get_project_by_id,
     get_case_by_id,
     get_users_by_ids,
+    get_scan_stage_member_ids,
     update_assigned_user_for_scan_stage,
     lock_and_get_latest_scan_package_version,
     get_processing_scan_package,
@@ -100,7 +100,7 @@ def submit_scan_package(
     scanned_by_name = _get_scanned_by_name(source_dir, scan_user_name_level)
     matched_user_id = None
     if scanned_by_name:
-        scan_member_ids = [m.user_id for m in db.query(ProjectStageMember).filter_by(project_id=project_id, stage_key="scan").all()]
+        scan_member_ids = get_scan_stage_member_ids(db, project_id)
         if scan_member_ids:
             norm_scanned = _normalize_name(scanned_by_name)
             users = get_users_by_ids(db, scan_member_ids)
@@ -158,11 +158,11 @@ def _calculate_a4_equivalent(width: float, height: float, rotate: int) -> int:
         return 1, 0, 0, 0, 0, 0  # A0
 
 
-def process_scan_package_background(package_id: int):
+def process_scan_package_background(package_id: int, session_factory=SessionLocal):
     if not pypdf:
         return
         
-    with SessionLocal() as db:
+    with session_factory() as db:
         from server.repositories.scan_repository import get_scan_package, update_scan_package, create_scan_files
         pkg = get_scan_package(db, package_id)
         if not pkg or pkg.status != "processing":

@@ -18,13 +18,14 @@ check nhập liệu → chuẩn hóa → bàn giao.
 - Lúc làm chỉ chạy test mục tiêu; gate đầy đủ ở cuối lát.
 - Test luôn dùng SQLite tạm; cấm create_all/drop_all trên engine toàn cục; cấm ghi file vào thư mục repo (dùng tmp_path).
 - Sắp hết quota: commit và push phần đã xong, cập nhật STATUS.md trước khi dừng.
+- docs/ nằm trong .gitignore: file MỚI trong docs/ phải `git add -f`.
 - Chỗ nghiệp vụ chưa rõ: hỏi người dùng, không tự đoán. Giá trị mặc định lấy theo QC-01, cấu hình được theo dự án.
 - Sau mỗi nhiệm vụ: chỉ người dùng các bước bấm trên web để kiểm tra.
 
 ## Test (bắt buộc pass trước khi commit)
 ```
-python -m pytest -q
-for f in tests/*selfcheck*.js; do node "$f" || echo "FAIL $f"; done
+python scripts/gate.py           # đầy đủ
+python scripts/gate.py --static  # nhanh
 ```
 
 ## Ràng buộc kỹ thuật

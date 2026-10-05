@@ -39,6 +39,14 @@ def run(cmd: list[str]) -> tuple[int, str]:
     return proc.returncode, proc.stdout + proc.stderr
 
 
+def describe_tree() -> str:
+    _, head = run(["git", "rev-parse", "--short", "HEAD"])
+    _, status = run(["git", "status", "--short"])
+    dirty = len([line for line in status.splitlines() if line.strip()])
+    suffix = f" + {dirty} file chưa commit (kết quả KHÔNG đại diện cho commit)" if dirty else " (cây sạch)"
+    return f"Cổng chạy trên commit {head.strip()}{suffix}"
+
+
 def check_frozen_files() -> None:
     code, upstream = run(["git", "rev-parse", "--abbrev-ref", "@{upstream}"])
     base = upstream.strip() if code == 0 else "HEAD"
@@ -116,6 +124,7 @@ def main(argv: list[str]) -> int:
         check_js_selfchecks()
         check_pytest([a for a in argv if not a.startswith("--")])
     print()
+    print(describe_tree())
     for name, ok, detail in results:
         print(f"[{'ĐẠT' if ok else 'LỖI'}] {name}" + (f": {detail}" if detail else ""))
     passed = all(ok for _, ok, _ in results)

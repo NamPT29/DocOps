@@ -1,7 +1,9 @@
 """Test-only compatibility for Codex's Windows filesystem sandbox."""
 
-from itertools import count
 import os
+os.environ["DATABASE_URL"] = "sqlite:///:memory:"
+
+from itertools import count
 from pathlib import Path
 import shutil
 import uuid

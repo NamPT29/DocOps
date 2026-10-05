@@ -1,6 +1,7 @@
 from sqlalchemy.orm import Session
 from server.models import Project, ProjectCase, User
 from server.models_scan import CaseScanPackage, CaseScanFile
+from server.models_workflow import ProjectStageMember
 from server.database import get_utc_now
 
 
@@ -19,6 +20,14 @@ def get_users_by_ids(db: Session, user_ids: list[int]) -> list[User]:
     if not user_ids:
         return []
     return db.query(User).filter(User.id.in_(user_ids)).all()
+
+
+def get_scan_stage_member_ids(db: Session, project_id: int) -> list[int]:
+    return [
+        m.user_id for m in db.query(ProjectStageMember).filter_by(
+            project_id=project_id, stage_key="scan"
+        ).all()
+    ]
 
 
 def update_assigned_user_for_scan_stage(db: Session, case_id: int, assigned_user_id: int | None):
