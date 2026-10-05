@@ -85,10 +85,13 @@ def update_scan_package(db: Session, package: CaseScanPackage):
 
 
 def delete_stuck_processing_packages(db: Session):
-    db.execute(
-        """
-        DELETE FROM case_scan_packages 
-        WHERE status = 'processing'
-        """
+    # Đổi tên hàm thành resolve_stuck_processing_packages nhưng gọi là delete_stuck_processing_packages
+    # theo yêu cầu cũ (chưa cần thiết phải đổi tên nếu gọi từ main.py, nhưng ta có thể giữ nguyên).
+    # Chuyển status = 'processing' -> 'failed', kèm reason.
+    db.query(CaseScanPackage).filter(CaseScanPackage.status == 'processing').update(
+        {
+            CaseScanPackage.status: 'failed',
+            CaseScanPackage.error_message: 'Hệ thống bị tắt đột ngột khi đang xử lý'
+        }
     )
     db.flush()

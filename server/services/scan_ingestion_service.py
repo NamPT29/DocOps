@@ -159,7 +159,7 @@ def submit_scan_package(
     return pkg
 
 
-def _calculate_a4_equivalent(width: float, height: float, rotate: int) -> int:
+def _calculate_a4_equivalent(width: float, height: float, rotate: int) -> tuple[int, ...]:
     """Classify page size and return (a0, a1, a2, a3, a4, a5)."""
     if rotate in (90, 270):
         width, height = height, width
@@ -182,146 +182,152 @@ def _calculate_a4_equivalent(width: float, height: float, rotate: int) -> int:
 
 
 def process_scan_package_background(package_id: int, session_factory=SessionLocal):
-    if not pypdf:
-        return
-        
     with session_factory() as db:
         from server.repositories.scan_repository import get_scan_package, update_scan_package, create_scan_files
         pkg = get_scan_package(db, package_id)
         if not pkg or pkg.status != "processing":
             return
             
-        _, source_dir, _ = resolve_server_source_directory(pkg.source_path)
-        
-        all_files = []
-        for root, _, files in os.walk(source_dir):
-            for name in files:
-                all_files.append(Path(root) / name)
-                
-        total_pages = 0
-        total_a4_equiv = 0
-        processed = 0
-        failed = 0
-        
-        warning_flags = set()
-        
-        # Check mtime/size changes
-        def get_file_stats(path: Path):
-            try:
-                st = os.stat(path)
-                return st.st_size, st.st_mtime
-            except OSError:
-                return -1, -1
-
-        for fpath in all_files:
-            rel_path = fpath.relative_to(source_dir).as_posix()
-            
-            s1, m1 = get_file_stats(fpath)
-            time.sleep(0.01) # Small gap if there are many files, but rule says "Việc chờ giữa hai lần lấy mẫu chỉ 2-3 giây".
-            # To be efficient, we can sample all files once, sleep 2 seconds, sample again.
-            
-        # Refined incomplete check: Sample all, wait, sample all
-        initial_stats = {f: get_file_stats(f) for f in all_files}
-        time.sleep(2.5)
-        final_stats = {f: get_file_stats(f) for f in all_files}
-        
-        for fpath in all_files:
-            rel_path = fpath.relative_to(source_dir).as_posix()
-            s1, m1 = initial_stats[fpath]
-            s2, m2 = final_stats[fpath]
-            
-            if s1 < 0 or s2 < 0:
-                continue
-                
-            scan_file = CaseScanFile(
-                package_id=pkg.id,
-                relative_path=rel_path,
-                file_size=s2,
-            )
-            
-            if s1 != s2 or m1 != m2:
-                scan_file.status = "incomplete"
-                scan_file.error_message = "File đang được chép dở (kích thước/mtime thay đổi)."
-                scan_file.page_count = -1
-                failed += 1
-                warning_flags.add("incomplete_files")
-                create_scan_files(db, [scan_file])
-                continue
-                
-            if fpath.suffix.lower() != ".pdf":
-                scan_file.is_pdf = False
-                scan_file.status = "not_pdf"
-                scan_file.page_count = 0
-                warning_flags.add("non_pdf_files")
-                create_scan_files(db, [scan_file])
-                processed += 1
-                continue
-                
-            try:
-                with open(fpath, "rb") as f:
-                    reader = pypdf.PdfReader(f, strict=False)
-                    num_pages = len(reader.pages)
-                    
-                    if num_pages == 0:
-                        raise ValueError("PDF 0 trang.")
-                        
-                    file_a0 = file_a1 = file_a2 = file_a3 = file_a4 = file_a5 = 0
-                    
-                    for page in reader.pages:
-                        mb = page.mediabox
-                        rotate = page.get("/Rotate", 0)
-                        user_unit = float(page.get("/UserUnit", 1.0))
-                        
-                        w = float(mb.width) * user_unit
-                        h = float(mb.height) * user_unit
-                        
-                        a0, a1, a2, a3, a4, a5 = _calculate_a4_equivalent(w, h, rotate)
-                        file_a0 += a0
-                        file_a1 += a1
-                        file_a2 += a2
-                        file_a3 += a3
-                        file_a4 += a4
-                        file_a5 += a5
-                        
-                    scan_file.page_count = num_pages
-                    scan_file.a0_pages = file_a0
-                    scan_file.a1_pages = file_a1
-                    scan_file.a2_pages = file_a2
-                    scan_file.a3_pages = file_a3
-                    scan_file.a4_pages = file_a4
-                    scan_file.a5_pages = file_a5
-                    
-                    file_a4_eq = file_a5 + file_a4 + (file_a3 * 2) + (file_a2 * 4) + (file_a1 * 8) + (file_a0 * 16)
-                    scan_file.a4_equivalent = file_a4_eq
-                    
-                    total_pages += num_pages
-                    total_a4_equiv += file_a4_eq
-                    processed += 1
-            except Exception as e:
-                scan_file.status = "error"
-                scan_file.page_count = -1
-                scan_file.error_message = f"Lỗi đọc PDF (có thể chép dở hoặc hỏng): {str(e)}"
-                failed += 1
-                warning_flags.add("error_files")
-                
-            create_scan_files(db, [scan_file])
-            
-            # Periodically update package progress
-            pkg.processed_files = processed
-            pkg.failed_files = failed
+        if not pypdf:
+            pkg.status = "failed"
+            pkg.error_message = "Thư viện pypdf chưa được cài đặt."
+            pkg.finished_at = get_utc_now()
             update_scan_package(db, pkg)
             db.commit()
+            return
 
-        pkg.total_files = len(all_files)
-        pkg.processed_files = processed
-        pkg.failed_files = failed
-        pkg.total_pages = total_pages
-        pkg.total_a4_equivalent = total_a4_equiv
-        pkg.status = "done"
-        pkg.finished_at = get_utc_now()
-        
-        if warning_flags:
-            pkg.warning_flags = json.dumps(list(warning_flags))
+        try:
+            _, source_dir, _ = resolve_server_source_directory(pkg.source_path)
             
-        update_scan_package(db, pkg)
-        db.commit()
+            all_files = []
+            for root, _, files in os.walk(source_dir):
+                for name in files:
+                    all_files.append(Path(root) / name)
+                    
+            pkg.total_files = len(all_files)
+            update_scan_package(db, pkg)
+            db.commit()
+                    
+            total_pages = 0
+            total_a4_equiv = 0
+            processed = 0
+            failed = 0
+            warning_flags = set()
+            
+            def get_file_stats(path: Path):
+                try:
+                    st = os.stat(path)
+                    return st.st_size, st.st_mtime
+                except OSError:
+                    return -1, -1
+                    
+            initial_stats = {f: get_file_stats(f) for f in all_files}
+            time.sleep(2.5)
+            final_stats = {f: get_file_stats(f) for f in all_files}
+            
+            for fpath in all_files:
+                rel_path = fpath.relative_to(source_dir).as_posix()
+                s1, m1 = initial_stats[fpath]
+                s2, m2 = final_stats[fpath]
+                
+                if s1 < 0 or s2 < 0:
+                    continue
+                    
+                scan_file = CaseScanFile(
+                    package_id=pkg.id,
+                    relative_path=rel_path,
+                    file_size=s2,
+                )
+                
+                if s1 != s2 or m1 != m2:
+                    scan_file.status = "incomplete"
+                    scan_file.error_message = "File đang được chép dở (kích thước/mtime thay đổi)."
+                    scan_file.page_count = -1
+                    failed += 1
+                    warning_flags.add("incomplete_files")
+                    create_scan_files(db, [scan_file])
+                    continue
+                    
+                if fpath.suffix.lower() != ".pdf":
+                    scan_file.is_pdf = False
+                    scan_file.status = "not_pdf"
+                    scan_file.page_count = 0
+                    warning_flags.add("non_pdf_files")
+                    create_scan_files(db, [scan_file])
+                    processed += 1
+                    continue
+                    
+                try:
+                    with open(fpath, "rb") as f:
+                        reader = pypdf.PdfReader(f, strict=False)
+                        if reader.is_encrypted:
+                            raise ValueError("File PDF bị mã hóa.")
+                        num_pages = len(reader.pages)
+                        
+                        if num_pages == 0:
+                            raise ValueError("PDF 0 trang.")
+                            
+                        file_a0 = file_a1 = file_a2 = file_a3 = file_a4 = file_a5 = 0
+                        
+                        for page in reader.pages:
+                            mb = page.mediabox
+                            rotate = page.get("/Rotate", 0)
+                            user_unit = float(page.get("/UserUnit", 1.0))
+                            
+                            w = float(mb.width) * user_unit
+                            h = float(mb.height) * user_unit
+                            
+                            a0, a1, a2, a3, a4, a5 = _calculate_a4_equivalent(w, h, rotate)
+                            file_a0 += a0
+                            file_a1 += a1
+                            file_a2 += a2
+                            file_a3 += a3
+                            file_a4 += a4
+                            file_a5 += a5
+                            
+                        scan_file.page_count = num_pages
+                        scan_file.a0_pages = file_a0
+                        scan_file.a1_pages = file_a1
+                        scan_file.a2_pages = file_a2
+                        scan_file.a3_pages = file_a3
+                        scan_file.a4_pages = file_a4
+                        scan_file.a5_pages = file_a5
+                        
+                        file_a4_eq = file_a5 + file_a4 + (file_a3 * 2) + (file_a2 * 4) + (file_a1 * 8) + (file_a0 * 16)
+                        scan_file.a4_equivalent = file_a4_eq
+                        
+                        total_pages += num_pages
+                        total_a4_equiv += file_a4_eq
+                        processed += 1
+                except Exception as e:
+                    scan_file.status = "error"
+                    scan_file.page_count = -1
+                    scan_file.error_message = f"Lỗi đọc PDF: {str(e)}"
+                    failed += 1
+                    warning_flags.add("error_files")
+                    
+                create_scan_files(db, [scan_file])
+                
+                pkg.processed_files = processed
+                pkg.failed_files = failed
+                update_scan_package(db, pkg)
+                db.commit()
+
+            pkg.processed_files = processed
+            pkg.failed_files = failed
+            pkg.total_pages = total_pages
+            pkg.total_a4_equivalent = total_a4_equiv
+            pkg.status = "done"
+            pkg.finished_at = get_utc_now()
+            
+            if warning_flags:
+                pkg.warning_flags = json.dumps(list(warning_flags))
+                
+            update_scan_package(db, pkg)
+            db.commit()
+        except Exception as e:
+            pkg.status = "failed"
+            pkg.error_message = f"Lỗi bất ngờ: {str(e)}"
+            pkg.finished_at = get_utc_now()
+            update_scan_package(db, pkg)
+            db.commit()
