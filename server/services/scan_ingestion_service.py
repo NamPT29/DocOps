@@ -1,14 +1,14 @@
 """Service for scan package ingestion (FR-SCN-01)."""
 
-import os
-import time
 import json
-import unicodedata
+import logging
+import os
 import re
+import time
+import unicodedata
 from pathlib import Path
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
-from sqlalchemy import text
 
 from server.database import get_utc_now, SessionLocal
 from server.models_scan import CaseScanPackage, CaseScanFile
@@ -23,6 +23,7 @@ from server.repositories.scan_repository import (
     update_assigned_user_for_scan_stage,
     lock_and_get_latest_scan_package_version,
     get_processing_scan_package,
+    get_scan_package,
     create_scan_package,
     create_scan_files,
     update_scan_package,
@@ -32,6 +33,8 @@ try:
     import pypdf
 except ImportError:
     pypdf = None
+
+logger = logging.getLogger(__name__)
 
 
 def _normalize_name(name: str | None) -> str:
@@ -181,9 +184,31 @@ def _calculate_a4_equivalent(width: float, height: float, rotate: int) -> tuple[
     return (1, 0, 0, 0, 0, 0)  # Lớn hơn A0 thì tính A0
 
 
+def _merge_warning_flags(stored: str | None, new_flags: set[str]) -> str | None:
+    """Keep flags set at submission (e.g. missing_scan_user) and add the new ones."""
+    try:
+        existing = set(json.loads(stored)) if stored else set()
+    except (TypeError, ValueError):
+        existing = set()
+    merged = existing | set(new_flags)
+    return json.dumps(sorted(merged)) if merged else None
+
+
+def _mark_failed(db: Session, package_id: int, message: str) -> None:
+    """Finish a package as failed even after a database error in the session."""
+    db.rollback()
+    pkg = get_scan_package(db, package_id)
+    if pkg is None:
+        return
+    pkg.status = "failed"
+    pkg.error_message = message
+    pkg.finished_at = get_utc_now()
+    update_scan_package(db, pkg)
+    db.commit()
+
+
 def process_scan_package_background(package_id: int, session_factory=SessionLocal):
     with session_factory() as db:
-        from server.repositories.scan_repository import get_scan_package, update_scan_package, create_scan_files
         pkg = get_scan_package(db, package_id)
         if not pkg or pkg.status != "processing":
             return
@@ -319,15 +344,13 @@ def process_scan_package_background(package_id: int, session_factory=SessionLoca
             pkg.total_a4_equivalent = total_a4_equiv
             pkg.status = "done"
             pkg.finished_at = get_utc_now()
-            
-            if warning_flags:
-                pkg.warning_flags = json.dumps(list(warning_flags))
-                
+            pkg.warning_flags = _merge_warning_flags(pkg.warning_flags, warning_flags)
             update_scan_package(db, pkg)
             db.commit()
         except Exception as e:
-            pkg.status = "failed"
-            pkg.error_message = f"Lỗi bất ngờ: {str(e)}"
-            pkg.finished_at = get_utc_now()
-            update_scan_package(db, pkg)
-            db.commit()
+            try:
+                _mark_failed(db, package_id, f"Lỗi bất ngờ: {e}")
+            except Exception:
+                # The database itself is unreachable; startup maintenance
+                # (fail_stuck_processing_packages) closes the package later.
+                logger.exception("Không thể đánh dấu gói scan %s là failed", package_id)

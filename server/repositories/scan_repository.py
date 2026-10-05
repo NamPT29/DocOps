@@ -84,14 +84,15 @@ def update_scan_package(db: Session, package: CaseScanPackage):
     db.flush()
 
 
-def delete_stuck_processing_packages(db: Session):
-    # Đổi tên hàm thành resolve_stuck_processing_packages nhưng gọi là delete_stuck_processing_packages
-    # theo yêu cầu cũ (chưa cần thiết phải đổi tên nếu gọi từ main.py, nhưng ta có thể giữ nguyên).
-    # Chuyển status = 'processing' -> 'failed', kèm reason.
-    db.query(CaseScanPackage).filter(CaseScanPackage.status == 'processing').update(
+def fail_stuck_processing_packages(db: Session) -> int:
+    """Mark packages left in 'processing' by a stopped server as failed."""
+    count = db.query(CaseScanPackage).filter(CaseScanPackage.status == 'processing').update(
         {
             CaseScanPackage.status: 'failed',
-            CaseScanPackage.error_message: 'Hệ thống bị tắt đột ngột khi đang xử lý'
-        }
+            CaseScanPackage.error_message: 'Hệ thống bị tắt đột ngột khi đang xử lý',
+            CaseScanPackage.finished_at: get_utc_now(),
+        },
+        synchronize_session=False,
     )
     db.flush()
+    return count

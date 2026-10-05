@@ -49,8 +49,8 @@ def run_startup_maintenance() -> None:
             return
         with SessionLocal() as db:
             upload_result = cleanup_stale_project_uploads(db)
-            from server.repositories.scan_repository import delete_stuck_processing_packages
-            delete_stuck_processing_packages(db)
+            from server.repositories.scan_repository import fail_stuck_processing_packages
+            fail_stuck_processing_packages(db)
             db.commit()
     except Exception:
         logger.warning("Không thể dọn phiên upload hoặc scan cũ khi khởi động", exc_info=True)
