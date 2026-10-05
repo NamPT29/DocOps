@@ -12,7 +12,12 @@ check nhập liệu → chuẩn hóa → bàn giao.
 
 ## Quy trình làm việc
 - Chỉ làm trên nhánh `claude/charming-planck-b2k42f`. Không tạo PR, không force push, không sửa lịch sử đã push.
-- Mỗi nhiệm vụ: trình bày kế hoạch ngắn → người dùng duyệt → code → test → **một commit** (ghi mã FR/BR/QC) → push.
+- Mỗi nhiệm vụ chia thành các LÁT nhỏ ghi ở docs/plans/STATUS.md. Mỗi lát: sửa -> `python scripts/gate.py` phải in "KẾT QUẢ CỔNG: ĐẠT" -> commit -> push.
+- Phiên mới: git pull, đọc AGENTS.md và docs/plans/STATUS.md, làm lát kế tiếp; không đọc lại cả repo; chỉ sửa các file nêu trong lát; mở chat mới cho mỗi lát.
+- Báo cáo cuối lát: dán nguyên đầu ra của gate.py. Không ghi "pass"/"xong" nếu chưa có dòng "KẾT QUẢ CỔNG: ĐẠT".
+- Lúc làm chỉ chạy test mục tiêu; gate đầy đủ ở cuối lát.
+- Test luôn dùng SQLite tạm; cấm create_all/drop_all trên engine toàn cục; cấm ghi file vào thư mục repo (dùng tmp_path).
+- Sắp hết quota: commit và push phần đã xong, cập nhật STATUS.md trước khi dừng.
 - Chỗ nghiệp vụ chưa rõ: hỏi người dùng, không tự đoán. Giá trị mặc định lấy theo QC-01, cấu hình được theo dự án.
 - Sau mỗi nhiệm vụ: chỉ người dùng các bước bấm trên web để kiểm tra.
 
