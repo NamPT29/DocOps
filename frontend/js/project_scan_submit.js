@@ -175,6 +175,49 @@ function scanSubmitPackageLines(pkg) {
     return lines;
 }
 
+function scanMatchLabels(pkg) {
+    if (pkg.status !== 'done') return [];
+    const els = [];
+    const statusMap = {
+        'matched': 'Khớp mục lục',
+        'mismatch': 'Lệch mục lục',
+        'no_catalog': 'Chưa có mục lục để so khớp'
+    };
+    const mainText = statusMap[pkg.match_status] || 'Chưa so khớp được';
+    const mainEl = scanSubmitElement('div', 'fw-bold mt-2', mainText);
+    if (pkg.match_status === 'matched') mainEl.classList.add('text-success');
+    else if (pkg.match_status === 'mismatch' || !pkg.match_status) mainEl.classList.add('text-danger');
+    els.push(mainEl);
+
+    if (pkg.match_summary) {
+        const summary = pkg.match_summary;
+        const listMap = [
+            { key: 'missing', label: 'Thiếu hồ sơ' },
+            { key: 'extra', label: 'Thư mục thừa' },
+            { key: 'invalid_folders', label: 'Tên thư mục lạ' },
+            { key: 'duplicate_folders', label: 'Thư mục trùng' },
+            { key: 'only_cover', label: 'Thư mục chỉ có bìa' },
+            { key: 'removed_from_catalog', label: 'Hồ sơ không còn trong mục lục mới' },
+            { key: 'misplaced_files', label: 'File sai cấp' }
+        ];
+        listMap.forEach(({ key, label }) => {
+            const arr = summary[key];
+            if (Array.isArray(arr) && arr.length > 0) {
+                const show = arr.slice(0, 10);
+                let text = `${label}: ${show.join(', ')}`;
+                if (arr.length > 10) {
+                    text += ` ... và ${arr.length - 10} mục nữa`;
+                }
+                els.push(scanSubmitElement('div', 'small text-muted', text));
+            }
+        });
+        if (summary.truncated) {
+            els.push(scanSubmitElement('div', 'small text-warning', 'Danh sách đã được cắt bớt'));
+        }
+    }
+    return els;
+}
+
 function renderScanPackage(container, pkg) {
     container.replaceChildren();
     scanSubmitPackageLines(pkg).forEach((line, index) => {
@@ -186,6 +229,7 @@ function renderScanPackage(container, pkg) {
     scanPackageWarnings(pkg).forEach(label => {
         container.appendChild(scanSubmitElement('span', 'badge bg-warning text-dark me-1', label));
     });
+    scanMatchLabels(pkg).forEach(el => container.appendChild(el));
 }
 
 function renderScanPackageHistory(packages) {
@@ -330,4 +374,40 @@ async function openScanSubmit(caseId, caseName) {
     setScanSubmitError('');
     await Promise.all([loadScanSubmitFolder(''), reloadScanPackageHistory()]);
     new bootstrap.Modal(document.getElementById('scanSubmitModal')).show();
+}
+async function openScanMatch(caseId, caseName) {
+    scanSubmitState.projectId = Number(projectWorkflowProjectId);
+    scanSubmitState.caseId = Number(caseId);
+    const packages = await scanSubmitListPackages();
+    const pkg = packages[0];
+    if (!pkg) {
+        alert('Chưa có gói scan nào.');
+        return;
+    }
+
+    const overlay = scanSubmitElement('div', 'modal fade show');
+    overlay.style.display = 'block';
+    overlay.style.backgroundColor = 'rgba(0,0,0,0.5)';
+    
+    const dialog = scanSubmitElement('div', 'modal-dialog modal-dialog-scrollable');
+    const content = scanSubmitElement('div', 'modal-content');
+    
+    const header = scanSubmitElement('div', 'modal-header bg-info text-white');
+    const title = scanSubmitElement('h5', 'modal-title', `So khớp: ${caseName}`);
+    const closeBtn = scanSubmitElement('button', 'btn-close btn-close-white');
+    closeBtn.addEventListener('click', () => overlay.remove());
+    header.append(title, closeBtn);
+    
+    const body = scanSubmitElement('div', 'modal-body');
+    renderScanPackage(body, pkg);
+    
+    const footer = scanSubmitElement('div', 'modal-footer');
+    const closeBtn2 = scanSubmitElement('button', 'btn btn-secondary', 'Đóng');
+    closeBtn2.addEventListener('click', () => overlay.remove());
+    footer.appendChild(closeBtn2);
+    
+    content.append(header, body, footer);
+    dialog.appendChild(content);
+    overlay.appendChild(dialog);
+    document.body.appendChild(overlay);
 }

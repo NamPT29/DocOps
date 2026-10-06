@@ -17,9 +17,9 @@ assert.doesNotMatch(
 );
 const scripts = Array.from(html.matchAll(/<script src="([^"]+)"/g), match => match[1]);
 const managementIndex = scripts.findIndex(src => src.startsWith('js/project_management.js'));
-const scanIndex = scripts.indexOf('js/project_scan_submit.js?v=1.01');
+const scanIndex = scripts.findIndex(src => /^js\/project_scan_submit\.js\?v=[\d.]+$/.test(src));
 assert.ok(scanIndex > managementIndex && managementIndex >= 0, 'project_scan_submit.js loads after project_management.js');
-assert.ok(scripts.includes('js/project_workflow.js?v=1.06'), 'project_workflow.js version was bumped');
+assert.ok(scripts.some(src => /^js\/project_workflow\.js\?v=[\d.]+$/.test(src)), 'project_workflow.js version was bumped');
 const ids = Array.from(html.matchAll(/\sid="([^"]+)"/g), match => match[1]);
 const duplicates = ids.filter((id, index) => ids.indexOf(id) !== index);
 assert.deepEqual(duplicates, [], 'Element ids in admin.html are unique.');
@@ -319,6 +319,15 @@ async function runTimers() {
     assert.match(result, /1 file không đọc được/);
     assert.equal(refreshCount, 1, 'refreshProjectWorkflow() after the package finished');
     assert.match(text(elements.scanSubmitHistory), /S1 – Xong/);
+
+    const matchLabelsPkg = { status: 'done', match_status: 'mismatch', match_summary: { missing: ['01'], extra: ['02', '03', '04', '05', '06', '07', '08', '09', '10', '11', '12'], truncated: true } };
+    const matchBox = element('div');
+    sandbox.scanMatchLabels(matchLabelsPkg).forEach(el => matchBox.appendChild(el));
+    const matchText = text(matchBox);
+    assert.match(matchText, /Lệch mục lục/);
+    assert.match(matchText, /Thiếu hồ sơ: 01/);
+    assert.match(matchText, /Thư mục thừa: 02, 03, 04, 05, 06, 07, 08, 09, 10, 11 \.\.\. và 1 mục nữa/);
+    assert.match(matchText, /Danh sách đã được cắt bớt/);
 
     // A failed package shows its error in red.
     const failedBox = element('div');

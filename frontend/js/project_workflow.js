@@ -226,6 +226,14 @@ function renderWorkflowCases(data) {
                 submit.addEventListener('click', () => openScanSubmit(item.case_id, item.display_name));
                 td.appendChild(submit);
             }
+            if (key === 'scan_qc' && typeof openScanMatch === 'function') {
+                const matchBtn = document.createElement('button');
+                matchBtn.type = 'button';
+                matchBtn.className = 'btn btn-sm btn-outline-info ms-1 py-0';
+                matchBtn.textContent = 'Xem so khớp';
+                matchBtn.addEventListener('click', () => openScanMatch(item.case_id, item.display_name));
+                td.appendChild(matchBtn);
+            }
             row.appendChild(td);
         });
         body.appendChild(row);
@@ -394,19 +402,44 @@ async function saveProjectWorkflow() {
     }
 }
 
-async function workflowTransition(caseId, stageKey, action) {
-    let reason = null;
-    if (action === 'reject' || action === 'reopen') {
+async function workflowTransition(caseId, stageKey, action, initialReason = null) {
+    let reason = initialReason;
+    if (!reason && (action === 'reject' || action === 'reopen')) {
         reason = (window.prompt('Nhập lý do:') || '').trim();
         if (!reason) return;
     }
-    const response = await apiCall(
+    
+    // Use authFetch to manually handle 409 errors
+    const res = await authFetch(
         `${workflowApiBase()}/cases/${Number(caseId)}/stages/${encodeURIComponent(stageKey)}/transition`,
         {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({action, reason}),
-        },
+        }
     );
-    if (response) await refreshProjectWorkflow();
+    if (!res) return;
+    
+    const data = await res.json().catch(() => ({}));
+    if (res.ok && data.status === 'ok') {
+        await refreshProjectWorkflow();
+        return;
+    }
+    
+    // Handle 409 Check scan specific errors
+    if (res.status === 409 && data.detail) {
+        if (data.detail.code === 'scan_catalog_mismatch' || data.detail.code === 'scan_processing') {
+            alert(data.detail.message || 'Lỗi so khớp mục lục.');
+            return;
+        }
+        if (data.detail.code === 'reason_required') {
+            const promptReason = (window.prompt('Hồ sơ scan lệch mục lục. Vui lòng nhập lý do (Bắt buộc):') || '').trim();
+            if (promptReason) {
+                return workflowTransition(caseId, stageKey, action, promptReason);
+            }
+            return;
+        }
+    }
+    
+    alert('Lỗi: ' + (data.message || (data.detail && data.detail.message) || data.detail || 'Không thực hiện được thao tác.'));
 }

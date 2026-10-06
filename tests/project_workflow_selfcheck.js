@@ -34,4 +34,61 @@ assert.deepEqual(labels(qc, { status: 'in_progress', available: true }), ['compl
 assert.deepEqual(labels(work, { status: 'done', available: true }), ['reopen']);
 assert.deepEqual(labels(derived, { status: 'pending', available: true }), [], 'Derived stages are never moved by hand.');
 
-console.log('Project workflow self-check passed.');
+// Test workflowTransition 409 flow
+let fetches = [];
+let alerts = [];
+let prompts = [];
+let refreshed = false;
+
+sandbox.authFetch = async (url, options) => {
+    fetches.push({ url, options });
+    const action = JSON.parse(options.body).action;
+    const reason = JSON.parse(options.body).reason;
+    if (action === 'complete' && sandbox._mockCode) {
+        return { ok: false, status: 409, json: async () => ({ detail: { code: sandbox._mockCode, message: 'Mock message' } }) };
+    }
+    return { ok: true, status: 200, json: async () => ({ status: 'ok' }) };
+};
+sandbox.alert = msg => alerts.push(msg);
+sandbox.window = { prompt: msg => { prompts.push(msg); return sandbox._mockPromptResult; } };
+sandbox.refreshProjectWorkflow = async () => { refreshed = true; };
+sandbox.workflowApiBase = () => '/api';
+sandbox.encodeURIComponent = encodeURIComponent;
+
+vm.runInContext('this.__testTransition = async (caseId, stageKey, action) => await workflowTransition(caseId, stageKey, action);', sandbox);
+
+(async () => {
+    // 1. scan_processing -> no prompt
+    sandbox._mockCode = 'scan_processing';
+    await sandbox.__testTransition(1, 'scan_qc', 'complete');
+    assert.deepEqual(prompts, []);
+    assert.deepEqual(alerts, ['Mock message']);
+    
+    // 2. scan_catalog_mismatch -> no prompt
+    fetches = []; alerts = []; prompts = [];
+    sandbox._mockCode = 'scan_catalog_mismatch';
+    await sandbox.__testTransition(1, 'scan_qc', 'complete');
+    assert.deepEqual(prompts, []);
+    assert.deepEqual(alerts, ['Mock message']);
+    
+    // 3. reason_required -> prompt -> sends reason
+    fetches = []; alerts = []; prompts = [];
+    sandbox._mockCode = 'reason_required';
+    sandbox._mockPromptResult = '  My Reason  '; // trimmed -> 'My Reason'
+    
+    // override authFetch to return OK on the second call
+    sandbox.authFetch = async (url, options) => {
+        fetches.push({ url, options });
+        const reason = JSON.parse(options.body).reason;
+        if (reason === 'My Reason') return { ok: true, status: 200, json: async () => ({ status: 'ok' }) };
+        return { ok: false, status: 409, json: async () => ({ detail: { code: sandbox._mockCode, message: 'Mock message' } }) };
+    };
+    
+    await sandbox.__testTransition(1, 'scan_qc', 'complete');
+    assert.equal(prompts.length, 1);
+    assert.equal(fetches.length, 2);
+    assert.equal(JSON.parse(fetches[1].options.body).reason, 'My Reason');
+    assert.equal(refreshed, true);
+    
+    console.log('Project workflow self-check passed.');
+})().catch(e => { console.error(e); process.exitCode = 1; });
