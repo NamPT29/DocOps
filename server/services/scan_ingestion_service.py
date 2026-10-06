@@ -43,12 +43,7 @@ except ImportError:
 logger = logging.getLogger(__name__)
 
 
-def _normalize_name(name: str | None) -> str:
-    if not name:
-        return ""
-    name = name.replace('đ', 'd').replace('Đ', 'd')
-    n = unicodedata.normalize('NFD', name).encode('ascii', 'ignore').decode('utf-8')
-    return re.sub(r'[\s_\-]', '', n).lower()
+from server.services.name_utils import _normalize_name
 
 
 def _extract_box_number(s: str | None) -> int | None:

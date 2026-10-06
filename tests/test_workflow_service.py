@@ -499,3 +499,134 @@ def test_br01_scan_qc_completion(world):
     res = _transition(world, world["qc"], case, "scan_qc", "complete")
     assert res.status_code == 409
     assert res.json()["detail"]["code"] == "scan_catalog_mismatch"
+
+
+def test_br04_scanned_by_user_id(world):
+    from server.models_scan import CaseScanPackage
+    db = world["db"]
+    _configure(world)
+    c1 = world["cases"][0]
+    pkg = CaseScanPackage(case_id=c1.id, version=1, status="done", match_status="matched", scanned_by_user_id=world["qc"].id, submitted_by_user_id=world["scanner"].id, source_path="S")
+    db.add(pkg)
+    db.commit()
+    
+    _transition(world, world["scanner"], c1, "scan", "start")
+    _transition(world, world["scanner"], c1, "scan", "complete")
+    
+    res = _transition(world, world["qc"], c1, "scan_qc", "start")
+    assert res.status_code == 409
+    assert res.json()["detail"]["code"] == "self_review"
+
+
+def test_br04_scanned_by_name_normalization(world):
+    from server.models_scan import CaseScanPackage
+    db = world["db"]
+    _configure(world)
+    c1 = world["cases"][0]
+    world["qc"].full_name = "Nguyễn Văn A"
+    db.commit()
+    
+    pkg = CaseScanPackage(case_id=c1.id, version=1, status="done", match_status="matched", scanned_by_name="nguyen van a", submitted_by_user_id=world["scanner"].id, source_path="S")
+    db.add(pkg)
+    db.commit()
+    
+    _transition(world, world["scanner"], c1, "scan", "start")
+    _transition(world, world["scanner"], c1, "scan", "complete")
+    
+    res = _transition(world, world["qc"], c1, "scan_qc", "start")
+    assert res.status_code == 409
+    assert res.json()["detail"]["code"] == "self_review"
+
+
+def test_br04_admin_is_also_blocked(world):
+    from server.models_scan import CaseScanPackage
+    db = world["db"]
+    _configure(world)
+    c1 = world["cases"][0]
+    world["admin"].full_name = "Lê Thị B"
+    db.commit()
+    
+    pkg = CaseScanPackage(case_id=c1.id, version=1, status="done", match_status="matched", scanned_by_name="lê thị b", submitted_by_user_id=world["scanner"].id, source_path="S")
+    db.add(pkg)
+    db.commit()
+    
+    _transition(world, world["scanner"], c1, "scan", "start")
+    _transition(world, world["scanner"], c1, "scan", "complete")
+    
+    res = _transition(world, world["admin"], c1, "scan_qc", "start")
+    assert res.status_code == 409
+    assert res.json()["detail"]["code"] == "self_review"
+
+
+def test_br04_checks_older_versions(world):
+    from server.models_scan import CaseScanPackage
+    db = world["db"]
+    _configure(world)
+    c1 = world["cases"][0]
+    pkg1 = CaseScanPackage(case_id=c1.id, version=1, status="failed", scanned_by_user_id=world["qc"].id, submitted_by_user_id=world["scanner"].id, source_path="S1")
+    pkg2 = CaseScanPackage(case_id=c1.id, version=2, status="done", match_status="matched", scanned_by_user_id=world["scanner"].id, submitted_by_user_id=world["scanner"].id, source_path="S2")
+    db.add_all([pkg1, pkg2])
+    db.commit()
+    
+    _transition(world, world["scanner"], c1, "scan", "start")
+    _transition(world, world["scanner"], c1, "scan", "complete")
+    
+    res = _transition(world, world["qc"], c1, "scan_qc", "start")
+    assert res.status_code == 409
+    assert res.json()["detail"]["code"] == "self_review"
+
+
+def test_br04_no_match_is_allowed(world):
+    from server.models_scan import CaseScanPackage
+    from server.models import ArrangementDossier
+    db = world["db"]
+    _configure(world)
+    c1 = world["cases"][0]
+    db.add(ArrangementDossier(case_id=c1.id, project_id=world["project"].id, box_number=1, dossier_number=1, dossier_suffix="", title="A", fonds_code="X", fonds_name="Y", catalog_number="1", start_date="20", end_date="20", start_year=20, maintenance_code="1", sheet_count=1, source_row=1))
+    
+    world["qc"].full_name = "Hoàng C"
+    pkg = CaseScanPackage(case_id=c1.id, version=1, status="done", match_status="matched", scanned_by_user_id=world["scanner"].id, scanned_by_name="nguyen d", submitted_by_user_id=world["scanner"].id, source_path="S")
+    db.add(pkg)
+    db.commit()
+    
+    _transition(world, world["scanner"], c1, "scan", "start")
+    _transition(world, world["scanner"], c1, "scan", "complete")
+    
+    assert _transition(world, world["qc"], c1, "scan_qc", "start").status_code == 200
+    assert _transition(world, world["qc"], c1, "scan_qc", "complete").status_code == 200
+
+
+def test_br04_empty_scanned_by_name_does_not_block(world):
+    from server.models_scan import CaseScanPackage
+    from server.models import ArrangementDossier
+    db = world["db"]
+    _configure(world)
+    c1 = world["cases"][0]
+    db.add(ArrangementDossier(case_id=c1.id, project_id=world["project"].id, box_number=1, dossier_number=1, dossier_suffix="", title="A", fonds_code="X", fonds_name="Y", catalog_number="1", start_date="20", end_date="20", start_year=20, maintenance_code="1", sheet_count=1, source_row=1))
+    
+    pkg = CaseScanPackage(case_id=c1.id, version=1, status="done", match_status="matched", scanned_by_name="", scanned_by_user_id=None, submitted_by_user_id=world["scanner"].id, source_path="S")
+    db.add(pkg)
+    db.commit()
+    
+    _transition(world, world["scanner"], c1, "scan", "start")
+    _transition(world, world["scanner"], c1, "scan", "complete")
+    
+    assert _transition(world, world["qc"], c1, "scan_qc", "start").status_code == 200
+    assert _transition(world, world["qc"], c1, "scan_qc", "complete").status_code == 200
+
+
+def test_br04_reject_is_not_blocked(world):
+    from server.models_scan import CaseScanPackage
+    db = world["db"]
+    _configure(world)
+    c1 = world["cases"][0]
+    pkg = CaseScanPackage(case_id=c1.id, version=1, status="done", match_status="matched", scanned_by_user_id=world["qc"].id, submitted_by_user_id=world["scanner"].id, source_path="S")
+    db.add(pkg)
+    db.commit()
+    
+    _transition(world, world["scanner"], c1, "scan", "start")
+    _transition(world, world["scanner"], c1, "scan", "complete")
+    
+    res = _transition(world, world["qc"], c1, "scan_qc", "reject")
+    assert res.status_code != 409 or res.json()["detail"].get("code") != "self_review"
+

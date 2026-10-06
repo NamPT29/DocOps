@@ -17,3 +17,5 @@ Cổng: python scripts/gate.py  (dùng --static để kiểm nhanh)
 - [x] B1c (sửa B1b: nối thẳng so khớp vào commit của gói)
 - [x] B2a (chặn Đạt Check scan)
 - [x] B2b (giao diện)
+## BR-04: người check scan không được trùng người scan
+- [x] B3 (chặn check scan trùng người scan)

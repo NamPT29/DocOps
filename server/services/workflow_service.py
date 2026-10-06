@@ -10,6 +10,7 @@ from server.models import (
 from server.repositories.workflow_repository import WorkflowRepository
 from server.services import account_policy_service as account_policy
 from server.services import workflow_engine as engine
+from server.services.name_utils import _normalize_name
 
 _CLIENT_ERROR_CODES = {"unknown_stage", "unknown_action", "reason_required"}
 
@@ -449,6 +450,25 @@ def _check_scan_qc_complete(repository, case_id, is_admin, reason):
             )
 
 
+def _check_br04_self_review(packages, actor):
+    norm_username = _normalize_name(actor.get("username"))
+    norm_fullname = _normalize_name(actor.get("full_name"))
+    
+    for pkg in packages:
+        if pkg.scanned_by_user_id == actor["id"]:
+            raise HTTPException(
+                status_code=409,
+                detail={"code": "self_review", "message": "Người check scan không được trùng người scan."}
+            )
+        if pkg.scanned_by_name:
+            norm_scanned = _normalize_name(pkg.scanned_by_name)
+            if norm_scanned and (norm_scanned == norm_username or norm_scanned == norm_fullname):
+                raise HTTPException(
+                    status_code=409,
+                    detail={"code": "self_review", "message": "Người check scan không được trùng người scan."}
+                )
+
+
 def transition_case_stage(db, *, project_id, case_id, stage_key, action, actor, reason=None):
     repository = WorkflowRepository(db)
     _project_or_404(repository, project_id)
@@ -465,8 +485,13 @@ def transition_case_stage(db, *, project_id, case_id, stage_key, action, actor, 
         if action != engine.REOPEN and stage_key in enabled:
             _require_stage_worker(repository, project_id, actor, stage_key)
             
-        if stage_key == "scan_qc" and action == engine.COMPLETE:
-            _check_scan_qc_complete(repository, case_id, is_admin, reason)
+        if stage_key == "scan_qc":
+            if action in (engine.START, engine.COMPLETE):
+                packages = repository.get_scan_packages(case_id)
+                _check_br04_self_review(packages, actor)
+            
+            if action == engine.COMPLETE:
+                _check_scan_qc_complete(repository, case_id, is_admin, reason)
 
         # Lock the rows we may change so two actors cannot race on one case.
         for key in enabled:

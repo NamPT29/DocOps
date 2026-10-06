@@ -111,6 +111,7 @@ def test_token_role_is_reloaded_from_database():
     assert current_user == {
         'id': 7,
         'username': 'member',
+        'full_name': '',
         'role': 'user',
         'session_id': login_session.session_id,
     }

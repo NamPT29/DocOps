@@ -105,5 +105,5 @@ compose.yaml
 docs/
 *.docx
 
-# Local dev samples
 samples_local/
+local.db

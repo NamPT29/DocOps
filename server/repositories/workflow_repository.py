@@ -42,6 +42,15 @@ class WorkflowRepository:
             .first()
         )
 
+    def get_scan_packages(self, case_id):
+        """Returns all scan packages for the given case."""
+        return (
+            self.session.query(CaseScanPackage)
+            .filter(CaseScanPackage.case_id == case_id)
+            .order_by(CaseScanPackage.version.desc())
+            .all()
+        )
+
     def stage_rows(self, project_id):
         return (
             self.session.query(ProjectStage)
