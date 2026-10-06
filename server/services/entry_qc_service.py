@@ -10,6 +10,7 @@ from server.repositories.workflow_repository import WorkflowRepository
 import math
 import secrets
 import random
+import json
 from sqlalchemy.exc import IntegrityError
 
 def _user_display_name(user):
@@ -351,7 +352,6 @@ def check_round2_item(db, project_id, case_id, submission_id, request_data: dict
     if any(r.round == 2 for r in existing_rounds):
         raise HTTPException(status_code=409, detail={"code": "round2_finalized", "message": "Vòng kiểm tra này đã được chốt kết quả."})
 
-    import json
     baseline = json.loads(item.baseline_data_json or "{}")
     
     final_data = dict(baseline)
@@ -408,7 +408,6 @@ def finalize_round2(db, project_id, case_id, actor):
 
     policy = get_effective_policy(db, project_id=project_id)
     threshold = policy["error_threshold_percent"]
-    from decimal import Decimal, ROUND_HALF_UP
     rate = (Decimal(error_fields) * 100 / Decimal(total_fields)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
 
     row = CaseEntryQcResult(

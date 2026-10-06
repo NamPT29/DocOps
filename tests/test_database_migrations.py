@@ -820,4 +820,41 @@ def test_scan_packages_revision_is_additive():
         assert "case_scan_packages" not in tables
         assert "case_scan_files" not in tables
 
+def test_entry_qc_round2_revision_is_additive():
+    pytest.importorskip("alembic")
+    from alembic import command
+    from sqlalchemy import inspect
+    from server.migration_runner import _alembic_config, current_database_revision, validate_existing_database
+
+    engine = create_engine("sqlite+pysqlite:///:memory:")
+    config = _alembic_config(ROOT)
+    with engine.begin() as connection:
+        config.attributes["connection"] = connection
+        command.upgrade(config, "0014_entry_qc_resolution")
+        
+        command.upgrade(config, "0015_entry_qc_round2")
+        assert current_database_revision(connection) == "0015_entry_qc_round2"
+        assert validate_existing_database(connection) == []
+        
+        tables = set(inspect(connection).get_table_names())
+        assert "case_entry_qc_samplings" in tables
+        assert "case_entry_qc_sample_items" in tables
+        
+        # Check column exists
+        columns = [c["name"] for c in inspect(connection).get_columns("project_policies")]
+        assert "entry_qc_round2_enabled" in columns
+        
+        command.downgrade(config, "0014_entry_qc_resolution")
+        tables = set(inspect(connection).get_table_names())
+        assert "case_entry_qc_samplings" not in tables
+        assert "case_entry_qc_sample_items" not in tables
+        
+        columns = [c["name"] for c in inspect(connection).get_columns("project_policies")]
+        assert "entry_qc_round2_enabled" not in columns
+        
+        # Up again
+        command.upgrade(config, "0015_entry_qc_round2")
+        tables = set(inspect(connection).get_table_names())
+        assert "case_entry_qc_samplings" in tables
+
 

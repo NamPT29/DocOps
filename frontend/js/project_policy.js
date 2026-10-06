@@ -29,15 +29,23 @@ function fillProjectPolicyForm(policy) {
     projectPolicyFields().forEach(field => {
         const key = field.dataset.policyKey;
         const override = overrides[key];
-        field.value = override === null || override === undefined ? '' : String(override);
-        if (field.tagName === 'SELECT') {
+        if (field.dataset.policyType === 'bool') {
+            field.value = override === true ? 'true' : (override === false ? 'false' : '');
             const defaultOption = field.querySelector('option[value=""]');
-            const profiles = policy.export_profiles || {};
             if (defaultOption) {
-                defaultOption.textContent = `Theo mặc định QC-01: ${profiles[defaults[key]] || defaults[key]}`;
+                defaultOption.textContent = `Theo QC-01 (${defaults[key] ? 'Bật' : 'Tắt'})`;
             }
-        } else if (key !== 'organ_code' && key !== 'file_notation') {
-            field.placeholder = `Mặc định: ${formatPolicyDefault(defaults[key])}`;
+        } else {
+            field.value = override === null || override === undefined ? '' : String(override);
+            if (field.tagName === 'SELECT') {
+                const defaultOption = field.querySelector('option[value=""]');
+                const profiles = policy.export_profiles || {};
+                if (defaultOption) {
+                    defaultOption.textContent = `Theo mặc định QC-01: ${profiles[defaults[key]] || defaults[key]}`;
+                }
+            } else if (key !== 'organ_code' && key !== 'file_notation') {
+                field.placeholder = `Mặc định: ${formatPolicyDefault(defaults[key])}`;
+            }
         }
     });
     const version = document.getElementById('projectPolicyQcVersion');
@@ -53,7 +61,9 @@ function collectProjectPolicyPayload() {
     projectPolicyFields().forEach(field => {
         const key = field.dataset.policyKey;
         const raw = String(field.value || '').trim();
-        if (!raw) {
+        if (field.dataset.policyType === 'bool') {
+            payload[key] = raw === 'true' ? true : (raw === 'false' ? false : null);
+        } else if (!raw) {
             payload[key] = null;
         } else if (field.type === 'number') {
             const number = Number(raw);

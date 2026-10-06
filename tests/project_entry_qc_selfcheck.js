@@ -98,7 +98,11 @@ const sandbox = {
         const bodyStr = options.body ? JSON.parse(options.body) : null;
         requests.push({ url, method: options.method || 'GET', body: bodyStr });
         const route = routes[`${options.method || 'GET'} ${url}`] || routes[`GET ${url}`];
-        if (route) return respond(200, route());
+        if (route) {
+            const res = route();
+            if (res && res._status) return respond(res._status, res._body);
+            return respond(200, res);
+        }
         return respond(404, { status: 'error', detail: 'Not found' });
     },
     WORKFLOW_STATUS_LABELS: { done: 'Xong', in_progress: 'Đang xử lý', pending: 'Chờ' },
@@ -197,11 +201,7 @@ async function runTest() {
     assert.equal(refreshCount, 1);
     
     // 409 error
-    routes['POST /api/projects/1/workflow/cases/2/entry-qc/resolve'] = () => ({ status: 'error', detail: { code: 'c', message: 'Lỗi 409' } });
-    sandbox.authFetch = async (url, opts) => {
-        if (opts && opts.method === 'POST') return respond(409, routes['POST /api/projects/1/workflow/cases/2/entry-qc/resolve']());
-        return respond(200, routes['GET /api/projects/1/workflow/cases/2/entry-qc']());
-    };
+    routes['POST /api/projects/1/workflow/cases/2/entry-qc/resolve'] = () => ({ _status: 409, _body: { status: 'error', detail: { code: 'c', message: 'Lỗi 409' } } });
     promptResult = 'valid';
     refreshCount = 0;
     await btnDuyet.listeners.click();
@@ -220,7 +220,6 @@ async function runTest() {
             }
         })
     };
-    sandbox.authFetch = async (url) => respond(200, routes['GET /api/projects/1/workflow/cases/2/entry-qc']());
     body.replaceChildren();
     await sandbox.openEntryQc(2, 'Box 4');
     overlay = body.children[body.children.length - 1];
@@ -262,6 +261,175 @@ async function runTest() {
     overlay = body.children[body.children.length - 1];
     txt = text(overlay);
     assert.match(txt, /Dự kiến: Không đạt/);
+
+    assert.match(txt, /Dự kiến: Không đạt/);
+    
+    // --- ROUND 2 TESTS ---
+    // (r2a) chưa bật
+    routes = {
+        'GET /api/projects/1/workflow/cases/2/entry-qc': () => ({
+            status: 'ok', data: { gate: { blocked: false }, entry_qc_status: 'done', live: null, rounds: [{ round: 1, passed: true }], round2: { enabled: false } }
+        })
+    };
+    body.replaceChildren();
+    await sandbox.openEntryQc(2, 'Box 7');
+    overlay = body.children[body.children.length - 1];
+    txt = text(overlay);
+    assert.match(txt, /Dự án không bật Check vòng 2/);
+    assert.doesNotMatch(txt, /Lấy mẫu vòng 2/);
+    
+    // (r2b) chưa xong vòng 1
+    routes = {
+        'GET /api/projects/1/workflow/cases/2/entry-qc': () => ({
+            status: 'ok', data: { gate: { blocked: false }, entry_qc_status: 'done', live: null, rounds: [], round2: { enabled: true, sampled: false } }
+        })
+    };
+    body.replaceChildren();
+    await sandbox.openEntryQc(2, 'Box 8');
+    overlay = body.children[body.children.length - 1];
+    txt = text(overlay);
+    assert.match(txt, /Cần xong vòng 1 trước khi lấy mẫu/);
+    assert.doesNotMatch(txt, /Lấy mẫu vòng 2/);
+    
+    // (r2c) lấy mẫu được (đã xong vòng 1)
+    routes = {
+        'GET /api/projects/1/workflow/cases/2/entry-qc': () => ({
+            status: 'ok', data: { gate: { blocked: false }, entry_qc_status: 'done', live: null, rounds: [{ round: 1, passed: true }], round2: { enabled: true, sampled: false } }
+        }),
+        'POST /api/projects/1/workflow/cases/2/entry-qc/round2/sample': () => ({ status: 'ok', data: {} })
+    };
+    body.replaceChildren();
+    await sandbox.openEntryQc(2, 'Box 9');
+    overlay = body.children[body.children.length - 1];
+    txt = text(overlay);
+    assert.match(txt, /Lấy mẫu vòng 2/);
+    
+    let btnSample = find(overlay, n => n.tagName === 'BUTTON' && n.textContent === 'Lấy mẫu vòng 2')[0];
+    confirmResult = false;
+    requests.length = 0;
+    await btnSample.listeners.click();
+    assert.equal(requests.length, 0);
+    
+    confirmResult = true;
+    refreshCount = 0;
+    await btnSample.listeners.click();
+    assert.equal(requests[0].method, 'POST');
+    assert.equal(requests[0].url, '/api/projects/1/workflow/cases/2/entry-qc/round2/sample');
+    assert.equal(refreshCount, 1);
+    
+    // (r2d) đang check dở (không có Chốt vòng 2)
+    routes = {
+        'GET /api/projects/1/workflow/cases/2/entry-qc': () => ({
+            status: 'ok', data: { 
+                gate: { blocked: false }, entry_qc_status: 'done', live: null, rounds: [{ round: 1, passed: true }], 
+                round2: { enabled: true, sampled: true, sampling: { sample_size: 2, population_count: 10, rate_percent: 20 }, items: [
+                    { report_name: 'Rep 1', checked_at: null },
+                    { report_name: 'Rep 2', checked_at: '2026', checked_by_name: 'Admin', changed_field_count: 1, visible_field_count: 5 }
+                ] }
+            }
+        })
+    };
+    body.replaceChildren();
+    await sandbox.openEntryQc(2, 'Box 10');
+    overlay = body.children[body.children.length - 1];
+    txt = text(overlay);
+    assert.match(txt, /Mẫu: 2\/10 phiếu \(tỷ lệ 20%\)/);
+    assert.match(txt, /Chưa check/);
+    assert.match(txt, /Đã check/);
+    assert.match(txt, /1\/5 trường sửa/);
+    assert.doesNotMatch(txt, /Chốt vòng 2/);
+    
+    // (r2e) đủ check chưa chốt
+    routes = {
+        'GET /api/projects/1/workflow/cases/2/entry-qc': () => ({
+            status: 'ok', data: { 
+                gate: { blocked: false }, entry_qc_status: 'done', live: null, rounds: [{ round: 1, passed: true }], 
+                round2: { enabled: true, sampled: true, sampling: { sample_size: 2, population_count: 10, rate_percent: 20 }, items: [
+                    { report_name: 'Rep 1', checked_at: '2026', checked_by_name: 'Admin', changed_field_count: 0, visible_field_count: 5 },
+                    { report_name: 'Rep 2', checked_at: '2026', checked_by_name: 'Admin', changed_field_count: 1, visible_field_count: 5 }
+                ] }
+            }
+        }),
+        'POST /api/projects/1/workflow/cases/2/entry-qc/round2': () => ({ status: 'ok', data: {} })
+    };
+    body.replaceChildren();
+    await sandbox.openEntryQc(2, 'Box 11');
+    overlay = body.children[body.children.length - 1];
+    txt = text(overlay);
+    assert.match(txt, /Chốt vòng 2/);
+    
+    let btnR2Chot = find(overlay, n => n.tagName === 'BUTTON' && n.textContent === 'Chốt vòng 2')[0];
+    confirmResult = false;
+    requests.length = 0;
+    await btnR2Chot.listeners.click();
+    assert.equal(requests.length, 0);
+    
+    confirmResult = true;
+    refreshCount = 0;
+    await btnR2Chot.listeners.click();
+    assert.equal(requests[0].method, 'POST');
+    assert.equal(requests[0].url, '/api/projects/1/workflow/cases/2/entry-qc/round2');
+    assert.equal(refreshCount, 1);
+    
+    // (r2f) vòng 2 không đạt chưa duyệt
+    routes = {
+        'GET /api/projects/1/workflow/cases/2/entry-qc': () => ({
+            status: 'ok', data: { 
+                gate: { blocked: false }, entry_qc_status: 'done', live: null, rounds: [{ round: 1, passed: true }, { round: 2, passed: false, rate_percent: 15, threshold_percent: 5 }], 
+                round2: { enabled: true, sampled: true, sampling: { sample_size: 2, population_count: 10, rate_percent: 20 }, items: [] }
+            }
+        }),
+        'POST /api/projects/1/workflow/cases/2/entry-qc/round2/resolve': () => ({ status: 'ok', data: {} })
+    };
+    body.replaceChildren();
+    await sandbox.openEntryQc(2, 'Box 12');
+    overlay = body.children[body.children.length - 1];
+    txt = text(overlay);
+    assert.match(txt, /Vòng 2: 15% \/ ngưỡng 5% - Không đạt/);
+    assert.match(txt, /Duyệt vòng 2 kèm lý do/);
+    assert.doesNotMatch(txt, /Chốt vòng 2/);
+    
+    let btnR2Duyet = find(overlay, n => n.tagName === 'BUTTON' && n.textContent === 'Duyệt vòng 2 kèm lý do')[0];
+    promptResult = '  duyet r2  ';
+    requests.length = 0;
+    refreshCount = 0;
+    await btnR2Duyet.listeners.click();
+    assert.equal(requests[0].method, 'POST');
+    assert.equal(requests[0].url, '/api/projects/1/workflow/cases/2/entry-qc/round2/resolve');
+    assert.equal(requests[0].body.reason, 'duyet r2');
+    assert.equal(refreshCount, 1);
+    
+    // (r2g) vòng 2 đã duyệt
+    routes = {
+        'GET /api/projects/1/workflow/cases/2/entry-qc': () => ({
+            status: 'ok', data: { 
+                gate: { blocked: false }, entry_qc_status: 'done', live: null, rounds: [{ round: 1, passed: true }, { round: 2, passed: false, resolution: 'approved', resolution_reason: 'OK r2' }], 
+                round2: { enabled: true, sampled: true, sampling: { sample_size: 2, population_count: 10, rate_percent: 20 }, items: [] }
+            }
+        })
+    };
+    body.replaceChildren();
+    await sandbox.openEntryQc(2, 'Box 13');
+    overlay = body.children[body.children.length - 1];
+    txt = text(overlay);
+    assert.match(txt, /Lý do: OK r2/);
+    assert.doesNotMatch(txt, /Duyệt vòng 2 kèm lý do/);
+    
+    // (r2h) vòng 2 đạt
+    routes = {
+        'GET /api/projects/1/workflow/cases/2/entry-qc': () => ({
+            status: 'ok', data: { 
+                gate: { blocked: false }, entry_qc_status: 'done', live: null, rounds: [{ round: 1, passed: true }, { round: 2, passed: true, rate_percent: 2, threshold_percent: 5 }], 
+                round2: { enabled: true, sampled: true, sampling: { sample_size: 2, population_count: 10, rate_percent: 20 }, items: [] }
+            }
+        })
+    };
+    body.replaceChildren();
+    await sandbox.openEntryQc(2, 'Box 14');
+    overlay = body.children[body.children.length - 1];
+    txt = text(overlay);
+    assert.match(txt, /Vòng 2: 2% \/ ngưỡng 5% - Đạt/);
+    assert.doesNotMatch(txt, /Duyệt vòng 2 kèm lý do/);
 
     console.log("All tests passed");
 }

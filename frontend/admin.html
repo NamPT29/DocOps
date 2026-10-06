@@ -665,6 +665,14 @@
                 <div class="input-group"><input type="number" class="form-control" id="policy-box_deadline_days" data-policy-key="box_deadline_days" min="1" max="365" step="1" inputmode="numeric"><span class="input-group-text">ngày</span></div>
                 <div class="form-text">Ngày lịch, tính đủ 24 giờ mỗi ngày kể từ lúc giao.</div>
               </div>
+              <div class="col-md-12">
+                <label class="form-label fw-semibold" for="policy-entry_qc_round2_enabled">Vòng check nhập liệu 2</label>
+                <select class="form-select" id="policy-entry_qc_round2_enabled" data-policy-key="entry_qc_round2_enabled" data-policy-type="bool">
+                  <option value="">Theo mặc định QC-01</option>
+                  <option value="true">Bật</option>
+                  <option value="false">Tắt</option>
+                </select>
+              </div>
             </div>
             <h6 class="text-primary">Định danh hồ sơ (QC-02/03)</h6>
             <div class="row g-3 mb-3">
@@ -1198,8 +1206,8 @@
     <script src="js/project_management.js?v=2.16"></script>
     <script src="js/project_scan_submit.js?v=1.02"></script>
     <script src="js/project_workflow.js?v=1.08"></script>
-    <script src="js/project_entry_qc.js?v=1.01"></script>
-    <script src="js/project_policy.js?v=1.00"></script>
+    <script src="js/project_entry_qc.js?v=1.02"></script>
+    <script src="js/project_policy.js?v=1.01"></script>
     <script src="js/arrangement_catalog.js?v=1.00"></script>
     <script src="js/ocr_image.js?v=2"></script>
     <script src="js/ocr_config.js?v=4"></script>

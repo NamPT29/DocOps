@@ -131,6 +131,78 @@ async function openEntryQc(caseId, caseName) {
             }
         }
         
+        // Vòng 2
+        const r2Div = _entryQcElement('div', 'card mb-3');
+        const r2Header = _entryQcElement('div', 'card-header fw-bold', 'Vòng 2 (Check chéo)');
+        const r2Body = _entryQcElement('div', 'card-body');
+        
+        const round1 = (data.rounds || []).find(r => r.round === 1);
+        const round1Done = round1 && (round1.passed || round1.resolution);
+        const round2 = (data.rounds || []).find(r => r.round === 2);
+        
+        let canFinalizeRound2 = false;
+        let canResolveRound2 = false;
+        let canSampleRound2 = false;
+        
+        if (data.round2) {
+            if (!data.round2.enabled) {
+                r2Body.appendChild(_entryQcElement('div', 'text-muted', 'Dự án không bật Check vòng 2.'));
+            } else {
+                if (!data.round2.sampled) {
+                    if (round1Done) {
+                        canSampleRound2 = true;
+                    } else {
+                        r2Body.appendChild(_entryQcElement('div', 'text-muted', 'Cần xong vòng 1 trước khi lấy mẫu.'));
+                    }
+                } else {
+                    const sample = data.round2.sampling;
+                    const items = data.round2.items || [];
+                    
+                    r2Body.appendChild(_entryQcElement('div', 'fw-bold mb-2', `Mẫu: ${sample.sample_size}/${sample.population_count} phiếu (tỷ lệ ${sample.rate_percent}%)`));
+                    
+                    if (items.length > 0) {
+                        const table = _entryQcElement('table', 'table table-sm table-bordered');
+                        const thead = _entryQcElement('thead', 'table-light');
+                        const htr = _entryQcElement('tr', '');
+                        ['Tên biên bản', 'Trạng thái', 'Người check', 'Trường sửa'].forEach(t => htr.appendChild(_entryQcElement('th', '', t)));
+                        thead.appendChild(htr);
+                        
+                        const tbody = _entryQcElement('tbody', '');
+                        let allChecked = true;
+                        
+                        items.forEach(item => {
+                            const tr = _entryQcElement('tr', '');
+                            tr.appendChild(_entryQcElement('td', '', item.report_name));
+                            if (item.checked_at) {
+                                tr.appendChild(_entryQcElement('td', 'text-success', 'Đã check'));
+                                tr.appendChild(_entryQcElement('td', '', item.checked_by_name || '—'));
+                                tr.appendChild(_entryQcElement('td', '', `${item.changed_field_count}/${item.visible_field_count} trường sửa`));
+                            } else {
+                                allChecked = false;
+                                tr.appendChild(_entryQcElement('td', 'text-warning', 'Chưa check'));
+                                tr.appendChild(_entryQcElement('td', '', '—'));
+                                tr.appendChild(_entryQcElement('td', '', '—'));
+                            }
+                            tbody.appendChild(tr);
+                        });
+                        
+                        table.append(thead, tbody);
+                        r2Body.appendChild(table);
+                        
+                        if (allChecked && !round2) {
+                            canFinalizeRound2 = true;
+                        }
+                    }
+                }
+            }
+            r2Div.append(r2Header, r2Body);
+            contentBox.appendChild(r2Div);
+            
+            if (round2 && round2.passed === false && !round2.resolution) {
+                canResolveRound2 = true;
+            }
+        }
+        
         // 5. Buttons (footer)
         footer.replaceChildren();
         
@@ -138,7 +210,6 @@ async function openEntryQc(caseId, caseName) {
         closeBtn2.addEventListener('click', closeOverlay);
         footer.appendChild(closeBtn2);
         
-        const round1 = (data.rounds || []).find(r => r.round === 1);
         
         if (data.entry_qc_status === 'done' && !round1) {
             const chotBtn = _entryQcElement('button', 'btn btn-primary ms-2', 'Chốt vòng 1');
@@ -195,6 +266,86 @@ async function openEntryQc(caseId, caseName) {
                 }
             });
             footer.appendChild(resolveBtn);
+        }
+        
+        if (canSampleRound2) {
+            const sampleBtn = _entryQcElement('button', 'btn btn-primary ms-2', 'Lấy mẫu vòng 2');
+            sampleBtn.addEventListener('click', async () => {
+                if (!window.confirm('Lấy mẫu ngẫu nhiên cho vòng 2? Sau khi lấy không đổi được.')) return;
+                sampleBtn.disabled = true;
+                const r = await authFetch(`/api/projects/${projectId}/workflow/cases/${caseId}/entry-qc/round2/sample`, { method: 'POST' });
+                    if (!r) {
+                        sampleBtn.disabled = false;
+                        return;
+                    }
+                    const rData = await r.json().catch(() => ({}));
+                    if (!r.ok || rData.status !== 'ok') {
+                        errorBox.textContent = scanSubmitErrorText(rData, 'Lỗi khi lấy mẫu.');
+                        errorBox.classList.remove('d-none');
+                        sampleBtn.disabled = false;
+                    } else {
+                        await render();
+                        if (typeof refreshProjectWorkflow === 'function') refreshProjectWorkflow();
+                    }
+            });
+            footer.appendChild(sampleBtn);
+        }
+        
+        if (canFinalizeRound2) {
+            const r2ChotBtn = _entryQcElement('button', 'btn btn-primary ms-2', 'Chốt vòng 2');
+            r2ChotBtn.addEventListener('click', async () => {
+                if (!window.confirm('Chốt kết quả vòng 2?')) return;
+                r2ChotBtn.disabled = true;
+                const r = await authFetch(`/api/projects/${projectId}/workflow/cases/${caseId}/entry-qc/round2`, { method: 'POST' });
+                if (!r) {
+                    r2ChotBtn.disabled = false;
+                    return;
+                }
+                const rData = await r.json().catch(() => ({}));
+                if (!r.ok || rData.status !== 'ok') {
+                    errorBox.textContent = scanSubmitErrorText(rData, 'Lỗi khi chốt.');
+                    errorBox.classList.remove('d-none');
+                    r2ChotBtn.disabled = false;
+                } else {
+                    await render();
+                    if (typeof refreshProjectWorkflow === 'function') refreshProjectWorkflow();
+                }
+            });
+            footer.appendChild(r2ChotBtn);
+        }
+        
+        if (canResolveRound2) {
+            const r2ResolveBtn = _entryQcElement('button', 'btn btn-warning ms-2', 'Duyệt vòng 2 kèm lý do');
+            r2ResolveBtn.addEventListener('click', async () => {
+                let reason = window.prompt('Nhập lý do duyệt:');
+                if (reason === null) return;
+                reason = reason.trim();
+                if (!reason) return;
+                if (reason.length > 500) {
+                    window.alert('Lý do quá dài (tối đa 500 ký tự).');
+                    return;
+                }
+                r2ResolveBtn.disabled = true;
+                const r = await authFetch(`/api/projects/${projectId}/workflow/cases/${caseId}/entry-qc/round2/resolve`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ reason })
+                });
+                if (!r) {
+                    r2ResolveBtn.disabled = false;
+                    return;
+                }
+                const rData = await r.json().catch(() => ({}));
+                if (!r.ok || rData.status !== 'ok') {
+                    errorBox.textContent = scanSubmitErrorText(rData, 'Lỗi khi duyệt.');
+                    errorBox.classList.remove('d-none');
+                    r2ResolveBtn.disabled = false;
+                } else {
+                    await render();
+                    if (typeof refreshProjectWorkflow === 'function') refreshProjectWorkflow();
+                }
+            });
+            footer.appendChild(r2ResolveBtn);
         }
     }
     
