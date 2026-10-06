@@ -630,3 +630,206 @@ def test_br04_reject_is_not_blocked(world):
     res = _transition(world, world["qc"], c1, "scan_qc", "reject")
     assert res.status_code != 409 or res.json()["detail"].get("code") != "self_review"
 
+def test_entry_qc_api_validations(world):
+    from server.models import ProjectReportUnit, ProjectDocumentAsset, Submission, AssignedDocument
+    client, db = world["client"], world["db"]
+    admin = world["admin"]
+    scanner = world["scanner"]
+    qc = world["qc"]
+    project = world["project"]
+    c1 = world["cases"][0]
+    
+    # Enable entry_qc and assign qc to it
+    world["client"].put(
+        f"/api/projects/{project.id}/workflow",
+        json={"enabled_stages": ["data_entry", "entry_qc"]},
+        headers=world["headers"](admin)
+    )
+    from server.models import ProjectMember
+    db.add(ProjectMember(project_id=project.id, user_id=qc.id, member_role="reviewer", is_active=True))
+    db.commit()
+    
+    # Not DONE -> 409
+    res = client.post(f"/api/projects/{project.id}/workflow/cases/{c1.id}/entry-qc/round1", headers=world["headers"](qc))
+    assert res.status_code == 409
+    assert res.json()["detail"]["code"] == "entry_qc_not_done"
+    
+    # Make entry_qc DONE but no fields
+    # Create 1 report, 1 submission, completed
+    report = ProjectReportUnit(project_id=project.id, case_id=c1.id, report_key="r1", display_name="R1")
+    db.add(report)
+    db.flush()
+    a1 = AssignedDocument(original_filename="a", uuid_filename="u1")
+    db.add(a1)
+    db.flush()
+    doc = ProjectDocumentAsset(project_id=project.id, case_id=c1.id, report_unit_id=report.id, assigned_document_id=a1.id, status="active", relative_path="a", normalized_relative_path="a", original_filename="a", storage_filename="a", byte_size=1, content_sha256="b")
+    db.add(doc)
+    db.flush()
+    sub = Submission(assigned_document_id=a1.id, created_by_user_id=scanner.id, status="completed", data_json="{}")
+    db.add(sub)
+    db.flush()
+    db.commit()
+    
+    res = client.post(f"/api/projects/{project.id}/workflow/cases/{c1.id}/entry-qc/round1", headers=world["headers"](qc))
+    assert res.status_code == 409
+    assert res.json()["detail"]["code"] == "no_fields"
+    
+    # Self review -> scanner shouldn't be able to review
+    world["client"].put(
+        f"/api/projects/{project.id}/workflow",
+        json={"enabled_stages": ["data_entry", "entry_qc"]},
+        headers=world["headers"](admin)
+    )
+    db.add(ProjectMember(project_id=project.id, user_id=scanner.id, member_role="reviewer", is_active=True))
+    db.commit()
+    res = client.post(f"/api/projects/{project.id}/workflow/cases/{c1.id}/entry-qc/round1", headers=world["headers"](scanner))
+    assert res.status_code == 409
+    assert res.json()["detail"]["code"] == "self_review"
+    
+    # 403 Un-authorized
+    outsider = world["outsider"]
+    res = client.post(f"/api/projects/{project.id}/workflow/cases/{c1.id}/entry-qc/round1", headers=world["headers"](outsider))
+    assert res.status_code == 403
+
+def test_entry_qc_calculation_and_snapshot(world):
+    from server.models import ProjectReportUnit, ProjectDocumentAsset, Submission, SubmissionQualityAssessment, ProjectPolicy, AssignedDocument
+    from decimal import Decimal
+    client, db = world["client"], world["db"]
+    admin = world["admin"]
+    qc = world["qc"]
+    project = world["project"]
+    c1 = world["cases"][0]
+    scanner = world["scanner"]
+    
+    # Configure members
+    world["client"].put(
+        f"/api/projects/{project.id}/workflow",
+        json={"enabled_stages": ["data_entry", "entry_qc"]},
+        headers=world["headers"](admin)
+    )
+    from server.models import ProjectMember
+    db.add(ProjectMember(project_id=project.id, user_id=qc.id, member_role="reviewer", is_active=True))
+    db.commit()
+    
+    # Change threshold to 10%
+    db.add(ProjectPolicy(project_id=project.id, error_threshold_percent=Decimal("10.00")))
+    db.commit()
+    
+    # Create 2 reports. r1: 3/50, r2: 1/50 -> Total 4/100 = 4.00%
+    r1 = ProjectReportUnit(project_id=project.id, case_id=c1.id, report_key="r1", display_name="R1")
+    r2 = ProjectReportUnit(project_id=project.id, case_id=c1.id, report_key="r2", display_name="R2")
+    db.add_all([r1, r2])
+    db.flush()
+    
+    a1 = AssignedDocument(original_filename="a1", uuid_filename="u1")
+    a2 = AssignedDocument(original_filename="a2", uuid_filename="u2")
+    db.add_all([a1, a2])
+    db.flush()
+    
+    d1 = ProjectDocumentAsset(project_id=project.id, case_id=c1.id, report_unit_id=r1.id, assigned_document_id=a1.id, status="active", relative_path="a1", normalized_relative_path="a1", original_filename="a1", storage_filename="a1", byte_size=1, content_sha256="b")
+    d2 = ProjectDocumentAsset(project_id=project.id, case_id=c1.id, report_unit_id=r2.id, assigned_document_id=a2.id, status="active", relative_path="a2", normalized_relative_path="a2", original_filename="a2", storage_filename="a2", byte_size=1, content_sha256="b")
+    db.add_all([d1, d2])
+    db.flush()
+    
+    s1 = Submission(assigned_document_id=a1.id, created_by_user_id=scanner.id, status="completed", data_json="{}")
+    s2 = Submission(assigned_document_id=a2.id, created_by_user_id=scanner.id, status="completed", data_json="{}")
+    db.add_all([s1, s2])
+    db.flush()
+    
+    sqa1 = SubmissionQualityAssessment(submission_id=s1.id, input_user_id=scanner.id, visible_field_count=50, changed_field_count=3, is_error_report=False, baseline_data_json="{}")
+    sqa2 = SubmissionQualityAssessment(submission_id=s2.id, input_user_id=scanner.id, visible_field_count=50, changed_field_count=1, is_error_report=False, baseline_data_json="{}")
+    db.add_all([sqa1, sqa2])
+    db.commit()
+    
+    # Call GET
+    res = client.get(f"/api/projects/{project.id}/workflow/cases/{c1.id}/entry-qc", headers=world["headers"](admin))
+    assert res.status_code == 200
+    data = res.json()["data"]
+    assert data["live"]["rate_percent"] == 4.0
+    assert data["live"]["would_pass"] is True
+    
+    # Finalize round 1
+    res = client.post(f"/api/projects/{project.id}/workflow/cases/{c1.id}/entry-qc/round1", headers=world["headers"](qc))
+    assert res.status_code == 200
+    r_data = res.json()["data"]
+    assert r_data["passed"] is True
+    assert r_data["rate_percent"] == 4.0
+    assert r_data["threshold_percent"] == 10.0
+    
+    # Double Finalize -> 409
+    res = client.post(f"/api/projects/{project.id}/workflow/cases/{c1.id}/entry-qc/round1", headers=world["headers"](qc))
+    assert res.status_code == 409
+    assert res.json()["detail"]["code"] == "already_finalized"
+    
+    # Change threshold to 2% and check snapshot
+    policy = db.query(ProjectPolicy).filter_by(project_id=project.id).first()
+    policy.error_threshold_percent = Decimal("2.00")
+    db.commit()
+    
+    res = client.get(f"/api/projects/{project.id}/workflow/cases/{c1.id}/entry-qc", headers=world["headers"](admin))
+    data = res.json()["data"]
+    assert data["rounds"][0]["threshold_percent"] == 10.0  # Kept snapshot
+
+def test_entry_qc_boundary(world):
+    # 5/100 threshold 5 => NOT PASS
+    from server.models import ProjectReportUnit, ProjectDocumentAsset, Submission, SubmissionQualityAssessment, AssignedDocument
+    client, db = world["client"], world["db"]
+    admin = world["admin"]
+    qc = world["qc"]
+    project = world["project"]
+    c1 = world["cases"][0]
+    scanner = world["scanner"]
+    
+    world["client"].put(
+        f"/api/projects/{project.id}/workflow",
+        json={"enabled_stages": ["data_entry", "entry_qc"]},
+        headers=world["headers"](admin)
+    )
+    from server.models import ProjectMember
+    db.add(ProjectMember(project_id=project.id, user_id=admin.id, member_role="reviewer", is_active=True))
+    db.commit()
+    
+    r1 = ProjectReportUnit(project_id=project.id, case_id=c1.id, report_key="r1", display_name="R1")
+    db.add(r1)
+    db.flush()
+    a1 = AssignedDocument(original_filename="a1", uuid_filename="u1")
+    db.add(a1)
+    db.flush()
+    d1 = ProjectDocumentAsset(project_id=project.id, case_id=c1.id, report_unit_id=r1.id, assigned_document_id=a1.id, status="active", relative_path="a1", normalized_relative_path="a1", original_filename="a1", storage_filename="a1", byte_size=1, content_sha256="b")
+    db.add(d1)
+    db.flush()
+    s1 = Submission(assigned_document_id=a1.id, created_by_user_id=scanner.id, status="completed", data_json="{}")
+    db.add(s1)
+    db.flush()
+    # 5 errors in 100 fields
+    sqa1 = SubmissionQualityAssessment(submission_id=s1.id, input_user_id=scanner.id, visible_field_count=100, changed_field_count=5, is_error_report=False, baseline_data_json="{}")
+    db.add(sqa1)
+    db.commit()
+    
+    res = client.post(f"/api/projects/{project.id}/workflow/cases/{c1.id}/entry-qc/round1", headers=world["headers"](admin))
+    assert res.status_code == 200
+    assert res.json()["data"]["passed"] is False  # rate=5, threshold=5 -> rate < threshold is False
+    
+    # 499 / 10000 -> 4.99 -> PASS
+    c2 = world["cases"][1]
+    r2 = ProjectReportUnit(project_id=project.id, case_id=c2.id, report_key="r2", display_name="R2")
+    db.add(r2)
+    db.flush()
+    a2 = AssignedDocument(original_filename="a2", uuid_filename="u2")
+    db.add(a2)
+    db.flush()
+    d2 = ProjectDocumentAsset(project_id=project.id, case_id=c2.id, report_unit_id=r2.id, assigned_document_id=a2.id, status="active", relative_path="a2", normalized_relative_path="a2", original_filename="a2", storage_filename="a2", byte_size=1, content_sha256="b")
+    db.add(d2)
+    db.flush()
+    s2 = Submission(assigned_document_id=a2.id, created_by_user_id=scanner.id, status="completed", data_json="{}")
+    db.add(s2)
+    db.flush()
+    sqa2 = SubmissionQualityAssessment(submission_id=s2.id, input_user_id=scanner.id, visible_field_count=10000, changed_field_count=499, is_error_report=False, baseline_data_json="{}")
+    db.add(sqa2)
+    db.commit()
+    
+    res = client.post(f"/api/projects/{project.id}/workflow/cases/{c2.id}/entry-qc/round1", headers=world["headers"](admin))
+    assert res.status_code == 200
+    assert res.json()["data"]["passed"] is True
+
+

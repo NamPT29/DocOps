@@ -19,3 +19,7 @@ Cổng: python scripts/gate.py  (dùng --static để kiểm nhanh)
 - [x] B2b (giao diện)
 ## BR-04: người check scan không được trùng người scan
 - [x] B3 (chặn check scan trùng người scan)
+## Check nhập hộp
+- [x] C1a (model, service tính toán, API GET/POST round 1)
+- [ ] C1b (nối vào xử lý nền hoặc test bổ sung - TBD)
+- [ ] C2 (TBD)

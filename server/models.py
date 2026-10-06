@@ -928,3 +928,7 @@ from server.models_scan import (  # noqa: E402,F401
     CaseScanPackage,
     CaseScanFile,
 )
+
+from server.models_entry_qc import (  # noqa: E402,F401
+    CaseEntryQcResult,
+)

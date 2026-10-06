@@ -182,3 +182,30 @@ def api_workflow_ready_input_cases(
         ),
     }
 
+from server.services import entry_qc_service
+
+@router.get("/cases/{case_id}/entry-qc")
+def api_get_entry_qc(
+    project_id: int,
+    case_id: int,
+    current_user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    return {
+        "status": "ok",
+        "data": entry_qc_service.get_entry_qc_summary(db, project_id=project_id, case_id=case_id)
+    }
+
+@router.post("/cases/{case_id}/entry-qc/round1")
+def api_finalize_entry_qc_round1(
+    project_id: int,
+    case_id: int,
+    current_user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    return {
+        "status": "ok",
+        "data": entry_qc_service.finalize_round1(db, project_id=project_id, case_id=case_id, actor=current_user)
+    }
+
+
