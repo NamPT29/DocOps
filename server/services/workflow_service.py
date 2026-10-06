@@ -11,6 +11,7 @@ from server.repositories.workflow_repository import WorkflowRepository
 from server.services import account_policy_service as account_policy
 from server.services import workflow_engine as engine
 from server.services.name_utils import _normalize_name
+from server.services.entry_qc_service import check_entry_qc_gate
 
 _CLIENT_ERROR_CODES = {"unknown_stage", "unknown_action", "reason_required"}
 
@@ -494,7 +495,6 @@ def transition_case_stage(db, *, project_id, case_id, stage_key, action, actor, 
                 _check_scan_qc_complete(repository, case_id, is_admin, reason)
                 
         if action == engine.START and engine.previous_enabled(stage_key, enabled) == "entry_qc":
-            from server.services.entry_qc_service import check_entry_qc_gate
             gate = check_entry_qc_gate(db, case_id)
             if gate["blocked"]:
                 raise HTTPException(status_code=409, detail={"code": gate["code"], "message": gate["message"]})

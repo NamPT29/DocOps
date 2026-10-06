@@ -150,7 +150,7 @@ def finalize_round1(db, project_id, case_id, actor):
     db.commit()
     
     # Return same structure as a round object in GET
-    creator_name = _user_display_name(actor) if hasattr(actor, 'full_name') else (actor.get("full_name") or actor.get("username"))
+    creator_name = actor.get("full_name") or actor.get("username")
     return {
         "round": row.round,
         "reports_total": row.reports_total,
@@ -200,10 +200,10 @@ def resolve_round1(db, project_id, case_id, actor, reason: str):
     
     db.commit()
     
-    creator_name = _user_display_name(actor) if hasattr(actor, 'full_name') else (actor.get("full_name") or actor.get("username"))
+    resolver_name = actor.get("full_name") or actor.get("username")
     return {
         "resolution": round1.resolution,
         "resolution_reason": round1.resolution_reason,
-        "resolved_by_name": creator_name,
+        "resolved_by_name": resolver_name,
         "resolved_at": round1.resolved_at.isoformat()
     }

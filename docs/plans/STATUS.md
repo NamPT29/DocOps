@@ -24,5 +24,6 @@ Cổng: python scripts/gate.py  (dùng --static để kiểm nhanh)
 - [ ] C1b (giao diện Check nhập hộp)
 - [x] C1c-1 (backend): hộp vượt ngưỡng BR-07 thì chặn bước sau, Admin duyệt kèm lý do.
 - [x] C1c-1b (sửa lỗi C1c-1, gọn migration, refactor test)
+- [x] C1c-1c (thêm test cổng, dọn code/comment)
 - [ ] C2 (TBD)
 

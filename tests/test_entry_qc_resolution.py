@@ -136,7 +136,6 @@ def test_entry_qc_permissions_and_cross_project(client, test_db, mock_data):
 
 def test_entry_qc_resolve_validations(client, test_db, mock_data):
     p1, c1, admin, reviewer, scanner = mock_data["p1"], mock_data["c1"], mock_data["admin"], mock_data["reviewer"], mock_data["scanner"]
-    print("Can query?", test_db.query(CaseEntryQcResult).all())
     setup_headers(app.dependency_overrides, admin)
     enable_stages(client, p1.id)
     
@@ -166,8 +165,6 @@ def test_entry_qc_resolve_validations_failed_case(client, test_db, mock_data):
     setup_headers(app.dependency_overrides, reviewer)
     assert client.post(f"/api/projects/{p1.id}/workflow/cases/{c1.id}/entry-qc/resolve", json={"reason": "ok"}).status_code == 403
     
-    # admin self review
-    # wait, if admin is the scanner, admin can't resolve!
     make_submission(test_db, p1.id, c1.id, admin["id"], 100, 0)
     setup_headers(app.dependency_overrides, admin)
     res = client.post(f"/api/projects/{p1.id}/workflow/cases/{c1.id}/entry-qc/resolve", json={"reason": "ok"})
@@ -205,12 +202,67 @@ def test_entry_qc_gate_passed(client, test_db, mock_data):
     setup_headers(app.dependency_overrides, admin)
     enable_stages(client, p1.id)
     
-    make_submission(test_db, p1.id, c1.id, scanner["id"], 100, 2)
-    client.post(f"/api/projects/{p1.id}/workflow/cases/{c1.id}/entry-qc/round1")
+    # chưa chốt vòng 1
+    res = client.post(f"/api/projects/{p1.id}/workflow/cases/{c1.id}/stages/normalization/transition", json={"action": "start"})
+    assert res.status_code == 409
+    assert res.json()["detail"]["code"] == "entry_qc_not_finalized"
     
-    # gate: passed round -> start next stage ok
+    # get entry-qc -> blocked
+    res = client.get(f"/api/projects/{p1.id}/workflow/cases/{c1.id}/entry-qc")
+    assert res.json()["data"]["gate"]["blocked"] is True
+    assert res.json()["data"]["gate"]["code"] == "entry_qc_not_finalized"
+    
+    # vòng 1 không đạt
+    make_submission(test_db, p1.id, c1.id, scanner["id"], 100, 10)
+    res = client.post(f"/api/projects/{p1.id}/workflow/cases/{c1.id}/entry-qc/round1")
+    assert res.status_code == 200
+    
+    res = client.post(f"/api/projects/{p1.id}/workflow/cases/{c1.id}/stages/normalization/transition", json={"action": "start"})
+    assert res.status_code == 409
+    assert res.json()["detail"]["code"] == "entry_qc_failed"
+    assert "10.0%" in res.json()["detail"]["message"]
+    assert "5.0%" in res.json()["detail"]["message"]
+    
+    # get entry-qc -> blocked failed
+    res = client.get(f"/api/projects/{p1.id}/workflow/cases/{c1.id}/entry-qc")
+    assert res.json()["data"]["gate"]["blocked"] is True
+    assert res.json()["data"]["gate"]["code"] == "entry_qc_failed"
+    
+    # sau resolve -> passed
+    res = client.post(f"/api/projects/{p1.id}/workflow/cases/{c1.id}/entry-qc/resolve", json={"reason": "ok"})
+    assert res.status_code == 200
+    
     res = client.post(f"/api/projects/{p1.id}/workflow/cases/{c1.id}/stages/normalization/transition", json={"action": "start"})
     assert res.status_code == 200
+    
+    # get entry-qc -> not blocked
+    res = client.get(f"/api/projects/{p1.id}/workflow/cases/{c1.id}/entry-qc")
+    assert res.json()["data"]["gate"]["blocked"] is False
+    
+def test_entry_qc_gate_skipped_if_not_enabled(client, test_db, mock_data):
+    p1, c1, admin = mock_data["p1"], mock_data["c1"], mock_data["admin"]
+    setup_headers(app.dependency_overrides, admin)
+    
+    # dự án KHÔNG bật entry_qc
+    client.put(f"/api/projects/{p1.id}/workflow", json={"enabled_stages": ["data_entry", "normalization", "handover"]})
+    
+    make_submission(test_db, p1.id, c1.id, mock_data["scanner"]["id"], 100, 2)
+    
+    res = client.post(f"/api/projects/{p1.id}/workflow/cases/{c1.id}/stages/normalization/transition", json={"action": "start"})
+    assert res.status_code == 200
+
+def test_entry_qc_gate_blocks_next_available_stage(client, test_db, mock_data):
+    p1, c1, admin = mock_data["p1"], mock_data["c1"], mock_data["admin"]
+    setup_headers(app.dependency_overrides, admin)
+    
+    # bật [data_entry, entry_qc, handover] (tắt Chuẩn hóa)
+    client.put(f"/api/projects/{p1.id}/workflow", json={"enabled_stages": ["data_entry", "entry_qc", "handover"]})
+    
+    make_submission(test_db, p1.id, c1.id, mock_data["scanner"]["id"], 100, 2)
+    
+    res = client.post(f"/api/projects/{p1.id}/workflow/cases/{c1.id}/stages/handover/transition", json={"action": "start"})
+    assert res.status_code == 409
+    assert res.json()["detail"]["code"] == "entry_qc_not_finalized"
 
 def test_entry_qc_snapshot(client, test_db, mock_data):
     p1, c1, admin, scanner = mock_data["p1"], mock_data["c1"], mock_data["admin"], mock_data["scanner"]
