@@ -451,3 +451,142 @@ def test_api_contract_round2_structure(client, test_db, mock_data):
     
     expected_item_keys = {"submission_id", "report_name", "checked", "checked_by_name", "changed_field_count", "visible_field_count"}
     assert set(item_data.keys()) == expected_item_keys
+
+def test_round2_get_item_permissions(client, test_db, mock_data):
+    admin = mock_data["admin"]
+    reviewer = mock_data["reviewer"]
+    p1 = mock_data["p1"]
+    c1 = mock_data["c1"]
+    
+    make_submissions(test_db, p1.id, c1.id, admin["id"], 5)
+    setup_headers(client.app.dependency_overrides, admin)
+    client.post(f"/api/projects/{p1.id}/workflow/cases/{c1.id}/entry-qc/round2/sample")
+    
+    sampling = test_db.query(CaseEntryQcSampling).filter_by(case_id=c1.id).first()
+    item = test_db.query(CaseEntryQcSampleItem).filter_by(sampling_id=sampling.id).first()
+    sid = item.submission_id
+    
+    # Not part of project
+    outsider = User(username="out", role="user", password="")
+    test_db.add(outsider)
+    test_db.commit()
+    setup_headers(client.app.dependency_overrides, {"id": outsider.id, "username": "out", "role": "user"})
+    assert client.get(f"/api/projects/{p1.id}/workflow/cases/{c1.id}/entry-qc/round2/items/{sid}").status_code == 403
+    
+    # Self review (Admin inputted this submission)
+    setup_headers(client.app.dependency_overrides, admin)
+    assert client.get(f"/api/projects/{p1.id}/workflow/cases/{c1.id}/entry-qc/round2/items/{sid}").status_code == 409
+    
+    # Reviewer can view
+    setup_headers(client.app.dependency_overrides, reviewer)
+    res = client.get(f"/api/projects/{p1.id}/workflow/cases/{c1.id}/entry-qc/round2/items/{sid}")
+    assert res.status_code == 200
+    assert res.json()["data"]["submission_id"] == sid
+
+def test_round2_get_item_fields(client, test_db, mock_data):
+    admin = mock_data["admin"]
+    reviewer = mock_data["reviewer"]
+    p1 = mock_data["p1"]
+    c1 = mock_data["c1"]
+    
+    # Setup schema with hidden column
+    p1.form_schema_json_snapshot = json.dumps([{
+        "fields": [
+            {"name": "f1", "label": "L1", "type": "text", "col_index": 0},
+            {"name": "f2", "label": "L2", "type": "text", "col_index": 1}
+        ]
+    }])
+    p1.template_config_json_snapshot = json.dumps({"hidden_cols": [2]})
+    test_db.commit()
+    
+    subs = make_submissions(test_db, p1.id, c1.id, admin["id"], 5)
+    
+    setup_headers(client.app.dependency_overrides, admin)
+    client.post(f"/api/projects/{p1.id}/workflow/cases/{c1.id}/entry-qc/round2/sample")
+    
+    sampling = test_db.query(CaseEntryQcSampling).filter_by(case_id=c1.id).first()
+    item = test_db.query(CaseEntryQcSampleItem).filter_by(sampling_id=sampling.id).first()
+    sid = item.submission_id
+    
+    # Set data_json for this specific submission
+    sub = test_db.query(Submission).get(sid)
+    sub.data_json = json.dumps({"f1": "v1", "f2": "v2"})
+    
+    # Also we need to update the baseline data in the item because sampling took a snapshot of it when data_json was empty
+    item.baseline_data_json = sub.data_json
+    test_db.commit()
+    
+    setup_headers(client.app.dependency_overrides, reviewer)
+    res = client.get(f"/api/projects/{p1.id}/workflow/cases/{c1.id}/entry-qc/round2/items/{sid}")
+    assert res.status_code == 200
+    fields = res.json()["data"]["fields"]
+    
+    assert len(fields) == 1
+    assert fields[0]["name"] == "f1"
+    assert fields[0]["label"] == "L1"
+    assert fields[0]["value"] == "v1"
+    
+    # Check item and update final data
+    client.put(f"/api/projects/{p1.id}/workflow/cases/{c1.id}/entry-qc/round2/items/{sid}", json={"data": {"f1": "new_v1"}})
+    
+    res = client.get(f"/api/projects/{p1.id}/workflow/cases/{c1.id}/entry-qc/round2/items/{sid}")
+    assert res.json()["data"]["fields"][0]["value"] == "new_v1"
+
+def test_round2_gate_states(client, test_db, mock_data):
+    admin = mock_data["admin"]
+    p1 = mock_data["p1"]
+    c1 = mock_data["c1"]
+    setup_headers(client.app.dependency_overrides, admin)
+    make_submissions(test_db, p1.id, c1.id, mock_data["reviewer"]["id"], 5)
+    
+    from server.services.entry_qc_service import check_entry_qc_gate
+    
+    # No round2 sample
+    gate = check_entry_qc_gate(test_db, p1.id, c1.id)
+    assert gate["blocked"] is True
+    assert gate["code"] == "entry_qc_round2_required"
+    
+    client.post(f"/api/projects/{p1.id}/workflow/cases/{c1.id}/entry-qc/round2/sample")
+    
+    # Pending round2
+    gate = check_entry_qc_gate(test_db, p1.id, c1.id)
+    assert gate["blocked"] is True
+    assert gate["code"] == "entry_qc_round2_pending"
+    
+    # Disable round2 in policy
+    pol = test_db.query(ProjectPolicy).first()
+    pol.entry_qc_round2_enabled = False
+    test_db.commit()
+    gate = check_entry_qc_gate(test_db, p1.id, c1.id)
+    assert gate["blocked"] is False
+    
+def test_round2_count_current_data(client, test_db, mock_data):
+    admin = mock_data["admin"]
+    reviewer = mock_data["reviewer"]
+    p1 = mock_data["p1"]
+    c1 = mock_data["c1"]
+    
+    subs = make_submissions(test_db, p1.id, c1.id, admin["id"], 5)
+    
+    setup_headers(client.app.dependency_overrides, admin)
+    client.post(f"/api/projects/{p1.id}/workflow/cases/{c1.id}/entry-qc/round2/sample")
+    
+    sampling = test_db.query(CaseEntryQcSampling).filter_by(case_id=c1.id).first()
+    item = test_db.query(CaseEntryQcSampleItem).filter_by(sampling_id=sampling.id).first()
+    sid = item.submission_id
+    
+    sub = test_db.query(Submission).get(sid)
+    sub.data_json = json.dumps({"f1": "v1"})
+    item.baseline_data_json = sub.data_json
+    test_db.commit()
+    
+    # Someone modifies the submission after sampling
+    sub.data_json = json.dumps({"f1": "v1_updated"})
+    test_db.commit()
+    
+    setup_headers(client.app.dependency_overrides, reviewer)
+    # Check item without modifying what's currently in submission
+    client.put(f"/api/projects/{p1.id}/workflow/cases/{c1.id}/entry-qc/round2/items/{sid}", json={"data": {"f1": "v1_updated"}})
+    
+    item = test_db.query(CaseEntryQcSampleItem).filter_by(submission_id=sid).first()
+    assert item.changed_field_count == 0

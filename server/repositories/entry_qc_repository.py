@@ -139,3 +139,19 @@ class EntryQcRepository:
 
     def get_sample_items(self, sampling_id: int) -> list[CaseEntryQcSampleItem]:
         return self.session.query(CaseEntryQcSampleItem).filter_by(sampling_id=sampling_id).all()
+
+    def get_sample_item(self, case_id: int, round_num: int, submission_id: int) -> CaseEntryQcSampleItem | None:
+        return (
+            self.session.query(CaseEntryQcSampleItem)
+            .join(CaseEntryQcSampling, CaseEntryQcSampling.id == CaseEntryQcSampleItem.sampling_id)
+            .filter(
+                CaseEntryQcSampling.case_id == case_id,
+                CaseEntryQcSampling.round == round_num,
+                CaseEntryQcSampleItem.submission_id == submission_id
+            )
+            .first()
+        )
+
+    def get_project(self, project_id: int):
+        from server.models import Project
+        return self.session.query(Project).get(project_id)

@@ -18,7 +18,7 @@ def _user_display_name(user):
         return None
     return user.full_name if user.full_name else user.username
 
-def check_entry_qc_gate(db, case_id):
+def check_entry_qc_gate(db, project_id, case_id):
     repo = EntryQcRepository(db)
     existing_rounds = repo.get_rounds(case_id)
     round1 = next((r for r in existing_rounds if r.round == 1), None)
@@ -26,6 +26,20 @@ def check_entry_qc_gate(db, case_id):
         return {"blocked": True, "code": "entry_qc_not_finalized", "message": "Hộp chưa chốt kết quả Check nhập liệu."}
     if not round1.passed and round1.resolution != "approved":
         return {"blocked": True, "code": "entry_qc_failed", "message": f"Hộp không đạt ngưỡng lỗi: {float(round1.rate_percent)}% (cần dưới {float(round1.threshold_percent)}%). Cần Admin duyệt kèm lý do."}
+        
+    policy = get_effective_policy(db, project_id=project_id)
+    if policy.get("entry_qc_round2_enabled", True):
+        sampling = repo.get_sampling(case_id, 2)
+        if not sampling:
+            return {"blocked": True, "code": "entry_qc_round2_required", "message": "Hộp chưa làm Check nhập vòng 2."}
+            
+        round2 = next((r for r in existing_rounds if r.round == 2), None)
+        if not round2:
+            return {"blocked": True, "code": "entry_qc_round2_pending", "message": "Check nhập vòng 2 chưa chốt."}
+            
+        if not round2.passed and round2.resolution != "approved":
+            return {"blocked": True, "code": "entry_qc_round2_failed", "message": f"Vòng 2 không đạt ngưỡng lỗi: {float(round2.rate_percent)}% (cần dưới {float(round2.threshold_percent)}%). Cần Admin duyệt kèm lý do."}
+
     return {"blocked": False, "code": None, "message": None}
 
 def _check_permission(db, project_id, case_id, actor):
@@ -116,7 +130,7 @@ def get_entry_qc_summary(db, project_id, case_id, actor):
         }
         
     return {
-        "gate": check_entry_qc_gate(db, case_id),
+        "gate": check_entry_qc_gate(db, project_id, case_id),
         "entry_qc_status": entry_qc_status,
         "live": live,
         "rounds": rounds,
@@ -316,7 +330,7 @@ def sample_round2(db, project_id, case_id, actor):
     db.commit()
     return {"message": "Đã lấy mẫu vòng 2."}
 
-def check_round2_item(db, project_id, case_id, submission_id, request_data: dict, actor):
+def _check_round2_item_access(db, project_id, case_id, submission_id, actor):
     repo = EntryQcRepository(db)
     _check_permission(db, project_id, case_id, actor)
 
@@ -324,39 +338,47 @@ def check_round2_item(db, project_id, case_id, submission_id, request_data: dict
     if not sampling:
         raise HTTPException(status_code=404, detail={"code": "not_found", "message": "Không tìm thấy mẫu."})
 
-    item = repo.get_sample_item_for_update(case_id, 2, submission_id)
+    item = repo.get_sample_item(case_id, 2, submission_id)
     if not item:
         raise HTTPException(status_code=404, detail={"code": "not_found", "message": "Phiếu không thuộc mẫu của hộp này."})
-
-    if item.checked_at is not None:
-        raise HTTPException(status_code=409, detail={"code": "already_checked", "message": "Phiếu này đã được check."})
 
     submission = repo.get_submission(submission_id)
     if not submission:
         raise HTTPException(status_code=404, detail={"code": "not_found", "message": "Không tìm thấy phiếu."})
         
-    if submission.status != 'completed':
-        raise HTTPException(status_code=409, detail={"code": "submission_changed", "message": "Phiếu đã thay đổi trạng thái."})
-
     if submission.created_by_user_id == actor["id"]:
         raise HTTPException(status_code=409, detail={"code": "self_review", "message": "Người check nhập liệu không được trùng người nhập liệu."})
 
     assessment = repo.get_quality_assessment(submission_id)
     if assessment and assessment.reviewer_user_id == actor["id"]:
         raise HTTPException(status_code=409, detail={"code": "self_review", "message": "Người check vòng 2 không được trùng người đã duyệt vòng 1."})
+        
+    return repo, item, submission
+
+def check_round2_item(db, project_id, case_id, submission_id, request_data: dict, actor):
+    repo, item, submission = _check_round2_item_access(db, project_id, case_id, submission_id, actor)
+    
+    # Needs a separate lock for update
+    item = repo.get_sample_item_for_update(case_id, 2, submission_id)
+
+    if item.checked_at is not None:
+        raise HTTPException(status_code=409, detail={"code": "already_checked", "message": "Phiếu này đã được check."})
+
+    if submission.status != 'completed':
+        raise HTTPException(status_code=409, detail={"code": "submission_changed", "message": "Phiếu đã thay đổi trạng thái."})
 
     existing_rounds = repo.get_rounds(case_id)
     if any(r.round == 2 for r in existing_rounds):
         raise HTTPException(status_code=409, detail={"code": "round2_finalized", "message": "Vòng kiểm tra này đã được chốt kết quả."})
 
-    baseline = json.loads(item.baseline_data_json or "{}")
+    current = json.loads(submission.data_json or "{}")
     
-    final_data = dict(baseline)
+    final_data = dict(current)
     for k, v in request_data.items():
         if isinstance(k, str) and not k.startswith("_"):
             final_data[k] = v
             
-    visible_count, changed_count = SubmissionQualityService.count_field_changes(db, submission, baseline, final_data)
+    visible_count, changed_count = SubmissionQualityService.count_field_changes(db, submission, current, final_data)
 
     item.final_data_json = json.dumps(final_data, ensure_ascii=False)
     item.visible_field_count = visible_count
@@ -372,6 +394,65 @@ def check_round2_item(db, project_id, case_id, submission_id, request_data: dict
 
     db.commit()
     return {"message": "Đã lưu kết quả check."}
+
+def get_round2_item(db, project_id, case_id, submission_id, actor):
+    repo, item, submission = _check_round2_item_access(db, project_id, case_id, submission_id, actor)
+    
+    current = json.loads(submission.data_json or "{}")
+    final_data = json.loads(item.final_data_json or "{}") if item.checked_at else None
+    
+    # We need to get the schema from the project, which is done by SubmissionQualityService
+    from server.services.submission_quality_service import _json_dict, _visible_schema_fields
+    project = repo.get_project(project_id)
+    try:
+        schema = json.loads(project.form_schema_json_snapshot or "[]")
+    except (TypeError, ValueError, json.JSONDecodeError):
+        schema = []
+        
+    config = _json_dict(project.template_config_json_snapshot)
+    if project.template_id:
+        from server.repositories.template_repository import TemplateRepository
+        template = TemplateRepository(db).get(project.template_id)
+        if template:
+            config.update(_json_dict(template.config_json))
+            
+    fields = _visible_schema_fields(schema, config)
+    
+    for f in fields:
+        name = f["name"]
+        if item.checked_at:
+            f["value"] = final_data.get(name)
+        else:
+            f["value"] = current.get(name)
+
+    from server.services.submission_helpers import _pdf_url
+    
+    from server.repositories.document_repository import DocumentRepository
+    document = DocumentRepository(db).get(submission.assigned_document_id)
+    report_name = document.original_filename if document else "Unknown"
+    
+    return {
+        "submission_id": item.submission_id,
+        "report_name": report_name,
+        "checked": item.checked_at is not None,
+        "checked_by_name": _user_display_name(item.checked_by) if item.checked_at else None,
+        "changed_field_count": item.changed_field_count,
+        "visible_field_count": item.visible_field_count,
+        "fields": fields,
+        "pdf_url": f"/api/projects/{project_id}/workflow/cases/{case_id}/entry-qc/round2/items/{submission_id}/pdf"
+    }
+
+def get_round2_item_pdf(db, project_id, case_id, submission_id, actor):
+    repo, item, submission = _check_round2_item_access(db, project_id, case_id, submission_id, actor)
+    
+    from server.repositories.document_repository import DocumentRepository
+    document = DocumentRepository(db).get(submission.assigned_document_id)
+    if not document:
+        raise HTTPException(status_code=404, detail="File không tồn tại")
+        
+    from server.services.submission_helpers import create_document_file_response
+    from server.settings import settings
+    return create_document_file_response(document, str(settings.pdf_storage_path))
 
 def finalize_round2(db, project_id, case_id, actor):
     repo = EntryQcRepository(db)

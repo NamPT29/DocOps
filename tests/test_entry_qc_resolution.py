@@ -64,7 +64,7 @@ def mock_data(test_db):
     test_db.add_all([p1, p2])
     test_db.commit()
     
-    test_db.add(ProjectPolicy(project_id=p1.id, error_threshold_percent=5))
+    test_db.add(ProjectPolicy(project_id=p1.id, error_threshold_percent=5, entry_qc_round2_enabled=False))
     test_db.add(ProjectMember(project_id=p1.id, user_id=reviewer.id, member_role="reviewer", is_active=True))
     test_db.add(ProjectMember(project_id=p2.id, user_id=reviewer2.id, member_role="reviewer", is_active=True))
     test_db.commit()

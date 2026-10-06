@@ -495,7 +495,7 @@ def transition_case_stage(db, *, project_id, case_id, stage_key, action, actor, 
                 _check_scan_qc_complete(repository, case_id, is_admin, reason)
                 
         if action == engine.START and engine.previous_enabled(stage_key, enabled) == "entry_qc":
-            gate = check_entry_qc_gate(db, case_id)
+            gate = check_entry_qc_gate(db, project_id, case_id)
             if gate["blocked"]:
                 raise HTTPException(status_code=409, detail={"code": gate["code"], "message": gate["message"]})
 

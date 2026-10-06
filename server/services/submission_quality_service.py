@@ -87,7 +87,7 @@ def _error_report_threshold_percent(db, submission: Submission) -> float:
         return float(DEFAULT_ERROR_REPORT_THRESHOLD_PERCENT)
 
 
-def _visible_schema_field_names(schema: object, config: dict) -> list[str]:
+def _visible_schema_fields(schema: object, config: dict) -> list[dict]:
     configured_hidden_columns = config.get("hidden_cols", [])
     if not isinstance(configured_hidden_columns, (list, tuple, set)):
         configured_hidden_columns = []
@@ -96,7 +96,7 @@ def _visible_schema_field_names(schema: object, config: dict) -> list[str]:
         for column in configured_hidden_columns
         if str(column).strip().isdigit() and int(column) > 0
     }
-    names: list[str] = []
+    result_fields: list[dict] = []
     seen: set[str] = set()
     for category in schema if isinstance(schema, list) else []:
         if not isinstance(category, dict):
@@ -120,8 +120,16 @@ def _visible_schema_field_names(schema: object, config: dict) -> list[str]:
             ):
                 continue
             seen.add(name)
-            names.append(name)
-    return names
+            result_fields.append({
+                "name": name,
+                "label": field.get("label"),
+                "type": field.get("type"),
+                "options": field.get("options")
+            })
+    return result_fields
+
+def _visible_schema_field_names(schema: object, config: dict) -> list[str]:
+    return [f["name"] for f in _visible_schema_fields(schema, config)]
 
 
 def _visible_field_names(

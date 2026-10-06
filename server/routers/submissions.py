@@ -1218,30 +1218,6 @@ def api_get_pdf_file(
         ):
             raise HTTPException(status_code=403, detail="Không có quyền truy cập file")
 
-    filepath = os.path.join(PDF_STORAGE_PATH, safe_filename)
-    if not os.path.isfile(filepath):
-        raise HTTPException(status_code=404, detail="File không tồn tại")
-
-    extension = os.path.splitext(safe_filename)[1].lower()
-    media_types = {
-        ".pdf": "application/pdf",
-        ".png": "image/png",
-        ".jpg": "image/jpeg",
-        ".jpeg": "image/jpeg",
-        ".webp": "image/webp",
-    }
-    media_type = media_types.get(extension)
-    if not media_type:
-        raise HTTPException(status_code=415, detail="Định dạng file không được hỗ trợ")
-
-    encoded_name = quote(str(original_filename), safe="")
-    return FileResponse(
-        filepath,
-        media_type=media_type,
-        headers={
-            "Cache-Control": "private, no-store",
-            "Content-Disposition": f"inline; filename*=UTF-8''{encoded_name}",
-            "X-Content-Type-Options": "nosniff",
-        },
-    )
+    from server.services.submission_helpers import create_document_file_response
+    return create_document_file_response(document, PDF_STORAGE_PATH)
 
