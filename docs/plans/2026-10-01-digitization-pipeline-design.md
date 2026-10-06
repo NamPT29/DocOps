@@ -173,13 +173,71 @@ Giao diện: Tab **Dự án → Thao tác → Quy trình số hóa** (`frontend/
 
 ## Nộp S (04/10, nhiệm vụ 4b, FR-SCN-01, revision `0011_scan_packages`)
 
-- Người scan **KHÔNG CÓ TÀI KHOẢN**. Danh tính người scan là TÊN đọc từ thư mục (`scanned_by_name`). Lưu nguyên văn, chỉ cắt khoảng trắng đầu/cuối, dùng cho sản lượng QC-06.
-  + Cấu hình vị trí tên: `scan_user_name_level` (mặc định 1 = thư mục cha của thư mục hộp, ví dụ `<Tên người scan>\<Số hộp>\<Số hồ sơ>\*.pdf`; 0 = không có tên). Nếu không tìm thấy tên ở vị trí quy định thì cảnh báo "chưa có tên người scan".
-  + `scanned_by_user_id` là TÙY CHỌN: ghi khi tên (bỏ dấu, khoảng trắng/gạch, không phân biệt hoa thường) khớp đúng MỘT thành viên thuộc `project_stage_members` của bước 'scan'. Không khớp thì để NULL (trường hợp BÌNH THƯỜNG).
-- Máy chủ xử lý trực tiếp thư mục `DOCUMENT_SOURCE_ROOT`, không tải file qua web client. Không bị chặn bởi bước Chỉnh lý (không bật trong quy trình dự án 10/10).
-- Khi bấm Nộp S (START): `assigned_user_id` của bước Scan được gán bằng `scanned_by_user_id` nếu có, ngược lại NULL. Không bao giờ gán bằng người bấm (workflow_service.py). Ngày 05/10 sẽ bổ sung chặn người duyệt CS có tên khớp `scanned_by_name`.
-- Xử lý PDF NHIỀU TRANG: đếm trang bằng `pypdf`, xử lý TUẦN TỰ từng file (không mở song song file lớn), truyền stream file vào `pypdf`. Đọc `MediaBox/Rotate/UserUnit` (`strict=False`), phân loại khổ TỪNG TRANG cộng vào `a0_pages`...`a5_pages` (QC-06). PDF 0 trang/cụt/mã hóa -> page_count = -1 + lỗi (cụt thì báo "có thể chép dở"). Cập nhật tiến độ theo từng file/lô nhỏ.
-- Check scan cho ngày 10/10 (phương án a): Người check kiểm ngoài hệ thống trước khi push lên máy chủ; hệ thống chỉ tự so khớp thư mục (BR-01) và người check bấm "Duyệt". Phương án (b) mở từng file trong hệ thống để sau 10/10. Khác BA v1.0.
+Code: `server/services/scan_ingestion_service.py`, `server/repositories/scan_repository.py`,
+API trong `server/routers/projects.py`, bảng `case_scan_packages` / `case_scan_files` (`server/models_scan.py`,
+migration `0011_scan_packages`), giao diện `frontend/js/project_scan_submit.js`.
+
+1. **Điều kiện nộp và mã lỗi** (`POST /api/projects/{pid}/cases/{cid}/scan-packages`, body
+   `{folder_path, scan_user_name_level=1}`; chỉ Admin):
+   - 403: không phải Admin. 422: body sai kiểu.
+   - 404: dự án không tồn tại; hộp không tồn tại hoặc không thuộc dự án.
+   - 400: `scan_user_name_level < 0`; thư mục không hợp lệ hoặc nằm ngoài `DOCUMENT_SOURCE_ROOT`.
+   - 409: số hộp không khớp; dự án chưa bật bước Scan; bước Scan đã `done`; bước `scan_qc` đã rời
+     `pending`; hộp đang có gói `processing`; bước liền trước Scan (vd. Chỉnh lý nếu được bật)
+     chưa xong (`{code: stage_blocked, message}` do `transition_case_stage` trả về).
+   - Trạng thái Scan: chưa có dòng = `pending`. `pending`/`rejected` → chuyển START (ghi sự kiện);
+     `in_progress` → chỉ thêm gói, không chuyển bước.
+2. **Khớp số hộp**: số hộp của hộp = N trong khóa `::muc-luc/hop-N` (hộp chờ scan), nếu không thì
+   dãy số ĐẦU TIÊN trong `case_key`, rồi trong tên hiển thị. Số của thư mục = dãy số đầu tiên trong
+   tên thư mục được chọn. So theo giá trị (`0020` = 20); thiếu số hoặc lệch → 409.
+3. **Tên người scan và người phụ trách**:
+   - Người scan không cần tài khoản. `scanned_by_name` = tên thư mục nằm `scan_user_name_level` cấp
+     phía trên thư mục hộp (1 = thư mục cha; 0 = không lấy tên), lưu nguyên tên thư mục.
+     Đường dẫn không đủ cấp → cờ `missing_scan_user`.
+   - `scanned_by_user_id`: khi tên (bỏ dấu, đ→d, bỏ khoảng trắng/`_`/`-`, chữ thường) khớp
+     `full_name` hoặc `username` của ĐÚNG MỘT thành viên bước Scan của dự án; không khớp → NULL.
+   - Sau mỗi lần nộp, `assigned_user_id` của bước Scan được ghi đè bằng `scanned_by_user_id`
+     (hoặc NULL), kể cả khi START vừa gán Admin bấm nút.
+4. **Phiên bản gói**: mỗi lần nộp tạo gói mới, `version` = phiên bản lớn nhất của hộp + 1 (S1, S2,
+   ...; khóa `with_for_update`; duy nhất theo (hộp, version)). Mỗi hộp tối đa MỘT gói `processing`:
+   kiểm ở service (409) và bằng chỉ mục duy nhất có điều kiện `status = 'processing'` trong DB.
+5. **Xử lý nền** (`process_scan_package_background`, chạy bằng BackgroundTasks):
+   - Duyệt mọi file trong thư mục (đệ quy), ghi `total_files` và commit NGAY trước khi đọc file.
+   - Lấy mẫu kích thước + mtime hai lần cách nhau 2,5 giây; file thay đổi → `incomplete`
+     (cờ `incomplete_files`); file biến mất giữa hai lần → bỏ qua.
+   - Không phải `.pdf` → `not_pdf` (cờ `non_pdf_files`), vẫn tính vào `processed_files`.
+   - PDF đọc tuần tự bằng `pypdf` (`strict=False`); mã hóa, 0 trang hoặc đọc lỗi (vd. file cụt)
+     → `error`, `page_count = -1`, `error_message` "Lỗi đọc PDF: ..." (cờ `error_files`), tính vào
+     `failed_files`. Một file lỗi KHÔNG làm hỏng cả gói: gói vẫn `done`.
+   - Tiến độ (`processed_files`, `failed_files`) commit sau mỗi file PDF và khi kết thúc.
+   - Kết thúc: `done`, `finished_at`; cờ mới được GỘP với cờ đã có lúc nộp (không ghi đè).
+   - Gói `failed` (kèm `error_message`, `finished_at`): thiếu thư viện `pypdf`, hoặc bất kỳ lỗi
+     ngoài dự kiến; khi lỗi DB thì rollback, nạp lại gói rồi mới đánh `failed`, nên gói không kẹt
+     `processing`.
+   - Khởi động máy chủ (`run_startup_maintenance` trong `server/main.py`, khi DB đã migrate):
+     `fail_stuck_processing_packages` chuyển mọi gói còn `processing` thành `failed`
+     ("Hệ thống bị tắt đột ngột khi đang xử lý").
+6. **QC-06**: khổ của TỪNG TRANG tính theo diện tích `MediaBox × UserUnit` (trang xoay 90/270 đổi
+   chiều, diện tích không đổi), so với A5, A4, A3, A2, A1, A0; vượt khổ quá 10 % diện tích thì tính
+   lên khổ kế tiếp, lớn hơn A0 tính A0; nhỏ hơn A5 tính A5. Quy đổi:
+   `A4 quy đổi = A5×1 + A4×1 + A3×2 + A2×4 + A1×8 + A0×16`, cộng vào `total_pages` và
+   `total_a4_equivalent` của gói.
+7. **Giao diện** (Quy trình số hóa → tab Hồ sơ):
+   - Nút "Nộp S" trong ô Scan khi: Scan đang `in_progress`, hoặc `pending`/`rejected` và
+     `available !== false`; đồng thời `scan_qc` (nếu bật) còn `pending` (`scanSubmitCanSubmit`).
+   - Hộp thoại chọn thư mục từ `GET /api/documents/server-folders` (vào thư mục con, lên cấp cha,
+     "Chọn thư mục này"; KHÔNG có ô gõ đường dẫn); ô "Cấp thư mục tên người scan" mặc định 1, min 0.
+   - Lỗi hiện nguyên văn `detail` (detail dạng `{code, message}` hiện `message`).
+   - Sau khi nộp: hỏi `GET` cùng URL mỗi 2 giây tới khi gói hết `processing`; dừng khi đóng hộp
+     thoại. Hiện tiến độ (processed + failed)/total; khi xong hiện S{version}, tên người scan
+     (hoặc "chưa có tên"), số trang, trang A4 quy đổi, thời gian (giờ Việt Nam), cảnh báo theo cờ và
+     số file lỗi của gói `done`; gói `failed` hiện `error_message` màu đỏ. Danh sách S1, S2...
+     của hộp; xong thì làm mới bảng quy trình.
+- Việc 05/10: chặn người duyệt Check scan có tên khớp `scanned_by_name`; so khớp thư mục hồ sơ
+  với mục lục (BR-01).
+- Check scan cho ngày 10/10 (phương án a): người check kiểm ngoài hệ thống trước khi đưa lên máy chủ;
+  hệ thống chỉ tự so khớp thư mục (BR-01) và người check bấm "Duyệt". Phương án (b) mở từng file
+  trong hệ thống để sau 10/10. Khác BA v1.0.
 
 ## Việc sau 10/10
 
@@ -188,6 +246,9 @@ Giao diện: Tab **Dự án → Thao tác → Quy trình số hóa** (`frontend/
 - FR-ARR-02: Theo dõi 5 mốc giao nhận hồ sơ giấy (nhận từ khách, giao chỉnh lý, giao scan, trả kho, trả khách).
 - Check scan phương án (b): hiển thị và mở từng file PDF trên web.
 - Chấm công KPI scan theo chuỗi tên người scan (`scanned_by_name`).
+- Nộp S: thư mục rỗng hiện vẫn được nhận (gói `done` với 0 file); cần chặn hoặc cảnh báo.
+- Nộp S: mở lại hộp thoại khi gói của hộp đang `processing` thì chưa tự hỏi tiến độ lại
+  (chỉ hiện trong danh sách các lần nộp).
 
 ## Lộ trình (BA mục 12.2)
 

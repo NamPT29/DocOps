@@ -8,4 +8,4 @@ Cổng: python scripts/gate.py  (dùng --static để kiểm nhanh)
 - [x] L3b Sửa L3 theo review 3b3a8f3: gộp warning_flags, rollback + nạp lại gói khi lỗi DB (không kẹt 'processing'), đổi tên fail_stuck_processing_packages, bổ sung test hồi quy.
 - [x] L4 Giao diện Nộp S + selfcheck JS chạy hàm. Model: Flash
 - [x] L4b Sửa L4 theo review bd4a431: setTimeout bọc hàm (hết "Illegal invocation", poll chạy tiếp), scanSubmitErrorText cho detail {code,message}, scanSubmitCanSubmit xét available, giữ body.modal-open khi còn modal khác; project_scan_submit.js?v=1.01.
-- [ ] L5 Tài liệu. Model: Flash
+- [x] L5 Tài liệu: mục "Nộp S" trong design doc viết lại theo code (điều kiện + mã lỗi, khớp số hộp, người scan, phiên bản, xử lý nền, QC-06, giao diện); thêm 2 việc sau 10/10. Model: Flash
