@@ -34,6 +34,7 @@ QC01_DEFAULTS = {
     "bad_paper_factor": Decimal("1.3"),
     "overtime_factor": Decimal("1.2"),
     "sunday_factor": Decimal("1.4"),
+    "entry_qc_round2_enabled": True,
 }
 
 _ORGAN_CODE = re.compile(r"^[A-Za-z0-9._-]{1,50}$")
@@ -58,6 +59,7 @@ POLICY_FIELDS = (
     PolicyField("bad_paper_factor", "Hệ số giấy xấu", "QC-07", "factor"),
     PolicyField("overtime_factor", "Hệ số ngoài giờ (OT)", "QC-09", "factor"),
     PolicyField("sunday_factor", "Hệ số Chủ nhật", "QC-09", "factor"),
+    PolicyField("entry_qc_round2_enabled", "Check nhập vòng 2", "QC-08", "bool"),
 )
 POLICY_KEYS = tuple(field.key for field in POLICY_FIELDS)
 
@@ -97,6 +99,14 @@ def clean_policy_value(field: PolicyField, value):
         if not 1 <= value <= 365:
             raise ValueError(f"{field.label} phải từ 1 đến 365 ngày.")
         return value
+    if field.kind == "bool":
+        if isinstance(value, bool):
+            return value
+        if str(value).strip().lower() == "true":
+            return True
+        if str(value).strip().lower() == "false":
+            return False
+        raise ValueError(f"{field.label} phải là đúng/sai (true/false) hoặc rỗng để dùng giá trị QC-01.")
     text = str(value).strip()
     if field.kind == "organ_code" and not _ORGAN_CODE.match(text):
         raise ValueError(

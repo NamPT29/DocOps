@@ -819,3 +819,5 @@ def test_scan_packages_revision_is_additive():
         tables = set(inspect(connection).get_table_names())
         assert "case_scan_packages" not in tables
         assert "case_scan_files" not in tables
+
+

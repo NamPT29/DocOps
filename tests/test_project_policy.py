@@ -26,6 +26,7 @@ DEFAULTS = {
     "bad_paper_factor": 1.3,
     "overtime_factor": 1.2,
     "sunday_factor": 1.4,
+    "entry_qc_round2_enabled": True,
 }
 
 

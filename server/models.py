@@ -624,6 +624,7 @@ class ProjectPolicy(Base):
     error_threshold_percent = Column(Numeric(5, 2), nullable=True)
     sample_rate_percent = Column(Numeric(5, 2), nullable=True)
     box_deadline_days = Column(Integer, nullable=True)
+    entry_qc_round2_enabled = Column(Boolean, nullable=True, info={"revision": "0015_entry_qc_round2"})
     # QC-02/03
     organ_code = Column(String(50), nullable=True)
     file_notation = Column(String(20), nullable=True)

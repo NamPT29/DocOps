@@ -223,3 +223,16 @@ def api_resolve_entry_qc_round1(
         "status": "ok",
         "data": entry_qc_service.resolve_round1(db, project_id=project_id, case_id=case_id, actor=current_user, reason=request.reason)
     }
+
+@router.post("/cases/{case_id}/entry-qc/round2/sample")
+def api_sample_entry_qc_round2(
+    project_id: int,
+    case_id: int,
+    current_user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    return {
+        "status": "ok",
+        "data": entry_qc_service.sample_round2(db, project_id=project_id, case_id=case_id, actor=current_user)
+    }
+

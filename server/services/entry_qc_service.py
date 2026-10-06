@@ -4,8 +4,12 @@ from server.repositories.entry_qc_repository import EntryQcRepository
 from server.services.project_policy_service import get_effective_policy
 from server.services.workflow_engine import derive_entry_statuses, DONE
 from server.models import get_utc_now
-from server.models_entry_qc import CaseEntryQcResult
+from server.models_entry_qc import CaseEntryQcResult, CaseEntryQcSampling, CaseEntryQcSampleItem
 from server.repositories.workflow_repository import WorkflowRepository
+import math
+import secrets
+import random
+from sqlalchemy.exc import IntegrityError
 
 def _user_display_name(user):
     if not user:
@@ -83,12 +87,41 @@ def get_entry_qc_summary(db, project_id, case_id, actor):
             "created_at": r.created_at.isoformat(),
             "created_by_name": creator_name
         })
+
+    # 4. Round 2
+    round2_payload = {"enabled": policy.get("entry_qc_round2_enabled", True) if total_fields > 0 else True, "sampling": None}
+    if total_fields == 0:
+        # If total_fields is 0, let's still get the policy properly without throwing errors or just get it again
+        policy = get_effective_policy(db, project_id=project_id)
+        round2_payload["enabled"] = policy.get("entry_qc_round2_enabled", True)
+        
+    sampling = repo.get_sampling(case_id, 2)
+    if sampling:
+        items = []
+        for row, report_name in repo.get_sample_items_with_info(sampling.id):
+            items.append({
+                "submission_id": row.submission_id,
+                "report_name": report_name,
+                "checked": row.checked_at is not None,
+                "checked_by_name": _user_display_name(row.checked_by) if row.checked_at else None,
+                "changed_field_count": row.changed_field_count,
+                "visible_field_count": row.visible_field_count
+            })
+        round2_payload["sampling"] = {
+            "sample_rate_percent": float(sampling.sample_rate_percent),
+            "population_count": sampling.population_count,
+            "sample_size": sampling.sample_size,
+            "created_at": sampling.created_at.isoformat(),
+            "created_by_name": _user_display_name(sampling.created_by),
+            "items": items
+        }
         
     return {
         "gate": check_entry_qc_gate(db, case_id),
         "entry_qc_status": entry_qc_status,
         "live": live,
-        "rounds": rounds
+        "rounds": rounds,
+        "round2": round2_payload
     }
 
 def finalize_round1(db, project_id, case_id, actor):
@@ -207,3 +240,73 @@ def resolve_round1(db, project_id, case_id, actor, reason: str):
         "resolved_by_name": resolver_name,
         "resolved_at": round1.resolved_at.isoformat()
     }
+
+
+def sample_round2(db, project_id, case_id, actor):
+    repo = EntryQcRepository(db)
+    _check_permission(db, project_id, case_id, actor)
+
+    policy = get_effective_policy(db, project_id=project_id)
+    if not policy.get("entry_qc_round2_enabled", True):
+        raise HTTPException(
+            status_code=409, detail={"code": "round2_disabled", "message": "Dự án không bật Check vòng 2."}
+        )
+
+    existing_rounds = repo.get_rounds(case_id)
+    round1 = next((r for r in existing_rounds if r.round == 1), None)
+    if not round1 or (not round1.passed and round1.resolution != "approved"):
+        raise HTTPException(
+            status_code=409, detail={"code": "round1_not_passed", "message": "Cần xong vòng 1 trước khi lấy mẫu."}
+        )
+
+    if repo.get_sampling(case_id, 2):
+        raise HTTPException(
+            status_code=409, detail={"code": "already_sampled", "message": "Hộp đã được lấy mẫu vòng 2."}
+        )
+
+    completed_submissions = repo.get_completed_submissions(project_id, case_id)
+    population = len(completed_submissions)
+    if population == 0:
+        raise HTTPException(
+            status_code=409, detail={"code": "no_submissions", "message": "Hộp không có phiếu nào để lấy mẫu."}
+        )
+
+    rate = policy["sample_rate_percent"]
+    sample_size = math.ceil(population * float(rate) / 100.0)
+    sample_size = max(1, min(sample_size, population))
+
+    seed = secrets.randbits(63)
+    sorted_ids = sorted(s.id for s in completed_submissions)
+    sampled_ids = set(random.Random(seed).sample(sorted_ids, sample_size))
+
+    sampling = CaseEntryQcSampling(
+        project_id=project_id,
+        case_id=case_id,
+        round=2,
+        population_count=population,
+        sample_size=sample_size,
+        sample_rate_percent=rate,
+        seed=seed,
+        created_by_user_id=actor["id"]
+    )
+    repo.add_sampling(sampling)
+    
+    try:
+        db.flush()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(
+            status_code=409, detail={"code": "already_sampled", "message": "Hộp đã được lấy mẫu vòng 2."}
+        )
+
+    items = []
+    for sub in completed_submissions:
+        if sub.id in sampled_ids:
+            items.append(CaseEntryQcSampleItem(
+                sampling_id=sampling.id,
+                submission_id=sub.id,
+                baseline_data_json=sub.data_json
+            ))
+    repo.add_sample_items(items)
+    db.commit()
+    return {"message": "Đã lấy mẫu vòng 2."}

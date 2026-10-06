@@ -5,7 +5,7 @@ from server.models import (
     SubmissionQualityAssessment,
     ProjectReportUnit,
 )
-from server.models_entry_qc import CaseEntryQcResult
+from server.models_entry_qc import CaseEntryQcResult, CaseEntryQcSampling, CaseEntryQcSampleItem
 from server.repositories.workflow_repository import WorkflowRepository
 
 
@@ -72,4 +72,48 @@ class EntryQcRepository:
             .first()
         )
         return row is not None
+
+    def get_completed_submissions(self, project_id, case_id):
+        return (
+            self.session.query(Submission)
+            .join(ProjectDocumentAsset, ProjectDocumentAsset.assigned_document_id == Submission.assigned_document_id)
+            .filter(
+                ProjectDocumentAsset.project_id == project_id,
+                ProjectDocumentAsset.case_id == case_id,
+                Submission.status == 'completed'
+            )
+            .order_by(Submission.id)
+            .all()
+        )
+
+    def add_sampling(self, sampling: CaseEntryQcSampling) -> CaseEntryQcSampling:
+        self.session.add(sampling)
+        return sampling
+
+    def add_sample_items(self, items: list[CaseEntryQcSampleItem]):
+        self.session.add_all(items)
+
+    def get_sampling(self, case_id: int, round_num: int) -> CaseEntryQcSampling | None:
+        return (
+            self.session.query(CaseEntryQcSampling)
+            .filter(
+                CaseEntryQcSampling.case_id == case_id,
+                CaseEntryQcSampling.round == round_num
+            )
+            .first()
+        )
+
+    def get_sample_items_with_info(self, sampling_id: int):
+        return (
+            self.session.query(
+                CaseEntryQcSampleItem,
+                ProjectReportUnit.display_name.label("report_name")
+            )
+            .join(Submission, Submission.id == CaseEntryQcSampleItem.submission_id)
+            .join(ProjectDocumentAsset, ProjectDocumentAsset.assigned_document_id == Submission.assigned_document_id)
+            .join(ProjectReportUnit, ProjectReportUnit.id == ProjectDocumentAsset.report_unit_id)
+            .filter(CaseEntryQcSampleItem.sampling_id == sampling_id)
+            .order_by(CaseEntryQcSampleItem.id)
+            .all()
+        )
 

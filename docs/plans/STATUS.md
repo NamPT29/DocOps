@@ -29,5 +29,6 @@ Cổng: python scripts/gate.py  (dùng --static để kiểm nhanh)
 - [x] C1c-1b (sửa lỗi C1c-1, gọn migration, refactor test)
 - [x] C1c-1c (thêm test cổng, dọn code/comment)
 - [x] C1b-2 (selfcheck báo lỗi đúng, Dự kiến theo would_pass, luật gate chặn selfcheck nuốt lỗi)
-- [ ] C2 (TBD)
-
+- [x] C2a (Check nhập vòng 2 - Chính sách & Lấy mẫu)
+- [ ] C2b (Check từng phiếu, chốt vòng 2, Admin duyệt)
+- [ ] C2c (Giao diện Admin vòng 2)
