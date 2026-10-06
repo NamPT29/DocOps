@@ -19,7 +19,7 @@ def check_entry_qc_gate(db, case_id):
     if not round1:
         return {"blocked": True, "code": "entry_qc_not_finalized", "message": "Hộp chưa chốt kết quả Check nhập liệu."}
     if not round1.passed and round1.resolution != "approved":
-        return {"blocked": True, "code": "entry_qc_failed", "message": f"Hộp vượt ngưỡng lỗi ({float(round1.rate_percent)}% > {float(round1.threshold_percent)}%). Cần Admin duyệt kèm lý do."}
+        return {"blocked": True, "code": "entry_qc_failed", "message": f"Hộp không đạt ngưỡng lỗi: {float(round1.rate_percent)}% (cần dưới {float(round1.threshold_percent)}%). Cần Admin duyệt kèm lý do."}
     return {"blocked": False, "code": None, "message": None}
 
 def _check_permission(db, project_id, case_id, actor):

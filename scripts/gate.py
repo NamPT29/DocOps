@@ -91,6 +91,15 @@ def check_sensitive_data_ignored() -> None:
     record("Dữ liệu mẫu thật không bị đưa vào Git", not problems, "; ".join(problems))
 
 
+def check_js_swallow_errors() -> None:
+    bad = []
+    for path in sorted((ROOT / "tests").glob("*selfcheck*.js")):
+        source = path.read_text(encoding="utf-8")
+        if ".catch(" in source and "process.exitCode" not in source and "process.exit(1)" not in source:
+            bad.append(path.name)
+    record("Luật chặn selfcheck nuốt lỗi", not bad, ", ".join(bad))
+
+
 def check_js_selfchecks() -> None:
     files = sorted(glob.glob(str(ROOT / "tests" / "*selfcheck*.js")))
     failed = [Path(item).name for item in files if run(["node", item])[0] != 0]
@@ -120,6 +129,7 @@ def main(argv: list[str]) -> int:
     check_empty_migrations()
     check_tests_do_not_touch_global_engine()
     check_sensitive_data_ignored()
+    check_js_swallow_errors()
     if "--static" not in argv:
         check_js_selfchecks()
         check_pytest([a for a in argv if not a.startswith("--")])

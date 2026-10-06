@@ -234,6 +234,14 @@ function renderWorkflowCases(data) {
                 matchBtn.addEventListener('click', () => openScanMatch(item.case_id, item.display_name));
                 td.appendChild(matchBtn);
             }
+            if (key === 'entry_qc' && typeof openEntryQc === 'function') {
+                const entryQcBtn = document.createElement('button');
+                entryQcBtn.type = 'button';
+                entryQcBtn.className = 'btn btn-sm btn-outline-info ms-1 py-0';
+                entryQcBtn.textContent = 'Check nhập';
+                entryQcBtn.addEventListener('click', () => openEntryQc(item.case_id, item.display_name));
+                td.appendChild(entryQcBtn);
+            }
             row.appendChild(td);
         });
         body.appendChild(row);
@@ -437,6 +445,10 @@ async function workflowTransition(caseId, stageKey, action, initialReason = null
             if (promptReason) {
                 return workflowTransition(caseId, stageKey, action, promptReason);
             }
+            return;
+        }
+        if (data.detail.code === 'entry_qc_not_finalized' || data.detail.code === 'entry_qc_failed') {
+            alert(data.detail.message + ' Mở nút "Check nhập" ở cột Check nhập liệu để chốt hoặc duyệt.');
             return;
         }
     }
