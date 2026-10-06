@@ -164,7 +164,7 @@ async function openEntryQc(caseId, caseName) {
                         const table = _entryQcElement('table', 'table table-sm table-bordered');
                         const thead = _entryQcElement('thead', 'table-light');
                         const htr = _entryQcElement('tr', '');
-                        ['Tên biên bản', 'Trạng thái', 'Người check', 'Trường sửa'].forEach(t => htr.appendChild(_entryQcElement('th', '', t)));
+                        ['Tên biên bản', 'Trạng thái', 'Người check', 'Trường sửa', 'Thao tác'].forEach(t => htr.appendChild(_entryQcElement('th', '', t)));
                         thead.appendChild(htr);
                         
                         const tbody = _entryQcElement('tbody', '');
@@ -183,6 +183,13 @@ async function openEntryQc(caseId, caseName) {
                                 tr.appendChild(_entryQcElement('td', '', '—'));
                                 tr.appendChild(_entryQcElement('td', '', '—'));
                             }
+                            
+                            const tdAction = _entryQcElement('td', '');
+                            const btnAction = _entryQcElement('button', 'btn btn-sm btn-outline-primary', item.checked ? 'Xem' : 'Check');
+                            btnAction.addEventListener('click', () => openRound2Item(projectId, caseId, item.submission_id, render));
+                            tdAction.appendChild(btnAction);
+                            tr.appendChild(tdAction);
+                            
                             tbody.appendChild(tr);
                         });
                         
@@ -355,4 +362,157 @@ async function openEntryQc(caseId, caseName) {
     document.body.appendChild(overlay);
     
     await render();
+}
+
+async function openRound2Item(projectId, caseId, submissionId, reload) {
+    const overlay = _entryQcElement('div', 'modal text-dark');
+    overlay.style.display = 'block';
+    overlay.style.backgroundColor = 'rgba(0,0,0,0.5)';
+    overlay.style.zIndex = '1060';
+    
+    const dialog = _entryQcElement('div', 'modal-dialog modal-xl modal-dialog-centered modal-dialog-scrollable');
+    const content = _entryQcElement('div', 'modal-content');
+    
+    const header = _entryQcElement('div', 'modal-header');
+    const title = _entryQcElement('h5', 'modal-title', 'Đang tải...');
+    const closeBtn = _entryQcElement('button', 'btn-close');
+    header.append(title, closeBtn);
+    
+    const bodyContainer = _entryQcElement('div', 'modal-body');
+    const errorBox = _entryQcElement('div', 'alert alert-danger d-none');
+    bodyContainer.appendChild(errorBox);
+    
+    const row = _entryQcElement('div', 'row d-none');
+    const colLeft = _entryQcElement('div', 'col-md-6');
+    const colRight = _entryQcElement('div', 'col-md-6');
+    row.append(colLeft, colRight);
+    bodyContainer.appendChild(row);
+    
+    const footer = _entryQcElement('div', 'modal-footer');
+    const closeBtn2 = _entryQcElement('button', 'btn btn-secondary', 'Đóng');
+    footer.appendChild(closeBtn2);
+    
+    let objectUrl = null;
+    const closeOverlay = () => {
+        if (objectUrl) URL.revokeObjectURL(objectUrl);
+        overlay.remove();
+    };
+    closeBtn.addEventListener('click', closeOverlay);
+    closeBtn2.addEventListener('click', closeOverlay);
+    
+    content.append(header, bodyContainer, footer);
+    dialog.appendChild(content);
+    overlay.appendChild(dialog);
+    document.body.appendChild(overlay);
+    
+    const res = await authFetch(`/api/projects/${projectId}/workflow/cases/${caseId}/entry-qc/round2/items/${submissionId}`);
+    if (!res) {
+        title.textContent = 'Lỗi';
+        return;
+    }
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || data.status !== 'ok') {
+        title.textContent = 'Không thể xem phiếu';
+        errorBox.textContent = scanSubmitErrorText(data, 'Lỗi tải phiếu.');
+        errorBox.classList.remove('d-none');
+        return;
+    }
+    
+    const item = data.data;
+    title.textContent = `Check vòng 2: ${item.report_name}`;
+    row.classList.remove('d-none');
+    
+    const pdfRes = await authFetch(item.pdf_url);
+    if (!pdfRes || !pdfRes.ok) {
+        colLeft.appendChild(_entryQcElement('div', 'alert alert-warning', 'Không mở được PDF.'));
+    } else {
+        const blob = await pdfRes.blob();
+        objectUrl = URL.createObjectURL(blob);
+        const iframe = _entryQcElement('iframe', 'w-100 h-100');
+        iframe.style.minHeight = '500px';
+        iframe.src = objectUrl;
+        colLeft.appendChild(iframe);
+    }
+    
+    const form = _entryQcElement('div', '');
+    if (item.checked) {
+        const infoDiv = _entryQcElement('div', 'alert alert-info', `Đã check bởi ${item.checked_by_name}: ${item.changed_field_count}/${item.visible_field_count} trường sửa`);
+        form.appendChild(infoDiv);
+    }
+    
+    const inputs = {};
+    item.fields.forEach(f => {
+        const grp = _entryQcElement('div', 'mb-2');
+        grp.appendChild(_entryQcElement('label', 'form-label fw-bold', f.label || f.name));
+        
+        let input;
+        if (f.type === 'dropdown') {
+            input = _entryQcElement('select', 'form-select');
+            let found = false;
+            (f.options || []).forEach(opt => {
+                const o = _entryQcElement('option', '', opt);
+                o.value = opt;
+                if (opt === f.value) {
+                    o.selected = true;
+                    found = true;
+                }
+                input.appendChild(o);
+            });
+            if (f.value !== null && f.value !== undefined && f.value !== '' && !found) {
+                const o = _entryQcElement('option', '', f.value);
+                o.value = f.value;
+                o.selected = true;
+                input.appendChild(o);
+            }
+        } else {
+            input = _entryQcElement('input', 'form-control');
+            input.type = 'text';
+            if (f.value !== null && f.value !== undefined) {
+                input.value = f.value;
+            }
+        }
+        
+        if (item.checked) input.disabled = true;
+        
+        grp.appendChild(input);
+        form.appendChild(grp);
+        inputs[f.name] = input;
+    });
+    colRight.appendChild(form);
+    
+    if (!item.checked) {
+        const saveBtn = _entryQcElement('button', 'btn btn-primary', 'Lưu kết quả check');
+        saveBtn.addEventListener('click', async () => {
+            if (!window.confirm('Lưu kết quả check phiếu này? Sau khi lưu không sửa được.')) return;
+            
+            saveBtn.disabled = true;
+            errorBox.classList.add('d-none');
+            
+            const payload = { data: {} };
+            for (const [name, el] of Object.entries(inputs)) {
+                payload.data[name] = el.value;
+            }
+            
+            const r = await authFetch(`/api/projects/${projectId}/workflow/cases/${caseId}/entry-qc/round2/items/${submissionId}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+            if (!r) {
+                saveBtn.disabled = false;
+                return;
+            }
+            const rData = await r.json().catch(() => ({}));
+            if (!r.ok || rData.status !== 'ok') {
+                errorBox.textContent = scanSubmitErrorText(rData, 'Lỗi khi lưu.');
+                errorBox.classList.remove('d-none');
+                saveBtn.disabled = false;
+            } else {
+                closeOverlay();
+                await reload();
+                if (typeof refreshProjectWorkflow === 'function') refreshProjectWorkflow();
+            }
+        });
+        footer.insertBefore(saveBtn, closeBtn2);
+    }
 }

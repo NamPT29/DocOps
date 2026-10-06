@@ -22,6 +22,9 @@ assert.ok(entryIndex > workflowIndex && workflowIndex >= 0, 'project_entry_qc.js
 assert.ok(scripts.some(src => /^js\/project_workflow\.js\?v=[\d.]+$/.test(src)), 'project_workflow.js version check');
 
 assert.match(workflowSource, /typeof openEntryQc === 'function'/, 'Check nhập button is rendered for entry_qc column');
+assert.match(workflowSource, /entry_qc_round2_required/, 'Must check entry_qc_round2_required');
+assert.match(workflowSource, /entry_qc_round2_pending/, 'Must check entry_qc_round2_pending');
+assert.match(workflowSource, /entry_qc_round2_failed/, 'Must check entry_qc_round2_failed');
 
 assert.doesNotMatch(source, /round2\.sampled/, 'Không dùng round2.sampled');
 assert.doesNotMatch(source, /round2\.items/, 'Không dùng round2.items');
@@ -50,6 +53,12 @@ function element(tag) {
         setAttribute(name, value) { this[name] = value; },
         append(...items) { this.children.push(...items); },
         appendChild(child) { this.children.push(child); return child; },
+        insertBefore(newNode, referenceNode) {
+            const idx = this.children.indexOf(referenceNode);
+            if (idx >= 0) this.children.splice(idx, 0, newNode);
+            else this.children.push(newNode);
+            return newNode;
+        },
         replaceChildren() { this.children = []; },
         addEventListener(type, handler) { this.listeners[type] = handler; },
         remove() {},
@@ -71,13 +80,15 @@ const find = (node, predicate, found = []) => {
 const requests = [];
 let routes = {};
 function respond(status, body) {
-    return { ok: status >= 200 && status < 300, status, json: async () => body };
+    return { ok: status >= 200 && status < 300, status, json: async () => body, blob: async () => body };
 }
 
 const body = element('body');
 let confirmResult = false;
 let promptResult = null;
 let alertMessages = [];
+let createdUrls = [];
+let revokedUrls = [];
 
 const formatter = managementSource.match(/function formatVietnamDateTime[\s\S]*?\n\}/)[0];
 const authSource = fs.readFileSync('frontend/auth.js', 'utf8');
@@ -86,7 +97,6 @@ const errorFormatter = authSource.match(/function formatApiErrorDetail[\s\S]*?\n
 const sandbox = {
     console,
     Promise,
-    Intl,
     Date,
     projectWorkflowProjectId: 1,
     document: {
@@ -111,7 +121,17 @@ const sandbox = {
         return respond(404, { status: 'error', detail: 'Not found' });
     },
     WORKFLOW_STATUS_LABELS: { done: 'Xong', in_progress: 'Đang xử lý', pending: 'Chờ' },
-    refreshProjectWorkflow: () => { requests.push({ url: 'refresh' }); },
+    refreshProjectWorkflow: () => { refreshCount++; },
+    URL: {
+        createObjectURL: (blob) => {
+            const url = 'blob:test-' + Math.random();
+            createdUrls.push(url);
+            return url;
+        },
+        revokeObjectURL: (url) => {
+            revokedUrls.push(url);
+        }
+    }
 };
 sandbox.scanSubmitErrorText = (data, fallback) => data && data.detail && data.detail.message ? data.detail.message : fallback;
 vm.runInNewContext(formatter + '\n' + errorFormatter + '\n' + source, sandbox);
@@ -435,6 +455,111 @@ async function runTest() {
     txt = text(overlay);
     assert.match(txt, /Vòng 2: 2% \/ ngưỡng 5% - Đạt/);
     assert.doesNotMatch(txt, /Duyệt vòng 2 kèm lý do/);
+
+    // (r2i) test openRound2Item
+    let reloadCalled = false;
+    const dummyReload = async () => { reloadCalled = true; };
+    createdUrls.length = 0;
+    revokedUrls.length = 0;
+    
+    routes = {
+        'GET /api/projects/1/workflow/cases/2/entry-qc/round2/items/99': () => ({
+            status: 'ok', data: {
+                submission_id: 99,
+                report_name: 'Phieu 99',
+                checked: false,
+                fields: [
+                    {name: 'f1', label: 'Field 1', type: 'text', value: 'old1'},
+                    {name: 'f2', label: 'Field 2', type: 'dropdown', options: ['A', 'B'], value: 'C'}
+                ],
+                pdf_url: '/api/pdf/99'
+            }
+        }),
+        'GET /api/pdf/99': () => { return { _status: 200, _body: 'pdf_blob_data', blob: async () => 'pdf_blob_data', ok: true }; },
+        'PUT /api/projects/1/workflow/cases/2/entry-qc/round2/items/99': () => ({ status: 'ok', data: {} })
+    };
+    
+    await sandbox.openRound2Item(1, 2, 99, dummyReload);
+    let r2Overlay = body.children[body.children.length - 1];
+    let r2Txt = text(r2Overlay);
+    assert.match(r2Txt, /Check vòng 2: Phieu 99/);
+    assert.match(r2Txt, /Field 1/);
+    assert.match(r2Txt, /Lưu kết quả check/);
+    assert.equal(createdUrls.length, 1);
+    
+    let iframe = find(r2Overlay, n => n.tagName === 'IFRAME')[0];
+    assert.ok(iframe.src.startsWith('blob:test-'));
+    
+    let inputs = find(r2Overlay, n => n.tagName === 'INPUT');
+    let selects = find(r2Overlay, n => n.tagName === 'SELECT');
+    assert.equal(inputs.length, 1);
+    assert.equal(selects.length, 1);
+    assert.equal(inputs[0].value, 'old1');
+    assert.equal(selects[0].children.length, 3);
+    
+    inputs[0].value = 'new1';
+    selects[0].value = 'A';
+    
+    let btnSaveR2 = find(r2Overlay, n => n.tagName === 'BUTTON' && n.textContent === 'Lưu kết quả check')[0];
+    confirmResult = false;
+    requests.length = 0;
+    await btnSaveR2.listeners.click();
+    assert.equal(requests.length, 0);
+    
+    confirmResult = true;
+    refreshCount = 0;
+    await btnSaveR2.listeners.click();
+    assert.equal(requests.length, 1);
+    assert.equal(requests[0].method, 'PUT');
+    assert.deepEqual(requests[0].body, { data: { f1: 'new1', f2: 'A' } });
+    assert.equal(reloadCalled, true);
+    assert.equal(refreshCount, 1);
+    
+    assert.equal(revokedUrls.length, 1);
+    assert.equal(revokedUrls[0], iframe.src);
+    
+    routes = {
+        'GET /api/projects/1/workflow/cases/2/entry-qc/round2/items/100': () => ({
+            status: 'ok', data: {
+                submission_id: 100,
+                report_name: 'Phieu 100',
+                checked: true,
+                checked_by_name: 'Admin',
+                changed_field_count: 1,
+                visible_field_count: 2,
+                fields: [
+                    {name: 'f1', label: 'Field 1', type: 'text', value: 'old1'}
+                ],
+                pdf_url: '/api/pdf/100'
+            }
+        }),
+        'GET /api/pdf/100': () => { return { _status: 200, _body: 'pdf_blob_data', blob: async () => 'pdf_blob_data', ok: true }; }
+    };
+    
+    await sandbox.openRound2Item(1, 2, 100, dummyReload);
+    r2Overlay = body.children[body.children.length - 1];
+    r2Txt = text(r2Overlay);
+    assert.match(r2Txt, /Check vòng 2: Phieu 100/);
+    assert.match(r2Txt, /Đã check bởi Admin: 1\/2 trường sửa/);
+    assert.doesNotMatch(r2Txt, /Lưu kết quả check/);
+    inputs = find(r2Overlay, n => n.tagName === 'INPUT');
+    assert.equal(inputs[0].disabled, true);
+    
+    let btnCloseR2 = find(r2Overlay, n => n.tagName === 'BUTTON' && n.textContent === 'Đóng')[0];
+    await btnCloseR2.listeners.click();
+    assert.equal(revokedUrls.length, 2);
+    
+    routes = {
+        'GET /api/projects/1/workflow/cases/2/entry-qc/round2/items/101': () => ({
+            _status: 409, _body: { status: 'error', detail: { code: 'self_review', message: 'Không được tự check' } }
+        })
+    };
+    await sandbox.openRound2Item(1, 2, 101, dummyReload);
+    r2Overlay = body.children[body.children.length - 1];
+    r2Txt = text(r2Overlay);
+    assert.match(r2Txt, /Không được tự check/);
+    assert.doesNotMatch(r2Txt, /Lưu kết quả check/);
+    assert.equal(find(r2Overlay, n => n.tagName === 'INPUT').length, 0);
 
     console.log("All tests passed");
 }

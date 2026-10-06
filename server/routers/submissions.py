@@ -38,6 +38,7 @@ from server.services.submission_metadata_service import (
     apply_submission_metadata,
 )
 from server.services.submission_service import COMPLETED_WITHOUT_FOLDER, SubmissionService, _load_submission_document_metadata
+from server.services.submission_helpers import create_document_file_response
 from server.services.export_job_service import (
     ExportJobBusyError,
     cleanup_export_job,
@@ -1218,6 +1219,5 @@ def api_get_pdf_file(
         ):
             raise HTTPException(status_code=403, detail="Không có quyền truy cập file")
 
-    from server.services.submission_helpers import create_document_file_response
     return create_document_file_response(document, PDF_STORAGE_PATH)
 

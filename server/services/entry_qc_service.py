@@ -12,7 +12,7 @@ import secrets
 import random
 import json
 from sqlalchemy.exc import IntegrityError
-from server.models import ProjectReportUnit
+
 from server.repositories.document_repository import DocumentRepository
 from server.services.submission_quality_service import _visible_schema_fields, _effective_project_config
 from server.services.submission_helpers import create_document_file_response

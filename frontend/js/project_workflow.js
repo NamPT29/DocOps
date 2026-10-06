@@ -447,7 +447,8 @@ async function workflowTransition(caseId, stageKey, action, initialReason = null
             }
             return;
         }
-        if (data.detail.code === 'entry_qc_not_finalized' || data.detail.code === 'entry_qc_failed') {
+        if (data.detail.code === 'entry_qc_not_finalized' || data.detail.code === 'entry_qc_failed' || 
+            data.detail.code === 'entry_qc_round2_required' || data.detail.code === 'entry_qc_round2_pending' || data.detail.code === 'entry_qc_round2_failed') {
             alert(data.detail.message + ' Mở nút "Check nhập" ở cột Check nhập liệu để chốt hoặc duyệt.');
             return;
         }
