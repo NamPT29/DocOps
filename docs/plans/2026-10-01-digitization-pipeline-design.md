@@ -233,6 +233,10 @@ migration `0011_scan_packages`), giao diện `frontend/js/project_scan_submit.js
      (hoặc "chưa có tên"), số trang, trang A4 quy đổi, thời gian (giờ Việt Nam), cảnh báo theo cờ và
      số file lỗi của gói `done`; gói `failed` hiện `error_message` màu đỏ. Danh sách S1, S2...
      của hộp; xong thì làm mới bảng quy trình.
+8. **So khớp mục lục (BR-01)**:
+   - Chạy tự động sau khi gói quét `done`. Kỳ vọng là các dòng mục lục chưa bị đánh dấu `missing_from_import_id` của hộp; thực tế là các đường dẫn PDF trong gói.
+   - Trả về `match_status` (`matched`, `mismatch`, hoặc `no_catalog` nếu hoàn toàn không có mục lục) và `match_summary` (được lưu vào gói, GET API trả về kèm).
+   - Lỗi khi so khớp không làm hỏng gói mà gán cờ `catalog_match_error` và `match_status = NULL`.
 - Việc 05/10: chặn người duyệt Check scan có tên khớp `scanned_by_name`; so khớp thư mục hồ sơ
   với mục lục (BR-01).
 - Check scan cho ngày 10/10 (phương án a): người check kiểm ngoài hệ thống trước khi đưa lên máy chủ;

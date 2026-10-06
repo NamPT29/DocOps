@@ -28,7 +28,12 @@ from server.repositories.scan_repository import (
     create_scan_package,
     create_scan_files,
     update_scan_package,
+    get_case_catalog_rows,
+    get_case_removed_catalog_rows,
+    get_scan_package_files,
+    update_scan_package_match_result,
 )
+from server.services.scan_catalog_match_service import match_scan_files_to_catalog
 
 try:
     import pypdf
@@ -344,6 +349,21 @@ def process_scan_package_background(package_id: int, session_factory=SessionLoca
             pkg.warning_flags = _merge_warning_flags(pkg.warning_flags, warning_flags)
             update_scan_package(db, pkg)
             db.commit()
+            
+            try:
+                catalog_rows = get_case_catalog_rows(db, pkg.case_id)
+                removed_rows = get_case_removed_catalog_rows(db, pkg.case_id)
+                files = get_scan_package_files(db, pkg.id)
+                match_res = match_scan_files_to_catalog(catalog_rows, files, removed_rows=removed_rows)
+                update_scan_package_match_result(
+                    db, pkg.id, match_res["match_status"], match_res["summary"]
+                )
+                db.commit()
+            except Exception as e:
+                logger.exception("Lỗi so khớp mục lục cho gói %s", package_id)
+                update_scan_package_match_result(db, pkg.id, None, None, error=True)
+                db.commit()
+                
         except Exception as e:
             try:
                 _mark_failed(db, package_id, f"Lỗi bất ngờ: {e}")

@@ -12,7 +12,7 @@ def match_scan_files_to_catalog(catalog_rows, file_paths, *, removed_rows=()):
         removed.add((row.dossier_number, row.dossier_suffix))
 
     catalog_total = len(expected)
-    if catalog_total == 0:
+    if catalog_total == 0 and len(removed) == 0:
         return {
             "match_status": "no_catalog",
             "summary": json.dumps({

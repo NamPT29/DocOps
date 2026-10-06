@@ -53,9 +53,6 @@ def test_duplicate_folder():
     assert res["match_status"] == "mismatch"
     summary = json.loads(res["summary"])
     assert summary["matched"] == ["1"]
-    # The first one "1" gets matched, "01" and "001" are duplicates
-    # Since dict iterating order depends on insertion which depends on files processing order,
-    # "01" and "001" will be the duplicates.
     assert set(summary["duplicate_folders"]) == {"01", "001"}
 
 def test_pdf_at_box_root():
@@ -101,6 +98,16 @@ def test_no_catalog():
     res = match_scan_files_to_catalog(catalog, files)
     assert res["match_status"] == "no_catalog"
     summary = json.loads(res["summary"])
+    assert summary["catalog_total"] == 0
+
+def test_no_catalog_but_removed_rows():
+    catalog = []
+    removed = [DummyRow(2, "")]
+    files = ["02/1.pdf"]
+    res = match_scan_files_to_catalog(catalog, files, removed_rows=removed)
+    assert res["match_status"] == "mismatch"
+    summary = json.loads(res["summary"])
+    assert summary["removed_from_catalog"] == ["02"]
     assert summary["catalog_total"] == 0
 
 def test_truncated():

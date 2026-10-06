@@ -428,6 +428,8 @@ def api_list_scan_packages(
                 "error_message": p.error_message,
                 "started_at": p.started_at,
                 "finished_at": p.finished_at,
+                "match_status": p.match_status,
+                "match_summary": json.loads(p.match_summary) if p.match_summary else None,
             }
             for p in packages
         ]

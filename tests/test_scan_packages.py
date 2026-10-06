@@ -13,7 +13,7 @@ from sqlalchemy.orm import sessionmaker
 import server.main as server_main
 from server.main import app, run_startup_maintenance
 from server.database import Base, get_db
-from server.models import User, Project, ProjectCase, Template
+from server.models import User, Project, ProjectCase, Template, ArrangementDossier
 from server.models_workflow import CaseStageEvent, ProjectStage, CaseStageState, ProjectStageMember
 from server.models_scan import CaseScanPackage, CaseScanFile
 from server.routers.auth import get_admin_user, get_current_user
@@ -592,3 +592,98 @@ def test_startup_maintenance_fails_stuck_packages(test_data, monkeypatch):
     db.expire_all()
     assert stuck.status == "failed"
     assert stuck.finished_at is not None
+
+def test_scan_package_catalog_matching_and_get(test_data, tmp_path, monkeypatch):
+    db = test_data["db"]
+    project = test_data["project"]
+    case = test_data["case"]
+    
+    dossier = ArrangementDossier(
+        project_id=project.id, case_id=case.id, box_number=1, dossier_number=12, dossier_suffix="",
+        fonds_code="F1", fonds_name="F1", catalog_number="1", title="T1", start_date="01/01/2000",
+        end_date="31/12/2000", start_year=2000, maintenance_code="V", sheet_count=10, source_row=1
+    )
+    db.add(dossier)
+    
+    removed = ArrangementDossier(
+        project_id=project.id, case_id=case.id, box_number=1, dossier_number=99, dossier_suffix="",
+        fonds_code="F1", fonds_name="F1", catalog_number="1", title="T1", start_date="01/01/2000",
+        end_date="31/12/2000", start_year=2000, maintenance_code="V", sheet_count=10, source_row=2,
+        missing_from_import_id=1
+    )
+    db.add(removed)
+    db.commit()
+
+    folder1 = _box_dir(test_data, "PKG1/12")
+    _write_pdf(folder1 / "file.pdf", [(210, 297)])
+    
+    pkg1 = CaseScanPackage(case_id=case.id, version=1, source_path="PKG1", status="processing", submitted_by_user_id=test_data["user"].id)
+    db.add(pkg1)
+    db.commit()
+    
+    process_scan_package_background(pkg1.id, session_factory=sessionmaker(bind=db.get_bind()))
+    db.refresh(pkg1)
+    
+    assert pkg1.status == "done"
+    assert pkg1.match_status == "matched"
+    assert "catalog_match_error" not in (pkg1.warning_flags or "")
+    
+    res = client.get(f"/api/projects/{project.id}/cases/{case.id}/scan-packages")
+    assert res.status_code == 200
+    data = res.json()["data"]
+    assert data[0]["id"] == pkg1.id
+    assert data[0]["match_status"] == "matched"
+    assert data[0]["match_summary"]["matched"] == ["12"]
+    
+    folder2 = _box_dir(test_data, "PKG2/99")
+    _write_pdf(folder2 / "file.pdf", [(210, 297)])
+    
+    pkg2 = CaseScanPackage(case_id=case.id, version=2, source_path="PKG2", status="processing", submitted_by_user_id=test_data["user"].id)
+    db.add(pkg2)
+    db.commit()
+    
+    process_scan_package_background(pkg2.id, session_factory=sessionmaker(bind=db.get_bind()))
+    db.refresh(pkg2)
+    
+    assert pkg2.match_status == "mismatch"
+    summary = json.loads(pkg2.match_summary)
+    assert summary["missing"] == ["12"]
+    assert summary["removed_from_catalog"] == ["99"]
+    
+    db.delete(dossier)
+    db.delete(removed)
+    db.commit()
+    
+    pkg3 = CaseScanPackage(case_id=case.id, version=3, source_path="PKG2", status="processing", submitted_by_user_id=test_data["user"].id)
+    db.add(pkg3)
+    db.commit()
+    
+    process_scan_package_background(pkg3.id, session_factory=sessionmaker(bind=db.get_bind()))
+    db.refresh(pkg3)
+    assert pkg3.match_status == "no_catalog"
+    
+    pkg4 = CaseScanPackage(case_id=case.id, version=4, source_path="PKG2", status="processing", submitted_by_user_id=test_data["user"].id)
+    db.add(pkg4)
+    db.commit()
+    
+    def raise_error(*args, **kwargs):
+        raise ValueError("Match error")
+        
+    monkeypatch.setattr(scan_ingestion_service, "match_scan_files_to_catalog", raise_error)
+    process_scan_package_background(pkg4.id, session_factory=sessionmaker(bind=db.get_bind()))
+    db.refresh(pkg4)
+    assert pkg4.status == "done"
+    assert pkg4.match_status is None
+    assert "catalog_match_error" in pkg4.warning_flags
+    
+    monkeypatch.undo()
+    pkg5 = CaseScanPackage(case_id=case.id, version=5, source_path="PKG2", status="processing", submitted_by_user_id=test_data["user"].id)
+    db.add(pkg5)
+    db.commit()
+    
+    monkeypatch.setattr(scan_ingestion_service, "_calculate_a4_equivalent", raise_error)
+    process_scan_package_background(pkg5.id, session_factory=sessionmaker(bind=db.get_bind()))
+    db.refresh(pkg5)
+    
+    assert pkg5.status == "failed"
+    assert pkg5.match_status is None

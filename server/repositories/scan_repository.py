@@ -1,8 +1,9 @@
 from sqlalchemy.orm import Session
-from server.models import Project, ProjectCase, User
+from server.models import Project, ProjectCase, User, ArrangementDossier
 from server.models_scan import CaseScanPackage, CaseScanFile
 from server.models_workflow import ProjectStageMember
 from server.database import get_utc_now
+import json
 
 
 def get_project_by_id(db: Session, project_id: int) -> Project | None:
@@ -96,3 +97,37 @@ def fail_stuck_processing_packages(db: Session) -> int:
     )
     db.flush()
     return count
+
+def get_case_catalog_rows(db: Session, case_id: int) -> list[ArrangementDossier]:
+    return db.query(ArrangementDossier).filter(
+        ArrangementDossier.case_id == case_id,
+        ArrangementDossier.missing_from_import_id.is_(None)
+    ).all()
+
+def get_case_removed_catalog_rows(db: Session, case_id: int) -> list[ArrangementDossier]:
+    return db.query(ArrangementDossier).filter(
+        ArrangementDossier.case_id == case_id,
+        ArrangementDossier.missing_from_import_id.is_not(None)
+    ).all()
+
+def get_scan_package_files(db: Session, package_id: int) -> list[str]:
+    return [
+        f.relative_path for f in db.query(CaseScanFile).filter(
+            CaseScanFile.package_id == package_id,
+            CaseScanFile.is_pdf == True
+        ).all()
+    ]
+
+def update_scan_package_match_result(
+    db: Session, package_id: int, match_status: str | None, match_summary: str | None, error: bool = False
+):
+    pkg = get_scan_package(db, package_id)
+    if not pkg:
+        return
+    pkg.match_status = match_status
+    pkg.match_summary = match_summary
+    if error:
+        flags = set(json.loads(pkg.warning_flags)) if pkg.warning_flags else set()
+        flags.add("catalog_match_error")
+        pkg.warning_flags = json.dumps(sorted(flags))
+    db.flush()

@@ -13,6 +13,6 @@ Cổng: python scripts/gate.py  (dùng --static để kiểm nhanh)
 - [x] B0 Dùng box_number_of_case_key (thành phần cuối) thay vì dãy số đầu tiên; xóa nhánh ::muc-luc trong _extract_box_number; 3 test mới; cập nhật design doc.
 ## BR-01 so khớp mục lục + Check scan
 - [x] B1a (dữ liệu + hàm so khớp)
-- [ ] B1b (nối vào xử lý nền + API)
+- [x] B1b (nối vào xử lý nền + API)
 - [ ] B2a (chặn Đạt Check scan)
 - [ ] B2b (giao diện)
