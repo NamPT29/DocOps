@@ -602,6 +602,43 @@
       </div>
     </div>
 
+    <!-- NỘP S: GÓI SCAN THEO HỘP (FR-SCN-01) -->
+    <div class="modal fade" id="scanSubmitModal" tabindex="-1" aria-hidden="true">
+      <div class="modal-dialog modal-lg modal-dialog-scrollable">
+        <div class="modal-content">
+          <div class="modal-header bg-primary text-white">
+            <h5 class="modal-title"><i class="fas fa-file-import"></i> Nộp S: <span id="scanSubmitModalTitle"></span></h5>
+            <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Đóng"></button>
+          </div>
+          <div class="modal-body">
+            <div class="fw-semibold mb-1">Thư mục trên máy chủ</div>
+            <div class="d-flex align-items-center gap-2 mb-2">
+              <button type="button" class="btn btn-sm btn-outline-secondary" id="scanSubmitUpButton"><i class="fas fa-level-up-alt"></i> Lên cấp cha</button>
+              <code id="scanSubmitCurrentPath" class="text-break"></code>
+              <button type="button" class="btn btn-sm btn-outline-primary ms-auto" id="scanSubmitChooseButton">Chọn thư mục này</button>
+            </div>
+            <div id="scanSubmitFolderList" class="list-group mb-2 admin-user-list-sm"></div>
+            <div id="scanSubmitSelectedPath" class="small text-muted mb-3"></div>
+            <div class="row g-2 align-items-end mb-3">
+              <div class="col-sm-6">
+                <label class="form-label fw-semibold" for="scanSubmitUserLevel">Cấp thư mục tên người scan</label>
+                <input type="number" class="form-control" id="scanSubmitUserLevel" min="0" step="1" value="1" inputmode="numeric">
+                <div class="form-text">1 = thư mục cha của thư mục hộp mang tên người scan; 0 = không lấy tên.</div>
+              </div>
+              <div class="col-sm-6">
+                <button type="button" class="btn btn-success w-100" id="scanSubmitSendButton" disabled><i class="fas fa-paper-plane"></i> Nộp</button>
+              </div>
+            </div>
+            <div id="scanSubmitError" class="alert alert-danger py-2 small d-none" role="alert"></div>
+            <div id="scanSubmitResult" class="mb-3" aria-live="polite"></div>
+            <h6 class="text-primary">Các lần nộp của hộp</h6>
+            <ul id="scanSubmitHistory" class="list-group mb-0"></ul>
+          </div>
+          <div class="modal-footer"><button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Đóng</button></div>
+        </div>
+      </div>
+    </div>
+
     <!-- CHÍNH SÁCH DỰ ÁN (FR-PRJ-03, QC-01) -->
     <div class="modal fade" id="projectPolicyModal" tabindex="-1" aria-hidden="true">
       <div class="modal-dialog modal-lg modal-dialog-scrollable">
@@ -1159,7 +1196,8 @@
     <script src="js/project_upload.js?v=1.01"></script>
     <script src="js/project_reports.js?v=1.00"></script>
     <script src="js/project_management.js?v=2.16"></script>
-    <script src="js/project_workflow.js?v=1.05"></script>
+    <script src="js/project_scan_submit.js?v=1.00"></script>
+    <script src="js/project_workflow.js?v=1.06"></script>
     <script src="js/project_policy.js?v=1.00"></script>
     <script src="js/arrangement_catalog.js?v=1.00"></script>
     <script src="js/ocr_image.js?v=2"></script>

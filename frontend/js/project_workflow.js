@@ -1,4 +1,4 @@
-/* global apiCall, projectManagementUsers, projectManagementProjects */
+/* global apiCall, projectManagementUsers, projectManagementProjects, scanSubmitCanSubmit, openScanSubmit */
 
 // =============================================================================
 // PROJECT PIPELINE ("Quy trình số hóa") ADMIN PANEL
@@ -213,6 +213,19 @@ function renderWorkflowCases(data) {
                 button.addEventListener('click', () => workflowTransition(item.case_id, key, action));
                 td.appendChild(button);
             });
+            // FR-SCN-01: submit the box's scan folder (js/project_scan_submit.js).
+            if (
+                key === 'scan'
+                && typeof scanSubmitCanSubmit === 'function'
+                && scanSubmitCanSubmit(cellData, item.stages.scan_qc)
+            ) {
+                const submit = document.createElement('button');
+                submit.type = 'button';
+                submit.className = 'btn btn-sm btn-outline-primary ms-1 py-0';
+                submit.textContent = 'Nộp S';
+                submit.addEventListener('click', () => openScanSubmit(item.case_id, item.display_name));
+                td.appendChild(submit);
+            }
             row.appendChild(td);
         });
         body.appendChild(row);
