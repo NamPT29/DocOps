@@ -58,6 +58,8 @@ class CaseScanPackage(Base):
     warning_flags = Column(Text, nullable=True)
     error_message = Column(Text, nullable=True)
     status = Column(String(32), nullable=False, default="processing", index=True)
+    match_status = Column(String(20), nullable=True, info={"revision": "0012_scan_catalog_match"})
+    match_summary = Column(Text, nullable=True, info={"revision": "0012_scan_catalog_match"})
     
     started_at = Column(DateTime, nullable=False, default=get_utc_now)
     finished_at = Column(DateTime, nullable=True)

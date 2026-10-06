@@ -11,3 +11,8 @@ Cổng: python scripts/gate.py  (dùng --static để kiểm nhanh)
 - [x] L5 Tài liệu: mục "Nộp S" trong design doc viết lại theo code (điều kiện + mã lỗi, khớp số hộp, người scan, phiên bản, xử lý nền, QC-06, giao diện); thêm 2 việc sau 10/10. Model: Flash
 ## B0 Sửa khớp số hộp: case_key phân cấp ("phong01/0020") lấy nhầm số 1 thay vì 20
 - [x] B0 Dùng box_number_of_case_key (thành phần cuối) thay vì dãy số đầu tiên; xóa nhánh ::muc-luc trong _extract_box_number; 3 test mới; cập nhật design doc.
+## BR-01 so khớp mục lục + Check scan
+- [x] B1a (dữ liệu + hàm so khớp)
+- [ ] B1b (nối vào xử lý nền + API)
+- [ ] B2a (chặn Đạt Check scan)
+- [ ] B2b (giao diện)
