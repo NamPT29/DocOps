@@ -340,29 +340,39 @@ def process_scan_package_background(package_id: int, session_factory=SessionLoca
                 update_scan_package(db, pkg)
                 db.commit()
 
+            try:
+                catalog_rows = get_case_catalog_rows(db, pkg.case_id)
+                removed_rows = get_case_removed_catalog_rows(db, pkg.case_id)
+                # Ensure we have all files by flushing if needed, but they were already committed individually
+                files = get_scan_package_files(db, pkg.id)
+                match_res = match_scan_files_to_catalog(catalog_rows, files, removed_rows=removed_rows)
+                match_status = match_res["match_status"]
+                match_summary = match_res["summary"]
+                match_error = False
+            except Exception as e:
+                logger.exception("Lỗi so khớp mục lục cho gói %s", package_id)
+                db.rollback()
+                match_error = True
+                match_status = None
+                match_summary = None
+
+            pkg = get_scan_package(db, package_id)
             pkg.processed_files = processed
             pkg.failed_files = failed
             pkg.total_pages = total_pages
             pkg.total_a4_equivalent = total_a4_equiv
             pkg.status = "done"
             pkg.finished_at = get_utc_now()
-            pkg.warning_flags = _merge_warning_flags(pkg.warning_flags, warning_flags)
+            
+            merged_flags = _merge_warning_flags(pkg.warning_flags, warning_flags)
+            if match_error:
+                merged_flags = _merge_warning_flags(merged_flags, {"catalog_match_error"})
+                
+            pkg.warning_flags = merged_flags
+            pkg.match_status = match_status
+            pkg.match_summary = match_summary
             update_scan_package(db, pkg)
             db.commit()
-            
-            try:
-                catalog_rows = get_case_catalog_rows(db, pkg.case_id)
-                removed_rows = get_case_removed_catalog_rows(db, pkg.case_id)
-                files = get_scan_package_files(db, pkg.id)
-                match_res = match_scan_files_to_catalog(catalog_rows, files, removed_rows=removed_rows)
-                update_scan_package_match_result(
-                    db, pkg.id, match_res["match_status"], match_res["summary"]
-                )
-                db.commit()
-            except Exception as e:
-                logger.exception("Lỗi so khớp mục lục cho gói %s", package_id)
-                update_scan_package_match_result(db, pkg.id, None, None, error=True)
-                db.commit()
                 
         except Exception as e:
             try:

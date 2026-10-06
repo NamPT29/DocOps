@@ -14,5 +14,6 @@ Cổng: python scripts/gate.py  (dùng --static để kiểm nhanh)
 ## BR-01 so khớp mục lục + Check scan
 - [x] B1a (dữ liệu + hàm so khớp)
 - [x] B1b (nối vào xử lý nền + API)
+- [ ] B1c (sửa B1b: nối thẳng so khớp vào commit của gói)
 - [ ] B2a (chặn Đạt Check scan)
 - [ ] B2b (giao diện)

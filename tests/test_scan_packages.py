@@ -593,7 +593,7 @@ def test_startup_maintenance_fails_stuck_packages(test_data, monkeypatch):
     assert stuck.status == "failed"
     assert stuck.finished_at is not None
 
-def test_scan_package_catalog_matching_and_get(test_data, tmp_path, monkeypatch):
+def test_scan_package_match_perfect_and_get(test_data, tmp_path):
     db = test_data["db"]
     project = test_data["project"]
     case = test_data["case"]
@@ -604,14 +604,6 @@ def test_scan_package_catalog_matching_and_get(test_data, tmp_path, monkeypatch)
         end_date="31/12/2000", start_year=2000, maintenance_code="V", sheet_count=10, source_row=1
     )
     db.add(dossier)
-    
-    removed = ArrangementDossier(
-        project_id=project.id, case_id=case.id, box_number=1, dossier_number=99, dossier_suffix="",
-        fonds_code="F1", fonds_name="F1", catalog_number="1", title="T1", start_date="01/01/2000",
-        end_date="31/12/2000", start_year=2000, maintenance_code="V", sheet_count=10, source_row=2,
-        missing_from_import_id=1
-    )
-    db.add(removed)
     db.commit()
 
     folder1 = _box_dir(test_data, "PKG1/12")
@@ -634,7 +626,26 @@ def test_scan_package_catalog_matching_and_get(test_data, tmp_path, monkeypatch)
     assert data[0]["id"] == pkg1.id
     assert data[0]["match_status"] == "matched"
     assert data[0]["match_summary"]["matched"] == ["12"]
+
+def test_scan_package_match_mismatch(test_data, tmp_path):
+    db = test_data["db"]
+    project = test_data["project"]
+    case = test_data["case"]
     
+    dossier = ArrangementDossier(
+        project_id=project.id, case_id=case.id, box_number=1, dossier_number=12, dossier_suffix="",
+        fonds_code="F1", fonds_name="F1", catalog_number="1", title="T1", start_date="01/01/2000",
+        end_date="31/12/2000", start_year=2000, maintenance_code="V", sheet_count=10, source_row=1
+    )
+    removed = ArrangementDossier(
+        project_id=project.id, case_id=case.id, box_number=1, dossier_number=99, dossier_suffix="",
+        fonds_code="F1", fonds_name="F1", catalog_number="1", title="T1", start_date="01/01/2000",
+        end_date="31/12/2000", start_year=2000, maintenance_code="V", sheet_count=10, source_row=2,
+        missing_from_import_id=1
+    )
+    db.add_all([dossier, removed])
+    db.commit()
+
     folder2 = _box_dir(test_data, "PKG2/99")
     _write_pdf(folder2 / "file.pdf", [(210, 297)])
     
@@ -649,22 +660,32 @@ def test_scan_package_catalog_matching_and_get(test_data, tmp_path, monkeypatch)
     summary = json.loads(pkg2.match_summary)
     assert summary["missing"] == ["12"]
     assert summary["removed_from_catalog"] == ["99"]
+
+def test_scan_package_match_no_catalog(test_data, tmp_path):
+    db = test_data["db"]
+    case = test_data["case"]
     
-    db.delete(dossier)
-    db.delete(removed)
-    db.commit()
-    
-    pkg3 = CaseScanPackage(case_id=case.id, version=3, source_path="PKG2", status="processing", submitted_by_user_id=test_data["user"].id)
+    pkg3 = CaseScanPackage(case_id=case.id, version=3, source_path="PKG3", status="processing", submitted_by_user_id=test_data["user"].id)
     db.add(pkg3)
     db.commit()
+    
+    folder = _box_dir(test_data, "PKG3/1")
+    _write_pdf(folder / "file.pdf", [(210, 297)])
     
     process_scan_package_background(pkg3.id, session_factory=sessionmaker(bind=db.get_bind()))
     db.refresh(pkg3)
     assert pkg3.match_status == "no_catalog"
+
+def test_scan_package_match_error_does_not_fail_package(test_data, tmp_path, monkeypatch):
+    db = test_data["db"]
+    case = test_data["case"]
     
-    pkg4 = CaseScanPackage(case_id=case.id, version=4, source_path="PKG2", status="processing", submitted_by_user_id=test_data["user"].id)
+    pkg4 = CaseScanPackage(case_id=case.id, version=4, source_path="PKG4", status="processing", submitted_by_user_id=test_data["user"].id)
     db.add(pkg4)
     db.commit()
+    
+    folder = _box_dir(test_data, "PKG4/1")
+    _write_pdf(folder / "file.pdf", [(210, 297)])
     
     def raise_error(*args, **kwargs):
         raise ValueError("Match error")
@@ -672,18 +693,56 @@ def test_scan_package_catalog_matching_and_get(test_data, tmp_path, monkeypatch)
     monkeypatch.setattr(scan_ingestion_service, "match_scan_files_to_catalog", raise_error)
     process_scan_package_background(pkg4.id, session_factory=sessionmaker(bind=db.get_bind()))
     db.refresh(pkg4)
+    
     assert pkg4.status == "done"
     assert pkg4.match_status is None
-    assert "catalog_match_error" in pkg4.warning_flags
+    assert "catalog_match_error" in (pkg4.warning_flags or "")
+
+def test_scan_package_failed_no_match(test_data, tmp_path, monkeypatch):
+    db = test_data["db"]
+    case = test_data["case"]
     
-    monkeypatch.undo()
-    pkg5 = CaseScanPackage(case_id=case.id, version=5, source_path="PKG2", status="processing", submitted_by_user_id=test_data["user"].id)
+    pkg5 = CaseScanPackage(case_id=case.id, version=5, source_path="PKG5", status="processing", submitted_by_user_id=test_data["user"].id)
     db.add(pkg5)
     db.commit()
     
-    monkeypatch.setattr(scan_ingestion_service, "_calculate_a4_equivalent", raise_error)
+    def raise_error(*args, **kwargs):
+        raise ValueError("Simulated logic error")
+        
+    monkeypatch.setattr(scan_ingestion_service, "resolve_server_source_directory", raise_error)
+    
+    folder = _box_dir(test_data, "PKG5/1")
+    _write_pdf(folder / "file.pdf", [(210, 297)])
+    
     process_scan_package_background(pkg5.id, session_factory=sessionmaker(bind=db.get_bind()))
     db.refresh(pkg5)
     
     assert pkg5.status == "failed"
     assert pkg5.match_status is None
+    assert "Simulated logic error" in pkg5.error_message
+
+def test_scan_package_no_status_gap_during_match(test_data, monkeypatch):
+    db = test_data["db"]
+    case = test_data["case"]
+    
+    pkg = CaseScanPackage(case_id=case.id, version=6, source_path="PKG6", status="processing", submitted_by_user_id=test_data["user"].id)
+    db.add(pkg)
+    db.commit()
+    
+    folder = _box_dir(test_data, "PKG6/1")
+    _write_pdf(folder / "file.pdf", [(210, 297)])
+    
+    SessionFactory = sessionmaker(bind=db.get_bind())
+    
+    def patched_match(*args, **kwargs):
+        with SessionFactory() as db2:
+            current_pkg = db2.query(CaseScanPackage).filter_by(id=pkg.id).first()
+            assert current_pkg.status == "processing", "Package should still be processing during match calculation"
+        return {"match_status": "matched", "summary": json.dumps({"matched": ["1"]})}
+        
+    monkeypatch.setattr(scan_ingestion_service, "match_scan_files_to_catalog", patched_match)
+    process_scan_package_background(pkg.id, session_factory=SessionFactory)
+    
+    db.refresh(pkg)
+    assert pkg.status == "done"
+    assert pkg.match_status == "matched"
