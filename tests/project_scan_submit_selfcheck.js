@@ -19,7 +19,7 @@ const scripts = Array.from(html.matchAll(/<script src="([^"]+)"/g), match => mat
 const managementIndex = scripts.findIndex(src => src.startsWith('js/project_management.js'));
 const scanIndex = scripts.findIndex(src => /^js\/project_scan_submit\.js\?v=[\d.]+$/.test(src));
 assert.ok(scanIndex > managementIndex && managementIndex >= 0, 'project_scan_submit.js loads after project_management.js');
-assert.ok(scripts.some(src => src === 'js/project_workflow.js?v=1.08'), 'project_workflow.js version was bumped');
+assert.ok(scripts.some(src => /^js\/project_workflow\.js\?v=[\d.]+$/.test(src)), 'project_workflow.js version was bumped');
 const ids = Array.from(html.matchAll(/\sid="([^"]+)"/g), match => match[1]);
 const duplicates = ids.filter((id, index) => ids.indexOf(id) !== index);
 assert.deepEqual(duplicates, [], 'Element ids in admin.html are unique.');

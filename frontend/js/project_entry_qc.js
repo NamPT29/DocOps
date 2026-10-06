@@ -13,6 +13,7 @@ async function _loadEntryQcData(projectId, caseId, body, errorBox) {
     errorBox.classList.add('d-none');
     
     const res = await authFetch(`/api/projects/${projectId}/workflow/cases/${caseId}/entry-qc`);
+    if (!res) return null;
     const payload = await res.json().catch(() => ({}));
     if (!res.ok || payload.status !== 'ok') {
         errorBox.textContent = scanSubmitErrorText(payload, 'Lỗi khi tải dữ liệu Check nhập liệu.');
@@ -35,6 +36,8 @@ async function openEntryQc(caseId, caseName) {
     const header = _entryQcElement('div', 'modal-header bg-info text-white');
     const title = _entryQcElement('h5', 'modal-title', `Check nhập liệu: ${caseName}`);
     const closeBtn = _entryQcElement('button', 'btn-close btn-close-white');
+    closeBtn.type = 'button';
+    closeBtn.setAttribute('aria-label', 'Đóng');
     
     header.append(title, closeBtn);
     
@@ -72,9 +75,9 @@ async function openEntryQc(caseId, caseName) {
             liveBody.appendChild(_entryQcElement('div', '', `Trường lỗi ${l.error_fields}/${l.total_fields}`));
             
             const rateStr = `Tỷ lệ lỗi ${l.rate_percent}% (ngưỡng ${l.threshold_percent}%)`;
-            const predictStr = l.rate_percent <= l.threshold_percent ? 'Dự kiến: Đạt' : 'Dự kiến: Không đạt';
+            const predictStr = l.would_pass ? 'Dự kiến: Đạt' : 'Dự kiến: Không đạt';
             const rateDiv = _entryQcElement('div', 'fw-bold mt-2', `${rateStr} -> ${predictStr}`);
-            if (l.rate_percent <= l.threshold_percent) {
+            if (l.would_pass) {
                 rateDiv.classList.add('text-success');
             } else {
                 rateDiv.classList.add('text-danger');
@@ -101,13 +104,15 @@ async function openEntryQc(caseId, caseName) {
                 li.appendChild(mDiv);
                 
                 const dt = typeof formatVietnamDateTime === 'function' ? formatVietnamDateTime(r.created_at) : r.created_at;
-                li.appendChild(_entryQcElement('div', 'small text-muted', `Chốt bởi ${r.created_by_name} lúc ${dt}`));
+                const createdBy = r.created_by_name || '—';
+                li.appendChild(_entryQcElement('div', 'small text-muted', `Chốt bởi ${createdBy} lúc ${dt}`));
                 
                 if (r.resolution) {
                     const rdt = typeof formatVietnamDateTime === 'function' ? formatVietnamDateTime(r.resolved_at) : r.resolved_at;
                     const resDiv = _entryQcElement('div', 'small mt-1');
                     resDiv.appendChild(_entryQcElement('strong', '', 'Admin duyệt: '));
-                    resDiv.appendChild(document.createTextNode(`${r.resolved_by_name} lúc ${rdt}. Lý do: ${r.resolution_reason}`));
+                    const resolvedBy = r.resolved_by_name || '—';
+                    resDiv.appendChild(document.createTextNode(`${resolvedBy} lúc ${rdt}. Lý do: ${r.resolution_reason}`));
                     li.appendChild(resDiv);
                 }
                 
@@ -141,6 +146,10 @@ async function openEntryQc(caseId, caseName) {
                 if (!window.confirm(`Chốt kết quả vòng 1 cho hộp ${caseName}? Sau khi chốt không sửa được.`)) return;
                 chotBtn.disabled = true;
                 const r = await authFetch(`/api/projects/${projectId}/workflow/cases/${caseId}/entry-qc/round1`, { method: 'POST' });
+                if (!r) {
+                    chotBtn.disabled = false;
+                    return;
+                }
                 const rData = await r.json().catch(() => ({}));
                 if (!r.ok || rData.status !== 'ok') {
                     errorBox.textContent = scanSubmitErrorText(rData, 'Lỗi khi chốt kết quả.');
@@ -171,6 +180,10 @@ async function openEntryQc(caseId, caseName) {
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ reason })
                 });
+                if (!r) {
+                    resolveBtn.disabled = false;
+                    return;
+                }
                 const rData = await r.json().catch(() => ({}));
                 if (!r.ok || rData.status !== 'ok') {
                     errorBox.textContent = scanSubmitErrorText(rData, 'Lỗi khi duyệt.');

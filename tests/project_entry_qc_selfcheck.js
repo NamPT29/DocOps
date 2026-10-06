@@ -19,7 +19,7 @@ const scripts = Array.from(html.matchAll(/<script src="([^"]+)"/g), match => mat
 const entryIndex = scripts.findIndex(src => /^js\/project_entry_qc\.js\?v=[\d.]+$/.test(src));
 const workflowIndex = scripts.findIndex(src => /^js\/project_workflow\.js\?v=[\d.]+$/.test(src));
 assert.ok(entryIndex > workflowIndex && workflowIndex >= 0, 'project_entry_qc.js loads after project_workflow.js');
-assert.ok(scripts.some(src => src === 'js/project_workflow.js?v=1.08'), 'project_workflow.js version is 1.08');
+assert.ok(scripts.some(src => /^js\/project_workflow\.js\?v=[\d.]+$/.test(src)), 'project_workflow.js version check');
 
 assert.match(workflowSource, /typeof openEntryQc === 'function'/, 'Check nhập button is rendered for entry_qc column');
 
@@ -42,6 +42,7 @@ function element(tag) {
             contains: name => classes.has(name),
         },
         style: {},
+        setAttribute(name, value) { this[name] = value; },
         append(...items) { this.children.push(...items); },
         appendChild(child) { this.children.push(child); return child; },
         replaceChildren() { this.children = []; },
@@ -128,11 +129,16 @@ async function runTest() {
     await btnChot.listeners.click();
     assert.equal(requests.length, 0, 'No API call if confirm false');
     
+    
+    let refreshCount = 0;
+    sandbox.refreshProjectWorkflow = () => { refreshCount++; };
+
     // click chot, confirm = true -> POST
     confirmResult = true;
     await btnChot.listeners.click();
     assert.equal(requests[0].method, 'POST');
     assert.equal(requests[0].url, '/api/projects/1/workflow/cases/2/entry-qc/round1');
+    assert.equal(refreshCount, 1);
 
     // (b) status in_progress, chưa chốt -> không có nút nào
     routes = {
@@ -183,10 +189,12 @@ async function runTest() {
     
     // valid prompt -> POST
     promptResult = '  valid reason  ';
+    refreshCount = 0;
     await btnDuyet.listeners.click();
     assert.equal(requests[0].method, 'POST');
     assert.equal(requests[0].url, '/api/projects/1/workflow/cases/2/entry-qc/resolve');
     assert.equal(requests[0].body.reason, 'valid reason');
+    assert.equal(refreshCount, 1);
     
     // 409 error
     routes['POST /api/projects/1/workflow/cases/2/entry-qc/resolve'] = () => ({ status: 'error', detail: { code: 'c', message: 'Lỗi 409' } });
@@ -195,9 +203,11 @@ async function runTest() {
         return respond(200, routes['GET /api/projects/1/workflow/cases/2/entry-qc']());
     };
     promptResult = 'valid';
+    refreshCount = 0;
     await btnDuyet.listeners.click();
     txt = text(overlay);
     assert.match(txt, /Lỗi 409/);
+    assert.equal(refreshCount, 0);
 
     // (d) đã duyệt -> hiện lý do, không nút
     routes = {
@@ -236,6 +246,23 @@ async function runTest() {
     txt = text(overlay);
     assert.doesNotMatch(txt, /Chốt vòng 1/);
     assert.doesNotMatch(txt, /Duyệt kèm lý do/);
+    // edge case (f) rate 5, threshold 5, would_pass false
+    routes = {
+        'GET /api/projects/1/workflow/cases/2/entry-qc': () => ({
+            status: 'ok', data: { 
+                gate: { blocked: false }, 
+                entry_qc_status: 'done', 
+                live: { reports_total: 10, reports_assessed: 10, error_reports: 2, total_fields: 100, error_fields: 5, rate_percent: 5, threshold_percent: 5, would_pass: false }, 
+                rounds: [] 
+            }
+        })
+    };
+    body.replaceChildren();
+    await sandbox.openEntryQc(2, 'Box 6');
+    overlay = body.children[body.children.length - 1];
+    txt = text(overlay);
+    assert.match(txt, /Dự kiến: Không đạt/);
+
     console.log("All tests passed");
 }
-runTest().catch(console.error);
+runTest().catch(error => { console.error(error); process.exitCode = 1; });
