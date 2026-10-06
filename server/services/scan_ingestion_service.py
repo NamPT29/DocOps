@@ -339,6 +339,12 @@ def process_scan_package_background(package_id: int, session_factory=SessionLoca
                 pkg.failed_files = failed
                 update_scan_package(db, pkg)
                 db.commit()
+            pkg.processed_files = processed
+            pkg.failed_files = failed
+            pkg.total_pages = total_pages
+            pkg.total_a4_equivalent = total_a4_equiv
+            update_scan_package(db, pkg)
+            db.commit()
 
             try:
                 catalog_rows = get_case_catalog_rows(db, pkg.case_id)

@@ -399,3 +399,103 @@ def test_admin_start_keeps_existing_assignee(world):
     ).json()["data"]["items"]
     scan = next(item for item in cases if item["case_id"] == c1.id)["stages"]["scan"]
     assert scan["assigned_user_id"] == world["scanner"].id
+
+
+def test_br01_scan_qc_completion(world):
+    from server.models_scan import CaseScanPackage
+    from server.models import ArrangementDossier
+    db = world["db"]
+    case = world["cases"][0]
+    
+    _configure(world)
+    _transition(world, world["scanner"], case, "scan", "start")
+    _transition(world, world["scanner"], case, "scan", "complete")
+    _transition(world, world["qc"], case, "scan_qc", "start")
+    
+    # 1. No catalog rows -> allowed
+    res = _transition(world, world["qc"], case, "scan_qc", "complete")
+    assert res.status_code == 200, res.json()
+    
+    # Reset case stage for further tests
+    _transition(world, world["admin"], case, "scan_qc", "reopen", reason="test")
+    _transition(world, world["qc"], case, "scan_qc", "start")
+    
+    # Add a catalog row so the case HAS a catalog
+    dossier = ArrangementDossier(
+        case_id=case.id, project_id=world["project"].id, box_number=1, 
+        dossier_number=1, dossier_suffix="",
+        fonds_code="F", fonds_name="F", catalog_number="1", title="T",
+        start_date="01/01/2000", end_date="01/01/2000", start_year=2000,
+        maintenance_code="V", sheet_count=1, source_row=1
+    )
+    db.add(dossier)
+    db.commit()
+    
+    # 2. No packages -> mismatch logic (409 reason_required for admin, 409 scan_catalog_mismatch for qc)
+    res = _transition(world, world["qc"], case, "scan_qc", "complete")
+    assert res.status_code == 409
+    assert res.json()["detail"]["code"] == "scan_catalog_mismatch"
+    
+    res = _transition(world, world["admin"], case, "scan_qc", "complete")
+    assert res.status_code == 409
+    assert res.json()["detail"]["code"] == "reason_required"
+    
+    # 3. Package processing -> 409 scan_processing
+    pkg1 = CaseScanPackage(case_id=case.id, version=1, source_path="P", status="processing", submitted_by_user_id=world["scanner"].id)
+    db.add(pkg1)
+    db.commit()
+    res = _transition(world, world["qc"], case, "scan_qc", "complete")
+    assert res.status_code == 409
+    assert res.json()["detail"]["code"] == "scan_processing"
+    
+    # 4. Package matched -> allowed
+    pkg1.status = "done"
+    pkg1.match_status = "matched"
+    db.commit()
+    res = _transition(world, world["qc"], case, "scan_qc", "complete")
+    assert res.status_code == 200, res.json()
+    _transition(world, world["admin"], case, "scan_qc", "reopen", reason="test")
+    _transition(world, world["qc"], case, "scan_qc", "start")
+    
+    # 5. New package mismatch, old package matched -> mismatch (checks latest)
+    pkg2 = CaseScanPackage(case_id=case.id, version=2, source_path="P2", status="done", match_status="mismatch", submitted_by_user_id=world["scanner"].id)
+    db.add(pkg2)
+    db.commit()
+    res = _transition(world, world["qc"], case, "scan_qc", "complete")
+    assert res.status_code == 409
+    assert res.json()["detail"]["code"] == "scan_catalog_mismatch"
+    
+    # 6. Reject is never blocked
+    res = _transition(world, world["qc"], case, "scan_qc", "reject", reason="test")
+    assert res.status_code == 200
+    # Setup back for the next test
+    _transition(world, world["scanner"], case, "scan", "start")
+    _transition(world, world["scanner"], case, "scan", "complete")
+    _transition(world, world["qc"], case, "scan_qc", "start")
+    
+    # 7. Admin completes with reason
+    res = _transition(world, world["admin"], case, "scan_qc", "complete", reason="It is fine")
+    assert res.status_code == 200
+    
+    from server.models import CaseStageEvent
+    event = db.query(CaseStageEvent).filter_by(case_id=case.id, action="complete").order_by(CaseStageEvent.id.desc()).first()
+    assert event.reason == "It is fine"
+    
+    _transition(world, world["admin"], case, "scan_qc", "reopen", reason="test")
+    _transition(world, world["qc"], case, "scan_qc", "start")
+    
+    # 8. Package failed -> mismatch logic
+    pkg2.status = "failed"
+    pkg2.match_status = None
+    db.commit()
+    res = _transition(world, world["admin"], case, "scan_qc", "complete")
+    assert res.status_code == 409
+    assert res.json()["detail"]["code"] == "reason_required"
+    
+    # 9. Package done but match_status None -> mismatch logic
+    pkg2.status = "done"
+    pkg2.match_status = None
+    db.commit()
+    res = _transition(world, world["qc"], case, "scan_qc", "complete")
+    assert res.status_code == 409
+    assert res.json()["detail"]["code"] == "scan_catalog_mismatch"

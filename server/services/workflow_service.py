@@ -419,6 +419,36 @@ def _current_statuses(repository, project_id, case_id, enabled):
     return statuses, stored
 
 
+def _check_scan_qc_complete(repository, case_id, is_admin, reason):
+    if not repository.catalog_dossier_count(case_id):
+        return
+        
+    pkg = repository.get_latest_scan_package(case_id)
+    if pkg and pkg.status == "processing":
+        raise HTTPException(
+            status_code=409,
+            detail={"code": "scan_processing", "message": "Gói scan đang được xử lý ngầm, vui lòng đợi."}
+        )
+        
+    is_mismatch = (
+        not pkg 
+        or pkg.status == "failed" 
+        or pkg.match_status != "matched"
+    )
+    
+    if is_mismatch:
+        if not is_admin:
+            raise HTTPException(
+                status_code=409,
+                detail={"code": "scan_catalog_mismatch", "message": "Hồ sơ scan lệch với mục lục. Chỉ Admin được duyệt."}
+            )
+        if not reason or not str(reason).strip():
+            raise HTTPException(
+                status_code=409,
+                detail={"code": "reason_required", "message": "Bắt buộc nhập lý do khi duyệt hồ sơ lệch mục lục."}
+            )
+
+
 def transition_case_stage(db, *, project_id, case_id, stage_key, action, actor, reason=None):
     repository = WorkflowRepository(db)
     _project_or_404(repository, project_id)
@@ -434,6 +464,9 @@ def transition_case_stage(db, *, project_id, case_id, stage_key, action, actor, 
             raise HTTPException(status_code=403, detail="Chỉ quản trị viên được mở lại bước")
         if action != engine.REOPEN and stage_key in enabled:
             _require_stage_worker(repository, project_id, actor, stage_key)
+            
+        if stage_key == "scan_qc" and action == engine.COMPLETE:
+            _check_scan_qc_complete(repository, case_id, is_admin, reason)
 
         # Lock the rows we may change so two actors cannot race on one case.
         for key in enabled:

@@ -14,6 +14,7 @@ from server.models import (
     Submission,
     User,
 )
+from server.models_scan import CaseScanPackage
 
 UNDER_REVIEW_STATUSES = ("pending_review", "pending_input_confirmation")
 
@@ -31,6 +32,15 @@ class WorkflowRepository:
         return self.session.query(func.count(ArrangementDossier.id)).filter(
             ArrangementDossier.case_id == case_id
         ).scalar() or 0
+
+    def get_latest_scan_package(self, case_id):
+        """Returns the latest scan package for the given case."""
+        return (
+            self.session.query(CaseScanPackage)
+            .filter(CaseScanPackage.case_id == case_id)
+            .order_by(CaseScanPackage.version.desc())
+            .first()
+        )
 
     def stage_rows(self, project_id):
         return (

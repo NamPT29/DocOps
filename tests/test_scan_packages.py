@@ -746,3 +746,31 @@ def test_scan_package_no_status_gap_during_match(test_data, monkeypatch):
     db.refresh(pkg)
     assert pkg.status == "done"
     assert pkg.match_status == "matched"
+
+def test_scan_package_rollback_preserves_files(test_data, monkeypatch):
+    db = test_data["db"]
+    case = test_data["case"]
+    
+    pkg = CaseScanPackage(case_id=case.id, version=7, source_path="PKG7", status="processing", submitted_by_user_id=test_data["user"].id)
+    db.add(pkg)
+    db.commit()
+    
+    folder = _box_dir(test_data, "PKG7/1")
+    _write_pdf(folder / "file.pdf", [(210, 297)])
+    for i in range(8):
+        (folder / f"file_{i}.txt").write_text("hello")
+    
+    def raise_error(*args, **kwargs):
+        raise ValueError("Match error")
+        
+    monkeypatch.setattr(scan_ingestion_service, "match_scan_files_to_catalog", raise_error)
+    process_scan_package_background(pkg.id, session_factory=sessionmaker(bind=db.get_bind()))
+    
+    db.refresh(pkg)
+    assert pkg.status == "done"
+    assert pkg.match_status is None
+    assert "catalog_match_error" in (pkg.warning_flags or "")
+    
+    files = db.query(CaseScanFile).filter_by(package_id=pkg.id).all()
+    assert len(files) == 9
+    assert pkg.total_files == 9
