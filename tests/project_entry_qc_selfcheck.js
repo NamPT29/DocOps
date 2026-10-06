@@ -23,6 +23,11 @@ assert.ok(scripts.some(src => /^js\/project_workflow\.js\?v=[\d.]+$/.test(src)),
 
 assert.match(workflowSource, /typeof openEntryQc === 'function'/, 'Check nhập button is rendered for entry_qc column');
 
+assert.doesNotMatch(source, /round2\.sampled/, 'Không dùng round2.sampled');
+assert.doesNotMatch(source, /round2\.items/, 'Không dùng round2.items');
+assert.doesNotMatch(source, /\.checked_at\b/, 'Không dùng item.checked_at');
+assert.doesNotMatch(source, /sample\.rate_percent\b/, 'Không dùng sample.rate_percent');
+
 // --- a small DOM ---
 function element(tag) {
     const classes = new Set();
@@ -281,7 +286,7 @@ async function runTest() {
     // (r2b) chưa xong vòng 1
     routes = {
         'GET /api/projects/1/workflow/cases/2/entry-qc': () => ({
-            status: 'ok', data: { gate: { blocked: false }, entry_qc_status: 'done', live: null, rounds: [], round2: { enabled: true, sampled: false } }
+            status: 'ok', data: { gate: { blocked: false }, entry_qc_status: 'done', live: null, rounds: [], round2: { enabled: true, sampling: null } }
         })
     };
     body.replaceChildren();
@@ -294,7 +299,7 @@ async function runTest() {
     // (r2c) lấy mẫu được (đã xong vòng 1)
     routes = {
         'GET /api/projects/1/workflow/cases/2/entry-qc': () => ({
-            status: 'ok', data: { gate: { blocked: false }, entry_qc_status: 'done', live: null, rounds: [{ round: 1, passed: true }], round2: { enabled: true, sampled: false } }
+            status: 'ok', data: { gate: { blocked: false }, entry_qc_status: 'done', live: null, rounds: [{ round: 1, passed: true }], round2: { enabled: true, sampling: null } }
         }),
         'POST /api/projects/1/workflow/cases/2/entry-qc/round2/sample': () => ({ status: 'ok', data: {} })
     };
@@ -322,10 +327,10 @@ async function runTest() {
         'GET /api/projects/1/workflow/cases/2/entry-qc': () => ({
             status: 'ok', data: { 
                 gate: { blocked: false }, entry_qc_status: 'done', live: null, rounds: [{ round: 1, passed: true }], 
-                round2: { enabled: true, sampled: true, sampling: { sample_size: 2, population_count: 10, rate_percent: 20 }, items: [
-                    { report_name: 'Rep 1', checked_at: null },
-                    { report_name: 'Rep 2', checked_at: '2026', checked_by_name: 'Admin', changed_field_count: 1, visible_field_count: 5 }
-                ] }
+                round2: { enabled: true, sampling: { sample_size: 2, population_count: 10, sample_rate_percent: 20, items: [
+                    { report_name: 'Rep 1', checked: false },
+                    { report_name: 'Rep 2', checked: true, checked_by_name: 'Admin', changed_field_count: 1, visible_field_count: 5 }
+                ] } }
             }
         })
     };
@@ -344,10 +349,10 @@ async function runTest() {
         'GET /api/projects/1/workflow/cases/2/entry-qc': () => ({
             status: 'ok', data: { 
                 gate: { blocked: false }, entry_qc_status: 'done', live: null, rounds: [{ round: 1, passed: true }], 
-                round2: { enabled: true, sampled: true, sampling: { sample_size: 2, population_count: 10, rate_percent: 20 }, items: [
-                    { report_name: 'Rep 1', checked_at: '2026', checked_by_name: 'Admin', changed_field_count: 0, visible_field_count: 5 },
-                    { report_name: 'Rep 2', checked_at: '2026', checked_by_name: 'Admin', changed_field_count: 1, visible_field_count: 5 }
-                ] }
+                round2: { enabled: true, sampling: { sample_size: 2, population_count: 10, sample_rate_percent: 20, items: [
+                    { report_name: 'Rep 1', checked: true, checked_by_name: 'Admin', changed_field_count: 0, visible_field_count: 5 },
+                    { report_name: 'Rep 2', checked: true, checked_by_name: 'Admin', changed_field_count: 1, visible_field_count: 5 }
+                ] } }
             }
         }),
         'POST /api/projects/1/workflow/cases/2/entry-qc/round2': () => ({ status: 'ok', data: {} })
@@ -376,7 +381,7 @@ async function runTest() {
         'GET /api/projects/1/workflow/cases/2/entry-qc': () => ({
             status: 'ok', data: { 
                 gate: { blocked: false }, entry_qc_status: 'done', live: null, rounds: [{ round: 1, passed: true }, { round: 2, passed: false, rate_percent: 15, threshold_percent: 5 }], 
-                round2: { enabled: true, sampled: true, sampling: { sample_size: 2, population_count: 10, rate_percent: 20 }, items: [] }
+                round2: { enabled: true, sampling: { sample_size: 2, population_count: 10, sample_rate_percent: 20, items: [] } }
             }
         }),
         'POST /api/projects/1/workflow/cases/2/entry-qc/round2/resolve': () => ({ status: 'ok', data: {} })
@@ -404,7 +409,7 @@ async function runTest() {
         'GET /api/projects/1/workflow/cases/2/entry-qc': () => ({
             status: 'ok', data: { 
                 gate: { blocked: false }, entry_qc_status: 'done', live: null, rounds: [{ round: 1, passed: true }, { round: 2, passed: false, resolution: 'approved', resolution_reason: 'OK r2' }], 
-                round2: { enabled: true, sampled: true, sampling: { sample_size: 2, population_count: 10, rate_percent: 20 }, items: [] }
+                round2: { enabled: true, sampling: { sample_size: 2, population_count: 10, sample_rate_percent: 20, items: [] } }
             }
         })
     };
@@ -420,7 +425,7 @@ async function runTest() {
         'GET /api/projects/1/workflow/cases/2/entry-qc': () => ({
             status: 'ok', data: { 
                 gate: { blocked: false }, entry_qc_status: 'done', live: null, rounds: [{ round: 1, passed: true }, { round: 2, passed: true, rate_percent: 2, threshold_percent: 5 }], 
-                round2: { enabled: true, sampled: true, sampling: { sample_size: 2, population_count: 10, rate_percent: 20 }, items: [] }
+                round2: { enabled: true, sampling: { sample_size: 2, population_count: 10, sample_rate_percent: 20, items: [] } }
             }
         })
     };

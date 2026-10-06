@@ -413,3 +413,41 @@ def test_round2_finalize_threshold_change_no_affect(client, mock_data, test_db):
     r = client.get(f'/api/projects/{mock_data["p1"].id}/workflow/cases/{mock_data["c1"].id}/entry-qc').json()
     assert r['data']['rounds'][1]['passed'] is True # Still true!
     assert r['data']['rounds'][1]['threshold_percent'] == 5.0
+
+def test_api_contract_round2_structure(client, test_db, mock_data):
+    # This test ensures the returned API dictionary exactly matches the specified schema.
+    admin = mock_data["admin"]
+    p1 = mock_data["p1"]
+    c1 = mock_data["c1"]
+    setup_headers(client.app.dependency_overrides, admin)
+
+    # First, make submissions so we can sample
+    subs = make_submissions(test_db, p1.id, c1.id, admin["id"], 5)
+    
+    # Enable round 2 and sample
+    client.post(f"/api/projects/{p1.id}/workflow/cases/{c1.id}/entry-qc/round2/sample")
+    
+    # Check one item to populate checked_by_name, etc.
+    sampling = test_db.query(CaseEntryQcSampling).filter_by(case_id=c1.id).first()
+    item = test_db.query(CaseEntryQcSampleItem).filter_by(sampling_id=sampling.id).first()
+    client.put(f"/api/projects/{p1.id}/workflow/cases/{c1.id}/entry-qc/round2/items/{item.submission_id}", json={"data": {"field1": "val1"}})
+    
+    response = client.get(f"/api/projects/{p1.id}/workflow/cases/{c1.id}/entry-qc")
+    assert response.status_code == 200
+    data = response.json()["data"]
+    
+    assert "round2" in data
+    round2 = data["round2"]
+    assert set(round2.keys()) == {"enabled", "sampling"}
+    
+    assert round2["sampling"] is not None
+    sampling_data = round2["sampling"]
+    
+    expected_sampling_keys = {"sample_rate_percent", "population_count", "sample_size", "created_at", "created_by_name", "items"}
+    assert set(sampling_data.keys()) == expected_sampling_keys
+    
+    assert len(sampling_data["items"]) > 0
+    item_data = sampling_data["items"][0]
+    
+    expected_item_keys = {"submission_id", "report_name", "checked", "checked_by_name", "changed_field_count", "visible_field_count"}
+    assert set(item_data.keys()) == expected_item_keys

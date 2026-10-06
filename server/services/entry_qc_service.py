@@ -52,9 +52,10 @@ def get_entry_qc_summary(db, project_id, case_id, actor):
     total_fields = stats["total_fields"]
     error_fields = stats["error_fields"]
     
+    policy = get_effective_policy(db, project_id=project_id)
+    
     live = None
     if total_fields > 0:
-        policy = get_effective_policy(db, project_id=project_id)
         threshold = policy["error_threshold_percent"]
         rate = (Decimal(error_fields) * 100 / Decimal(total_fields)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
         live = {
@@ -91,12 +92,8 @@ def get_entry_qc_summary(db, project_id, case_id, actor):
         })
 
     # 4. Round 2
-    round2_payload = {"enabled": policy.get("entry_qc_round2_enabled", True) if total_fields > 0 else True, "sampling": None}
-    if total_fields == 0:
-        # If total_fields is 0, let's still get the policy properly without throwing errors or just get it again
-        policy = get_effective_policy(db, project_id=project_id)
-        round2_payload["enabled"] = policy.get("entry_qc_round2_enabled", True)
-        
+    round2_payload = {"enabled": policy.get("entry_qc_round2_enabled", True), "sampling": None}
+    
     sampling = repo.get_sampling(case_id, 2)
     if sampling:
         items = []

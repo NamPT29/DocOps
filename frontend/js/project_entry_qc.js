@@ -148,7 +148,7 @@ async function openEntryQc(caseId, caseName) {
             if (!data.round2.enabled) {
                 r2Body.appendChild(_entryQcElement('div', 'text-muted', 'Dự án không bật Check vòng 2.'));
             } else {
-                if (!data.round2.sampled) {
+                if (data.round2.sampling === null) {
                     if (round1Done) {
                         canSampleRound2 = true;
                     } else {
@@ -156,9 +156,9 @@ async function openEntryQc(caseId, caseName) {
                     }
                 } else {
                     const sample = data.round2.sampling;
-                    const items = data.round2.items || [];
+                    const items = sample.items || [];
                     
-                    r2Body.appendChild(_entryQcElement('div', 'fw-bold mb-2', `Mẫu: ${sample.sample_size}/${sample.population_count} phiếu (tỷ lệ ${sample.rate_percent}%)`));
+                    r2Body.appendChild(_entryQcElement('div', 'fw-bold mb-2', `Mẫu: ${sample.sample_size}/${sample.population_count} phiếu (tỷ lệ ${sample.sample_rate_percent}%)`));
                     
                     if (items.length > 0) {
                         const table = _entryQcElement('table', 'table table-sm table-bordered');
@@ -173,7 +173,7 @@ async function openEntryQc(caseId, caseName) {
                         items.forEach(item => {
                             const tr = _entryQcElement('tr', '');
                             tr.appendChild(_entryQcElement('td', '', item.report_name));
-                            if (item.checked_at) {
+                            if (item.checked === true) {
                                 tr.appendChild(_entryQcElement('td', 'text-success', 'Đã check'));
                                 tr.appendChild(_entryQcElement('td', '', item.checked_by_name || '—'));
                                 tr.appendChild(_entryQcElement('td', '', `${item.changed_field_count}/${item.visible_field_count} trường sửa`));
@@ -274,19 +274,19 @@ async function openEntryQc(caseId, caseName) {
                 if (!window.confirm('Lấy mẫu ngẫu nhiên cho vòng 2? Sau khi lấy không đổi được.')) return;
                 sampleBtn.disabled = true;
                 const r = await authFetch(`/api/projects/${projectId}/workflow/cases/${caseId}/entry-qc/round2/sample`, { method: 'POST' });
-                    if (!r) {
-                        sampleBtn.disabled = false;
-                        return;
-                    }
-                    const rData = await r.json().catch(() => ({}));
-                    if (!r.ok || rData.status !== 'ok') {
-                        errorBox.textContent = scanSubmitErrorText(rData, 'Lỗi khi lấy mẫu.');
-                        errorBox.classList.remove('d-none');
-                        sampleBtn.disabled = false;
-                    } else {
-                        await render();
-                        if (typeof refreshProjectWorkflow === 'function') refreshProjectWorkflow();
-                    }
+                if (!r) {
+                    sampleBtn.disabled = false;
+                    return;
+                }
+                const rData = await r.json().catch(() => ({}));
+                if (!r.ok || rData.status !== 'ok') {
+                    errorBox.textContent = scanSubmitErrorText(rData, 'Lỗi khi lấy mẫu.');
+                    errorBox.classList.remove('d-none');
+                    sampleBtn.disabled = false;
+                } else {
+                    await render();
+                    if (typeof refreshProjectWorkflow === 'function') refreshProjectWorkflow();
+                }
             });
             footer.appendChild(sampleBtn);
         }

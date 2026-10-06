@@ -184,6 +184,46 @@ def test_unknown_project_and_unknown_fields_are_rejected(world):
         projects.ProjectPolicyRequest(error_rate=5)
 
 
+def test_entry_qc_round2_enabled_values(world):
+    # true -> true
+    policy = _put(world, entry_qc_round2_enabled=True)
+    assert policy["values"]["entry_qc_round2_enabled"] is True
+    # false -> false
+    policy = _put(world, entry_qc_round2_enabled=False)
+    assert policy["values"]["entry_qc_round2_enabled"] is False
+    # null -> follows QC-01 (True)
+    policy = _put(world, entry_qc_round2_enabled=None)
+    assert policy["values"]["entry_qc_round2_enabled"] is True
+    assert policy["overrides"]["entry_qc_round2_enabled"] is None
+
+
+def test_full_payload_can_be_saved(world):
+    # Send all fields as they would be from the form
+    payload = {
+        "error_threshold_percent": 3.0,
+        "sample_rate_percent": 15.0,
+        "box_deadline_days": 1,
+        "organ_code": "T123",
+        "file_notation": "LT",
+        "export_profile": "NN-SIP",
+        "bad_paper_factor": 1.1,
+        "overtime_factor": 1.5,
+        "sunday_factor": 1.2,
+        "entry_qc_round2_enabled": False,
+    }
+    policy = _put(world, **payload)
+    assert policy["values"] == payload
+    
+    with pytest.raises(HTTPException) as error:
+        _put(world, entry_qc_round2_enabled="abc")
+    assert error.value.status_code == 400
+    assert "đúng/sai" in error.value.detail or "đúng/sai (true/false)" in error.value.detail
+
+
+def test_policy_keys_match_request_model():
+    assert set(policy_service.POLICY_KEYS) == set(projects.ProjectPolicyRequest.model_fields.keys())
+
+
 def test_only_admins_reach_the_policy_api(world):
     db = world["db"]
     app = FastAPI()

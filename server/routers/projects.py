@@ -310,6 +310,7 @@ class ProjectPolicyRequest(BaseModel):
     bad_paper_factor: Any = None
     overtime_factor: Any = None
     sunday_factor: Any = None
+    entry_qc_round2_enabled: Any = None
 
 
 @router.get("/{project_id}/policy")
