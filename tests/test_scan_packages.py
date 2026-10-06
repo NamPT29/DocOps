@@ -191,6 +191,41 @@ def test_3e_box_number_matching(test_data):
     assert _submit(test_data, "P1/Hộp 0020", case=case2).status_code == 200
 
 
+def test_hierarchical_case_key_uses_last_component(test_data):
+    """case_key 'phong01/0020' → box 20, folder '0020' → 200."""
+    db = test_data["db"]
+    _enable_scan(test_data)
+    case = ProjectCase(project_id=test_data["project"].id, case_key="phong01/0020", display_name="Hộp 20")
+    db.add(case)
+    db.commit()
+    _box_dir(test_data, "P1/0020")
+    assert _submit(test_data, "P1/0020", case=case).status_code == 200
+
+
+def test_hierarchical_case_key_rejects_wrong_folder(test_data):
+    """case_key 'phong01/0020' must NOT match folder '01' or '0021'."""
+    db = test_data["db"]
+    _enable_scan(test_data)
+    case = ProjectCase(project_id=test_data["project"].id, case_key="phong01/0020", display_name="Hộp 20")
+    db.add(case)
+    db.commit()
+    _box_dir(test_data, "P1/01")
+    _box_dir(test_data, "P1/0021")
+    assert _submit(test_data, "P1/01", case=case).status_code == 409
+    assert _submit(test_data, "P1/0021", case=case).status_code == 409
+
+
+def test_placeholder_case_key_accepts_matching_folder(test_data):
+    """case_key '::muc-luc/hop-20' still matches folder 'Hộp 0020'."""
+    db = test_data["db"]
+    _enable_scan(test_data)
+    case = ProjectCase(project_id=test_data["project"].id, case_key="::muc-luc/hop-20", display_name="Hộp 20")
+    db.add(case)
+    db.commit()
+    _box_dir(test_data, "P1/Hộp 0020")
+    assert _submit(test_data, "P1/Hộp 0020", case=case).status_code == 200
+
+
 def test_3c_3f_3k_scan_user(test_data):
     db = test_data["db"]
     project = test_data["project"]

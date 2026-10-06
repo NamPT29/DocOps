@@ -187,8 +187,8 @@ migration `0011_scan_packages`), giao diện `frontend/js/project_scan_submit.js
      chưa xong (`{code: stage_blocked, message}` do `transition_case_stage` trả về).
    - Trạng thái Scan: chưa có dòng = `pending`. `pending`/`rejected` → chuyển START (ghi sự kiện);
      `in_progress` → chỉ thêm gói, không chuyển bước.
-2. **Khớp số hộp**: số hộp của hộp = N trong khóa `::muc-luc/hop-N` (hộp chờ scan), nếu không thì
-   dãy số ĐẦU TIÊN trong `case_key`, rồi trong tên hiển thị. Số của thư mục = dãy số đầu tiên trong
+2. **Khớp số hộp**: số hộp của hộp = `box_number_of_case_key(case_key)` (thành phần cuối của
+   khóa, hiểu cả `::muc-luc/hop-N`); nếu trả `None` mới lấy dãy số đầu tiên trong tên hiển thị. Số của thư mục = dãy số đầu tiên trong
    tên thư mục được chọn. So theo giá trị (`0020` = 20); thiếu số hoặc lệch → 409.
 3. **Tên người scan và người phụ trách**:
    - Người scan không cần tài khoản. `scanned_by_name` = tên thư mục nằm `scan_user_name_level` cấp

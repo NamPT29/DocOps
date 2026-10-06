@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 
 from server.database import get_utc_now, SessionLocal
 from server.models_scan import CaseScanPackage, CaseScanFile
+from server.services.arrangement_catalog_parser import box_number_of_case_key
 from server.services.server_folder_service import resolve_server_source_directory
 from server.services.workflow_service import transition_case_stage
 from server.repositories.workflow_repository import WorkflowRepository
@@ -48,10 +49,6 @@ def _normalize_name(name: str | None) -> str:
 def _extract_box_number(s: str | None) -> int | None:
     if not s:
         return None
-    if "::muc-luc/hop-" in s:
-        match = re.search(r"::muc-luc/hop-(\d+)", s)
-        if match:
-            return int(match.group(1))
     match = re.search(r"\d+", s)
     return int(match.group()) if match else None
 
@@ -81,7 +78,7 @@ def submit_scan_package(
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
-    case_box = _extract_box_number(case.case_key) or _extract_box_number(case.display_name)
+    case_box = box_number_of_case_key(case.case_key) or _extract_box_number(case.display_name)
     folder_box = _extract_box_number(source_dir.name)
     
     if case_box is None or folder_box is None or case_box != folder_box:
