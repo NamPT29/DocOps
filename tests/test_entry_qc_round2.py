@@ -259,3 +259,157 @@ def test_round2_race_condition(client, mock_data, test_db, monkeypatch):
     res = client.post(f"/api/projects/{mock_data['p1'].id}/workflow/cases/{mock_data['c1'].id}/entry-qc/round2/sample")
     assert res.status_code == 409
     assert res.json()["detail"]["code"] == "already_sampled"
+
+def test_round2_check_item_success(client, mock_data, test_db):
+    setup_headers(app.dependency_overrides, mock_data['admin'])
+    make_submissions(test_db, mock_data['p1'].id, mock_data['c1'].id, 999, 1) # user 999
+    client.post(f'/api/projects/{mock_data["p1"].id}/workflow/cases/{mock_data["c1"].id}/entry-qc/round2/sample')
+    r = client.get(f'/api/projects/{mock_data["p1"].id}/workflow/cases/{mock_data["c1"].id}/entry-qc').json()
+    sub_id = r['data']['round2']['sampling']['items'][0]['submission_id']
+    
+    # Check item
+    res = client.put(
+        f'/api/projects/{mock_data["p1"].id}/workflow/cases/{mock_data["c1"].id}/entry-qc/round2/items/{sub_id}',
+        json={'data': {'field': 'val2', 'new_field': 'val3', '_internal': 'ignored'}}
+    )
+    assert res.status_code == 200
+    
+    # Verify GET reflects changes
+    r = client.get(f'/api/projects/{mock_data["p1"].id}/workflow/cases/{mock_data["c1"].id}/entry-qc').json()
+    item = r['data']['round2']['sampling']['items'][0]
+    assert item['checked'] is True
+    assert item['checked_by_name'] == 'admin'
+    assert item['visible_field_count'] == 2 # field, new_field
+    assert item['changed_field_count'] == 2 # both changed from baseline
+    
+    # Verify submission data_json updated
+    from server.models import Submission
+    sub = test_db.query(Submission).get(sub_id)
+    data = json.loads(sub.data_json)
+    assert data['field'] == 'val2'
+    assert data['new_field'] == 'val3'
+    assert data.get('_internal') is None # not updated
+
+def test_round2_check_self_review_input(client, mock_data, test_db):
+    setup_headers(app.dependency_overrides, mock_data['admin'])
+    make_submissions(test_db, mock_data['p1'].id, mock_data['c1'].id, mock_data['admin']['id'], 1)
+    client.post(f'/api/projects/{mock_data["p1"].id}/workflow/cases/{mock_data["c1"].id}/entry-qc/round2/sample')
+    r = client.get(f'/api/projects/{mock_data["p1"].id}/workflow/cases/{mock_data["c1"].id}/entry-qc').json()
+    sub_id = r['data']['round2']['sampling']['items'][0]['submission_id']
+    
+    res = client.put(
+        f'/api/projects/{mock_data["p1"].id}/workflow/cases/{mock_data["c1"].id}/entry-qc/round2/items/{sub_id}',
+        json={'data': {}}
+    )
+    assert res.status_code == 409
+    assert res.json()['detail']['code'] == 'self_review'
+
+def test_round2_check_self_review_reviewer(client, mock_data, test_db):
+    setup_headers(app.dependency_overrides, mock_data['admin'])
+    subs = make_submissions(test_db, mock_data['p1'].id, mock_data['c1'].id, 999, 1)
+    from server.models import SubmissionQualityAssessment
+    # Admin was the reviewer
+    test_db.add(SubmissionQualityAssessment(submission_id=subs[0].id, input_user_id=999, reviewer_user_id=mock_data['admin']['id'], baseline_data_json='{}', visible_field_count=1, changed_field_count=0, is_error_report=False))
+    test_db.commit()
+    
+    client.post(f'/api/projects/{mock_data["p1"].id}/workflow/cases/{mock_data["c1"].id}/entry-qc/round2/sample')
+    r = client.get(f'/api/projects/{mock_data["p1"].id}/workflow/cases/{mock_data["c1"].id}/entry-qc').json()
+    sub_id = r['data']['round2']['sampling']['items'][0]['submission_id']
+    
+    res = client.put(
+        f'/api/projects/{mock_data["p1"].id}/workflow/cases/{mock_data["c1"].id}/entry-qc/round2/items/{sub_id}',
+        json={'data': {}}
+    )
+    assert res.status_code == 409
+    assert res.json()['detail']['code'] == 'self_review'
+
+def test_round2_already_checked(client, mock_data, test_db):
+    setup_headers(app.dependency_overrides, mock_data['admin'])
+    make_submissions(test_db, mock_data['p1'].id, mock_data['c1'].id, 999, 1)
+    client.post(f'/api/projects/{mock_data["p1"].id}/workflow/cases/{mock_data["c1"].id}/entry-qc/round2/sample')
+    r = client.get(f'/api/projects/{mock_data["p1"].id}/workflow/cases/{mock_data["c1"].id}/entry-qc').json()
+    sub_id = r['data']['round2']['sampling']['items'][0]['submission_id']
+    
+    client.put(f'/api/projects/{mock_data["p1"].id}/workflow/cases/{mock_data["c1"].id}/entry-qc/round2/items/{sub_id}', json={'data': {}})
+    res = client.put(f'/api/projects/{mock_data["p1"].id}/workflow/cases/{mock_data["c1"].id}/entry-qc/round2/items/{sub_id}', json={'data': {}})
+    assert res.status_code == 409
+    assert res.json()['detail']['code'] == 'already_checked'
+
+def test_round2_submission_changed(client, mock_data, test_db):
+    setup_headers(app.dependency_overrides, mock_data['admin'])
+    subs = make_submissions(test_db, mock_data['p1'].id, mock_data['c1'].id, 999, 1)
+    client.post(f'/api/projects/{mock_data["p1"].id}/workflow/cases/{mock_data["c1"].id}/entry-qc/round2/sample')
+    
+    subs[0].status = 'pending_input_confirmation'
+    test_db.commit()
+    
+    res = client.put(f'/api/projects/{mock_data["p1"].id}/workflow/cases/{mock_data["c1"].id}/entry-qc/round2/items/{subs[0].id}', json={'data': {}})
+    assert res.status_code == 409
+    assert res.json()['detail']['code'] == 'submission_changed'
+
+def test_round2_finalize_items_unchecked(client, mock_data, test_db):
+    setup_headers(app.dependency_overrides, mock_data['admin'])
+    make_submissions(test_db, mock_data['p1'].id, mock_data['c1'].id, 999, 1)
+    client.post(f'/api/projects/{mock_data["p1"].id}/workflow/cases/{mock_data["c1"].id}/entry-qc/round2/sample')
+    
+    res = client.post(f'/api/projects/{mock_data["p1"].id}/workflow/cases/{mock_data["c1"].id}/entry-qc/round2')
+    assert res.status_code == 409
+    assert res.json()['detail']['code'] == 'items_unchecked'
+
+def test_round2_finalize_pass_fail_boundary(client, mock_data, test_db):
+    setup_headers(app.dependency_overrides, mock_data['admin'])
+    subs = make_submissions(test_db, mock_data['p1'].id, mock_data['c1'].id, 999, 1)
+    
+    baseline_data = {f"f{i}": "v" for i in range(100)}
+    subs[0].data_json = json.dumps(baseline_data)
+    test_db.commit()
+    
+    client.post(f'/api/projects/{mock_data["p1"].id}/workflow/cases/{mock_data["c1"].id}/entry-qc/round2/sample')
+    
+    r = client.get(f'/api/projects/{mock_data["p1"].id}/workflow/cases/{mock_data["c1"].id}/entry-qc').json()
+    sub_id = r['data']['round2']['sampling']['items'][0]['submission_id']
+    
+    data = dict(baseline_data)
+    for i in range(5):
+        data[f"f{i}"] = "changed"
+    
+    client.put(f'/api/projects/{mock_data["p1"].id}/workflow/cases/{mock_data["c1"].id}/entry-qc/round2/items/{sub_id}', json={'data': data})
+    
+    res = client.post(f'/api/projects/{mock_data["p1"].id}/workflow/cases/{mock_data["c1"].id}/entry-qc/round2')
+    assert res.status_code == 200
+    assert res.json()['data']['passed'] is False
+    assert res.json()['data']['rate_percent'] == 5.0
+    
+    # test resolve
+    res = client.post(f'/api/projects/{mock_data["p1"].id}/workflow/cases/{mock_data["c1"].id}/entry-qc/round2/resolve', json={"reason": "ok"})
+    assert res.status_code == 200
+
+def test_round2_finalize_threshold_change_no_affect(client, mock_data, test_db):
+    setup_headers(app.dependency_overrides, mock_data['admin'])
+    subs = make_submissions(test_db, mock_data['p1'].id, mock_data['c1'].id, 999, 1)
+    
+    baseline_data = {f"f{i}": "v" for i in range(100)}
+    subs[0].data_json = json.dumps(baseline_data)
+    test_db.commit()
+    
+    client.post(f'/api/projects/{mock_data["p1"].id}/workflow/cases/{mock_data["c1"].id}/entry-qc/round2/sample')
+    
+    r = client.get(f'/api/projects/{mock_data["p1"].id}/workflow/cases/{mock_data["c1"].id}/entry-qc').json()
+    sub_id = r['data']['round2']['sampling']['items'][0]['submission_id']
+    
+    data = dict(baseline_data)
+    for i in range(4):
+        data[f"f{i}"] = "changed"
+        
+    client.put(f'/api/projects/{mock_data["p1"].id}/workflow/cases/{mock_data["c1"].id}/entry-qc/round2/items/{sub_id}', json={'data': data})
+    client.post(f'/api/projects/{mock_data["p1"].id}/workflow/cases/{mock_data["c1"].id}/entry-qc/round2')
+    
+    # Change threshold to 2%
+    from server.models import ProjectPolicy
+    pol = test_db.query(ProjectPolicy).first()
+    pol.error_threshold_percent = 2
+    test_db.commit()
+    
+    r = client.get(f'/api/projects/{mock_data["p1"].id}/workflow/cases/{mock_data["c1"].id}/entry-qc').json()
+    assert r['data']['rounds'][1]['passed'] is True # Still true!
+    assert r['data']['rounds'][1]['threshold_percent'] == 5.0

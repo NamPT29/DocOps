@@ -3,7 +3,8 @@ from fastapi import HTTPException
 from server.repositories.entry_qc_repository import EntryQcRepository
 from server.services.project_policy_service import get_effective_policy
 from server.services.workflow_engine import derive_entry_statuses, DONE
-from server.models import get_utc_now
+from server.models import get_utc_now, Submission, SubmissionQualityAssessment
+from server.services.submission_quality_service import SubmissionQualityService
 from server.models_entry_qc import CaseEntryQcResult, CaseEntryQcSampling, CaseEntryQcSampleItem
 from server.repositories.workflow_repository import WorkflowRepository
 import math
@@ -198,7 +199,7 @@ def finalize_round1(db, project_id, case_id, actor):
         "created_by_name": creator_name
     }
 
-def resolve_round1(db, project_id, case_id, actor, reason: str):
+def _resolve_round(db, project_id, case_id, actor, reason: str, round_no: int):
     _check_permission(db, project_id, case_id, actor)
     if actor.get("role") != "admin":
         raise HTTPException(status_code=403, detail={"code": "forbidden", "message": "Bạn không có quyền thực hiện bước này."})
@@ -215,31 +216,37 @@ def resolve_round1(db, project_id, case_id, actor, reason: str):
         )
 
     existing_rounds = repo.get_rounds(case_id)
-    round1 = next((r for r in existing_rounds if r.round == 1), None)
+    round_obj = next((r for r in existing_rounds if r.round == round_no), None)
     
-    if not round1:
+    if not round_obj:
         raise HTTPException(status_code=409, detail={"code": "not_finalized", "message": "Chưa chốt kết quả Check nhập liệu."})
     
-    if round1.passed:
+    if round_obj.passed:
         raise HTTPException(status_code=409, detail={"code": "not_failed", "message": "Vòng kiểm tra đã Đạt, không cần duyệt."})
         
-    if round1.resolution:
+    if round_obj.resolution:
         raise HTTPException(status_code=409, detail={"code": "already_resolved", "message": "Hộp đã được duyệt."})
         
-    round1.resolution = "approved"
-    round1.resolution_reason = reason.strip()
-    round1.resolved_by_user_id = actor["id"]
-    round1.resolved_at = get_utc_now()
+    round_obj.resolution = "approved"
+    round_obj.resolution_reason = reason.strip()
+    round_obj.resolved_by_user_id = actor["id"]
+    round_obj.resolved_at = get_utc_now()
     
     db.commit()
     
     resolver_name = actor.get("full_name") or actor.get("username")
     return {
-        "resolution": round1.resolution,
-        "resolution_reason": round1.resolution_reason,
+        "resolution": round_obj.resolution,
+        "resolution_reason": round_obj.resolution_reason,
         "resolved_by_name": resolver_name,
-        "resolved_at": round1.resolved_at.isoformat()
+        "resolved_at": round_obj.resolved_at.isoformat()
     }
+
+def resolve_round1(db, project_id, case_id, actor, reason: str):
+    return _resolve_round(db, project_id, case_id, actor, reason, 1)
+
+def resolve_round2(db, project_id, case_id, actor, reason: str):
+    return _resolve_round(db, project_id, case_id, actor, reason, 2)
 
 
 def sample_round2(db, project_id, case_id, actor):
@@ -310,3 +317,127 @@ def sample_round2(db, project_id, case_id, actor):
     repo.add_sample_items(items)
     db.commit()
     return {"message": "Đã lấy mẫu vòng 2."}
+
+def check_round2_item(db, project_id, case_id, submission_id, request_data: dict, actor):
+    repo = EntryQcRepository(db)
+    _check_permission(db, project_id, case_id, actor)
+
+    sampling = repo.get_sampling(case_id, 2)
+    if not sampling:
+        raise HTTPException(status_code=404, detail={"code": "not_found", "message": "Không tìm thấy mẫu."})
+
+    item = repo.get_sample_item_for_update(case_id, 2, submission_id)
+    if not item:
+        raise HTTPException(status_code=404, detail={"code": "not_found", "message": "Phiếu không thuộc mẫu của hộp này."})
+
+    if item.checked_at is not None:
+        raise HTTPException(status_code=409, detail={"code": "already_checked", "message": "Phiếu này đã được check."})
+
+    submission = repo.get_submission(submission_id)
+    if not submission:
+        raise HTTPException(status_code=404, detail={"code": "not_found", "message": "Không tìm thấy phiếu."})
+        
+    if submission.status != 'completed':
+        raise HTTPException(status_code=409, detail={"code": "submission_changed", "message": "Phiếu đã thay đổi trạng thái."})
+
+    if submission.created_by_user_id == actor["id"]:
+        raise HTTPException(status_code=409, detail={"code": "self_review", "message": "Người check nhập liệu không được trùng người nhập liệu."})
+
+    assessment = repo.get_quality_assessment(submission_id)
+    if assessment and assessment.reviewer_user_id == actor["id"]:
+        raise HTTPException(status_code=409, detail={"code": "self_review", "message": "Người check vòng 2 không được trùng người đã duyệt vòng 1."})
+
+    existing_rounds = repo.get_rounds(case_id)
+    if any(r.round == 2 for r in existing_rounds):
+        raise HTTPException(status_code=409, detail={"code": "round2_finalized", "message": "Vòng kiểm tra này đã được chốt kết quả."})
+
+    import json
+    baseline = json.loads(item.baseline_data_json or "{}")
+    
+    final_data = dict(baseline)
+    for k, v in request_data.items():
+        if isinstance(k, str) and not k.startswith("_"):
+            final_data[k] = v
+            
+    visible_count, changed_count = SubmissionQualityService.count_field_changes(db, submission, baseline, final_data)
+
+    item.final_data_json = json.dumps(final_data, ensure_ascii=False)
+    item.visible_field_count = visible_count
+    item.changed_field_count = changed_count
+    item.checked_by_user_id = actor["id"]
+    item.checked_at = get_utc_now()
+
+    sub_data = json.loads(submission.data_json or "{}")
+    for k, v in request_data.items():
+        if isinstance(k, str) and not k.startswith("_"):
+            sub_data[k] = v
+    submission.data_json = json.dumps(sub_data, ensure_ascii=False)
+
+    db.commit()
+    return {"message": "Đã lưu kết quả check."}
+
+def finalize_round2(db, project_id, case_id, actor):
+    repo = EntryQcRepository(db)
+    _check_permission(db, project_id, case_id, actor)
+
+    if repo.has_submission_by_user(project_id, case_id, actor["id"]):
+        raise HTTPException(
+            status_code=409, 
+            detail={"code": "self_review", "message": "Người chốt không được trùng người nhập liệu (của bất kỳ báo cáo nào trong hộp)."}
+        )
+
+    sampling = repo.get_sampling(case_id, 2)
+    if not sampling:
+        raise HTTPException(status_code=409, detail={"code": "not_sampled", "message": "Hộp chưa được lấy mẫu vòng 2."})
+
+    existing_rounds = repo.get_rounds(case_id)
+    if any(r.round == 2 for r in existing_rounds):
+        raise HTTPException(status_code=409, detail={"code": "already_finalized", "message": "Vòng kiểm tra này đã được chốt kết quả."})
+
+    items = repo.get_sample_items(sampling.id)
+    unchecked_count = sum(1 for item in items if item.checked_at is None)
+    if unchecked_count > 0:
+        raise HTTPException(status_code=409, detail={"code": "items_unchecked", "message": f"Còn {unchecked_count} phiếu chưa check."})
+
+    total_fields = sum(item.visible_field_count or 0 for item in items)
+    if total_fields == 0:
+        raise HTTPException(status_code=409, detail={"code": "no_fields", "message": "Không có trường dữ liệu nào để tính tỷ lệ lỗi."})
+
+    error_fields = sum(item.changed_field_count or 0 for item in items)
+    error_reports = sum(1 for item in items if (item.changed_field_count or 0) > 0)
+
+    policy = get_effective_policy(db, project_id=project_id)
+    threshold = policy["error_threshold_percent"]
+    from decimal import Decimal, ROUND_HALF_UP
+    rate = (Decimal(error_fields) * 100 / Decimal(total_fields)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+
+    row = CaseEntryQcResult(
+        project_id=project_id,
+        case_id=case_id,
+        round=2,
+        reports_total=sampling.population_count,
+        reports_assessed=sampling.sample_size,
+        error_reports=error_reports,
+        total_fields=total_fields,
+        error_fields=error_fields,
+        rate_percent=rate,
+        threshold_percent=threshold,
+        passed=bool(rate < threshold),
+        created_by_user_id=actor["id"]
+    )
+    repo.add_round(row)
+    db.commit()
+
+    return {
+        "round": row.round,
+        "reports_total": row.reports_total,
+        "reports_assessed": row.reports_assessed,
+        "error_reports": row.error_reports,
+        "total_fields": row.total_fields,
+        "error_fields": row.error_fields,
+        "rate_percent": float(row.rate_percent),
+        "threshold_percent": float(row.threshold_percent),
+        "passed": row.passed,
+        "created_at": row.created_at.isoformat(),
+        "created_by_name": actor.get("full_name") or actor.get("username")
+    }

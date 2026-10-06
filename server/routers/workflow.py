@@ -236,3 +236,45 @@ def api_sample_entry_qc_round2(
         "data": entry_qc_service.sample_round2(db, project_id=project_id, case_id=case_id, actor=current_user)
     }
 
+class EntryQcItemCheckRequest(BaseModel):
+    data: dict
+
+@router.put("/cases/{case_id}/entry-qc/round2/items/{submission_id}")
+def api_check_entry_qc_round2_item(
+    project_id: int,
+    case_id: int,
+    submission_id: int,
+    request: EntryQcItemCheckRequest,
+    current_user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    return {
+        "status": "ok",
+        "data": entry_qc_service.check_round2_item(db, project_id=project_id, case_id=case_id, submission_id=submission_id, request_data=request.data, actor=current_user)
+    }
+
+@router.post("/cases/{case_id}/entry-qc/round2")
+def api_finalize_entry_qc_round2(
+    project_id: int,
+    case_id: int,
+    current_user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    return {
+        "status": "ok",
+        "data": entry_qc_service.finalize_round2(db, project_id=project_id, case_id=case_id, actor=current_user)
+    }
+
+@router.post("/cases/{case_id}/entry-qc/round2/resolve")
+def api_resolve_entry_qc_round2(
+    project_id: int,
+    case_id: int,
+    request: EntryQcResolveRequest,
+    current_user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    return {
+        "status": "ok",
+        "data": entry_qc_service.resolve_round2(db, project_id=project_id, case_id=case_id, actor=current_user, reason=request.reason)
+    }
+

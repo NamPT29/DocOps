@@ -208,6 +208,28 @@ class SubmissionQualityService:
         }
 
     @staticmethod
+    def count_field_changes(
+        db,
+        submission: Submission,
+        baseline: dict,
+        final_data: dict,
+    ) -> tuple[int, int]:
+        final_public_data = _public_form_data(final_data)
+        field_names = _visible_field_names(
+            db,
+            submission,
+            baseline,
+            final_public_data,
+        )
+        changed_count = sum(
+            _comparable(baseline.get(name, ""))
+            != _comparable(final_public_data.get(name, ""))
+            for name in field_names
+        )
+        visible_count = len(field_names)
+        return visible_count, changed_count
+
+    @staticmethod
     def ensure_baseline(
         submission: Submission,
         data: dict,
@@ -249,18 +271,9 @@ class SubmissionQualityService:
 
         baseline = _json_dict(assessment.baseline_data_json)
         final_public_data = _public_form_data(final_data)
-        field_names = _visible_field_names(
-            db,
-            submission,
-            baseline,
-            final_public_data,
+        visible_count, changed_count = SubmissionQualityService.count_field_changes(
+            db, submission, baseline, final_data
         )
-        changed_count = sum(
-            _comparable(baseline.get(name, ""))
-            != _comparable(final_public_data.get(name, ""))
-            for name in field_names
-        )
-        visible_count = len(field_names)
         threshold_percent = _error_report_threshold_percent(db, submission)
         exceeds_threshold = (
             visible_count > 0
@@ -286,6 +299,13 @@ class SubmissionQualityService:
             reviewer_error_count=0,
         ))
         db.flush()
+        
+        field_names = _visible_field_names(
+            db,
+            submission,
+            baseline,
+            final_public_data,
+        )
         for name in field_names:
             baseline_value = baseline.get(name, "")
             reviewer_value = final_public_data.get(name, "")
