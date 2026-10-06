@@ -830,6 +830,109 @@ def test_entry_qc_boundary(world):
     
     res = client.post(f"/api/projects/{project.id}/workflow/cases/{c2.id}/entry-qc/round1", headers=world["headers"](admin))
     assert res.status_code == 200
+    assert res.status_code == 200
     assert res.json()["data"]["passed"] is True
 
 
+def test_entry_qc_resolve_and_gate(world):
+    from server.models import ProjectReportUnit, ProjectDocumentAsset, Submission, SubmissionQualityAssessment, AssignedDocument, ProjectMember
+    client, db = world["client"], world["db"]
+    admin = world["admin"]
+    qc = world["qc"]
+    outsider = world["outsider"]
+    project = world["project"]
+    c1 = world["cases"][0]
+    c2 = world["cases"][1]
+    scanner = world["scanner"]
+    
+    # Configure members
+    world["client"].put(
+        f"/api/projects/{project.id}/workflow",
+        json={"enabled_stages": ["data_entry", "entry_qc", "normalization", "handover"]},
+        headers=world["headers"](admin)
+    )
+    db.add(ProjectMember(project_id=project.id, user_id=qc.id, member_role="reviewer", is_active=True))
+    db.commit()
+
+    # GET entry-qc permissions
+    assert client.get(f"/api/projects/{project.id}/workflow/cases/{c1.id}/entry-qc", headers=world["headers"](outsider)).status_code == 403
+    assert client.get(f"/api/projects/{project.id}/workflow/cases/{c1.id}/entry-qc", headers=world["headers"](qc)).status_code == 200
+    
+    # Gate blocking because not finalized
+    res = client.post(f"/api/projects/{project.id}/workflow/cases/{c1.id}/stages/normalization/transition", json={"action": "start"}, headers=world["headers"](admin))
+    assert res.status_code == 409
+    assert res.json()["detail"]["code"] == "entry_qc_not_finalized"
+
+    # Make c1 failed round 1
+    r1 = ProjectReportUnit(project_id=project.id, case_id=c1.id, report_key="r1", display_name="R1")
+    db.add(r1)
+    db.flush()
+    a1 = AssignedDocument(original_filename="a1", uuid_filename="u1")
+    db.add(a1)
+    db.flush()
+    d1 = ProjectDocumentAsset(project_id=project.id, case_id=c1.id, report_unit_id=r1.id, assigned_document_id=a1.id, status="active", relative_path="a1", normalized_relative_path="a1", original_filename="a1", storage_filename="a1", byte_size=1, content_sha256="b")
+    db.add(d1)
+    db.flush()
+    s1 = Submission(assigned_document_id=a1.id, created_by_user_id=scanner.id, status="completed", data_json="{}")
+    db.add(s1)
+    db.flush()
+    sqa1 = SubmissionQualityAssessment(submission_id=s1.id, input_user_id=scanner.id, visible_field_count=100, changed_field_count=10, is_error_report=False, baseline_data_json="{}")
+    db.add(sqa1)
+    db.commit()
+    
+    # Finalize -> Failed (10%)
+    client.post(f"/api/projects/{project.id}/workflow/cases/{c1.id}/entry-qc/round1", headers=world["headers"](qc))
+    
+    # Gate blocking because failed and not resolved
+    res = client.post(f"/api/projects/{project.id}/workflow/cases/{c1.id}/stages/normalization/transition", json={"action": "start"}, headers=world["headers"](admin))
+    assert res.status_code == 409
+    assert res.json()["detail"]["code"] == "entry_qc_failed"
+    
+    # Resolve API validations
+    assert client.post(f"/api/projects/{project.id}/workflow/cases/{c1.id}/entry-qc/resolve", json={"reason": "ok"}, headers=world["headers"](qc)).status_code == 403
+    
+    res = client.post(f"/api/projects/{project.id}/workflow/cases/{c1.id}/entry-qc/resolve", json={"reason": " Duyệt cho đi "}, headers=world["headers"](admin))
+    assert res.status_code == 200
+    assert res.json()["data"]["resolution"] == "approved"
+    assert res.json()["data"]["resolution_reason"] == "Duyệt cho đi"
+    
+    # Check GET includes gate and resolution
+    data = client.get(f"/api/projects/{project.id}/workflow/cases/{c1.id}/entry-qc", headers=world["headers"](admin)).json()["data"]
+    assert data["gate"]["blocked"] is False
+    assert data["rounds"][0]["resolution"] == "approved"
+    
+    # Gate should pass now
+    res = client.post(f"/api/projects/{project.id}/workflow/cases/{c1.id}/stages/normalization/transition", json={"action": "start"}, headers=world["headers"](admin))
+    assert res.status_code == 200
+
+    # Test gate with entry_qc off
+    world["client"].put(
+        f"/api/projects/{project.id}/workflow",
+        json={"enabled_stages": ["data_entry", "normalization", "handover"]},
+        headers=world["headers"](admin)
+    )
+    r2 = ProjectReportUnit(project_id=project.id, case_id=c2.id, report_key="r2", display_name="R2")
+    db.add(r2)
+    db.flush()
+    a2 = AssignedDocument(original_filename="a2", uuid_filename="u2")
+    db.add(a2)
+    db.flush()
+    d2 = ProjectDocumentAsset(project_id=project.id, case_id=c2.id, report_unit_id=r2.id, assigned_document_id=a2.id, status="active", relative_path="a2", normalized_relative_path="a2", original_filename="a2", storage_filename="a2", byte_size=1, content_sha256="b")
+    db.add(d2)
+    db.flush()
+    s2 = Submission(assigned_document_id=a2.id, created_by_user_id=scanner.id, status="completed", data_json="{}")
+    db.add(s2)
+    db.commit()
+    res = client.post(f"/api/projects/{project.id}/workflow/cases/{c2.id}/stages/normalization/transition", json={"action": "start"}, headers=world["headers"](admin))
+    assert res.status_code == 200
+
+    # Test gate when normalization is off, handover should be blocked by entry_qc
+    world["client"].put(
+        f"/api/projects/{project.id}/workflow",
+        json={"enabled_stages": ["data_entry", "entry_qc", "handover"]},
+        headers=world["headers"](admin)
+    )
+    res = client.post(f"/api/projects/{project.id}/workflow/cases/{c2.id}/stages/handover/transition", json={"action": "start"}, headers=world["headers"](admin))
+
+    assert res.status_code == 409
+    assert res.json()["detail"]["code"] == "entry_qc_not_finalized"

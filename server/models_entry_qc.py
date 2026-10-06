@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 from decimal import Decimal
 
-from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Integer, Numeric, text, CheckConstraint, UniqueConstraint
+from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Integer, Numeric, text, CheckConstraint, UniqueConstraint, String, Text
 from sqlalchemy.orm import relationship
 
 from server.database import Base
@@ -18,7 +18,8 @@ class CaseEntryQcResult(Base):
         CheckConstraint('total_fields >= 0', name='chk_total_fields_non_neg'),
         CheckConstraint('error_fields >= 0', name='chk_error_fields_non_neg'),
         CheckConstraint('rate_percent >= 0 AND rate_percent <= 100', name='chk_rate_percent_range'),
-        {"info": {"revision": "0013_entry_qc_results"}},
+        CheckConstraint("resolution = 'approved'", name='ck_entry_qc_resolution'),
+        {"info": {"revision": "0014_entry_qc_resolution"}},
     )
 
     id = Column(Integer, primary_key=True, index=True)
@@ -37,6 +38,11 @@ class CaseEntryQcResult(Base):
     threshold_percent = Column(Numeric(5, 2), nullable=False)
     passed = Column(Boolean, nullable=False)
     
+    resolution = Column(String(20), nullable=True, info={"revision": "0014_entry_qc_resolution"})
+    resolution_reason = Column(Text, nullable=True, info={"revision": "0014_entry_qc_resolution"})
+    resolved_by_user_id = Column(Integer, ForeignKey("users.id"), nullable=True, info={"revision": "0014_entry_qc_resolution"})
+    resolved_at = Column(DateTime, nullable=True, info={"revision": "0014_entry_qc_resolution"})
+    
     created_by_user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
     created_at = Column(
         DateTime,
@@ -47,3 +53,4 @@ class CaseEntryQcResult(Base):
     
     case = relationship("ProjectCase")
     created_by = relationship("User", foreign_keys=[created_by_user_id])
+    resolved_by = relationship("User", foreign_keys=[resolved_by_user_id])

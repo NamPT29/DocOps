@@ -22,4 +22,6 @@ Cổng: python scripts/gate.py  (dùng --static để kiểm nhanh)
 ## Check nhập hộp
 - [x] C1a (model, service tính toán, API GET/POST round 1)
 - [ ] C1b (nối vào xử lý nền hoặc test bổ sung - TBD)
+- [x] C1c-1 (backend): hộp vượt ngưỡng BR-07 thì chặn bước sau, Admin duyệt kèm lý do.
 - [ ] C2 (TBD)
+

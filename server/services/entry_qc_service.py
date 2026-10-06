@@ -6,7 +6,24 @@ from server.services.workflow_engine import derive_entry_statuses, DONE
 from server.models_entry_qc import CaseEntryQcResult
 from server.repositories.workflow_repository import WorkflowRepository
 
-def get_entry_qc_summary(db, project_id, case_id):
+def _check_permission(db, project_id, actor):
+    workflow_repo = WorkflowRepository(db)
+    if actor.get("role") != "admin":
+        if not workflow_repo.user_has_legacy_role(project_id, actor["id"], "reviewer"):
+            raise HTTPException(status_code=403, detail={"code": "forbidden", "message": "Bạn không có quyền thực hiện bước này."})
+
+def check_entry_qc_gate(db, case_id):
+    repo = EntryQcRepository(db)
+    existing_rounds = repo.get_rounds(case_id)
+    round1 = next((r for r in existing_rounds if r.round == 1), None)
+    if not round1:
+        return {"blocked": True, "code": "entry_qc_not_finalized", "message": "Hộp chưa chốt kết quả Check nhập liệu."}
+    if not round1.passed and round1.resolution != "approved":
+        return {"blocked": True, "code": "entry_qc_failed", "message": f"Hộp vượt ngưỡng lỗi ({float(round1.rate_percent)}% > {float(round1.threshold_percent)}%). Cần Admin duyệt kèm lý do."}
+    return {"blocked": False, "code": None, "message": None}
+
+def get_entry_qc_summary(db, project_id, case_id, actor):
+    _check_permission(db, project_id, actor)
     repo = EntryQcRepository(db)
     
     # 1. Workflow Status
@@ -49,11 +66,16 @@ def get_entry_qc_summary(db, project_id, case_id):
             "rate_percent": float(r.rate_percent),
             "threshold_percent": float(r.threshold_percent),
             "passed": r.passed,
+            "resolution": r.resolution,
+            "resolution_reason": r.resolution_reason,
+            "resolved_by_name": r.resolved_by.full_name if r.resolved_by and r.resolved_by.full_name else (r.resolved_by.username if r.resolved_by else None) if r.resolved_by else None,
+            "resolved_at": r.resolved_at.isoformat() if r.resolved_at else None,
             "created_at": r.created_at.isoformat(),
             "created_by_name": creator_name
         })
         
     return {
+        "gate": check_entry_qc_gate(db, case_id),
         "entry_qc_status": entry_qc_status,
         "live": live,
         "rounds": rounds
@@ -62,12 +84,7 @@ def get_entry_qc_summary(db, project_id, case_id):
 def finalize_round1(db, project_id, case_id, actor):
     repo = EntryQcRepository(db)
     
-    # Validation 1: case exists and actor has right to do it
-    # We should ensure the actor is admin or has 'reviewer' role on 'entry_qc' stage.
-    workflow_repo = WorkflowRepository(db)
-    if actor.get("role") != "admin":
-        if not workflow_repo.user_has_legacy_role(project_id, actor["id"], "reviewer"):
-            raise HTTPException(status_code=403, detail={"code": "forbidden", "message": "Bạn không có quyền thực hiện bước này."})
+    _check_permission(db, project_id, actor)
     
     # Validation 2: Self-review
     if repo.has_submission_by_user(project_id, case_id, actor["id"]):
@@ -136,4 +153,47 @@ def finalize_round1(db, project_id, case_id, actor):
         "passed": row.passed,
         "created_at": row.created_at.isoformat(),
         "created_by_name": creator_name
+    }
+
+def resolve_round1(db, project_id, case_id, actor, reason: str):
+    if actor.get("role") != "admin":
+        raise HTTPException(status_code=403, detail={"code": "forbidden", "message": "Bạn không có quyền thực hiện bước này."})
+    
+    if not str(reason or "").strip():
+        raise HTTPException(status_code=409, detail={"code": "reason_required", "message": "Cần nêu lý do khi duyệt."})
+        
+    repo = EntryQcRepository(db)
+    
+    if repo.has_submission_by_user(project_id, case_id, actor["id"]):
+        raise HTTPException(
+            status_code=409, 
+            detail={"code": "self_review", "message": "Người check nhập liệu không được trùng người nhập liệu (của bất kỳ báo cáo nào trong hộp)."}
+        )
+
+    existing_rounds = repo.get_rounds(case_id)
+    round1 = next((r for r in existing_rounds if r.round == 1), None)
+    
+    if not round1:
+        raise HTTPException(status_code=409, detail={"code": "not_finalized", "message": "Chưa chốt kết quả Check nhập liệu."})
+    
+    if round1.passed:
+        raise HTTPException(status_code=409, detail={"code": "not_failed", "message": "Vòng kiểm tra đã Đạt, không cần duyệt."})
+        
+    if round1.resolution:
+        raise HTTPException(status_code=409, detail={"code": "already_resolved", "message": "Hộp đã được duyệt."})
+        
+    from server.models import get_utc_now
+    round1.resolution = "approved"
+    round1.resolution_reason = reason.strip()
+    round1.resolved_by_user_id = actor["id"]
+    round1.resolved_at = get_utc_now()
+    
+    db.commit()
+    
+    creator_name = actor.get("full_name") or actor.get("username")
+    return {
+        "resolution": round1.resolution,
+        "resolution_reason": round1.resolution_reason,
+        "resolved_by_name": creator_name,
+        "resolved_at": round1.resolved_at.isoformat()
     }

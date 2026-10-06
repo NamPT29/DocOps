@@ -193,7 +193,7 @@ def api_get_entry_qc(
 ):
     return {
         "status": "ok",
-        "data": entry_qc_service.get_entry_qc_summary(db, project_id=project_id, case_id=case_id)
+        "data": entry_qc_service.get_entry_qc_summary(db, project_id=project_id, case_id=case_id, actor=current_user)
     }
 
 @router.post("/cases/{case_id}/entry-qc/round1")
@@ -208,4 +208,18 @@ def api_finalize_entry_qc_round1(
         "data": entry_qc_service.finalize_round1(db, project_id=project_id, case_id=case_id, actor=current_user)
     }
 
+class EntryQcResolveRequest(BaseModel):
+    reason: str = Field(..., min_length=1, max_length=500)
 
+@router.post("/cases/{case_id}/entry-qc/resolve")
+def api_resolve_entry_qc_round1(
+    project_id: int,
+    case_id: int,
+    request: EntryQcResolveRequest,
+    current_user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    return {
+        "status": "ok",
+        "data": entry_qc_service.resolve_round1(db, project_id=project_id, case_id=case_id, actor=current_user, reason=request.reason)
+    }

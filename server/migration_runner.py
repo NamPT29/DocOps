@@ -21,7 +21,7 @@ from migrations.schema_0001 import SCHEMA
 
 
 BASELINE_REVISION = "0001_current_schema"
-HEAD_REVISION = "0013_entry_qc_results"
+HEAD_REVISION = "0014_entry_qc_resolution"
 _POSTGRES_MIGRATION_LOCK_ID = 761_004_001
 
 

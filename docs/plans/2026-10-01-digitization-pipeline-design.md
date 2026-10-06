@@ -242,6 +242,9 @@ migration `0011_scan_packages`), giao diện `frontend/js/project_scan_submit.js
 - Check scan cho ngày 10/10 (phương án a): người check kiểm ngoài hệ thống trước khi đưa lên máy chủ;
   hệ thống chỉ tự so khớp thư mục (BR-01) và người check bấm "Duyệt". Phương án (b) mở từng file
   trong hệ thống để sau 10/10. Khác BA v1.0.
+- **Check nhập hộp (BR-07)**:
+  + Chặn các bước tiếp theo (Chuẩn hóa, Bàn giao) nếu tỷ lệ trường lỗi của toàn hộp vượt ngưỡng cho phép.
+  + "Trả lại cả hộp": hệ thống không tự đổi trạng thái của các báo cáo thành `rejected`, mà chỉ ĐÁNH DẤU hộp vượt ngưỡng. Admin sẽ quyết định "Duyệt" kèm lý do để cho phép hộp đi tiếp.
 
 ## Việc sau 10/10
 
