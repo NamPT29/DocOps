@@ -270,8 +270,10 @@ def test_entry_qc_snapshot(client, test_db, mock_data):
     enable_stages(client, p1.id)
     
     make_submission(test_db, p1.id, c1.id, scanner["id"], 100, 10)
-    client.post(f"/api/projects/{p1.id}/workflow/cases/{c1.id}/entry-qc/round1")
-    client.post(f"/api/projects/{p1.id}/workflow/cases/{c1.id}/entry-qc/resolve", json={"reason": "ok"})
+    res = client.post(f"/api/projects/{p1.id}/workflow/cases/{c1.id}/entry-qc/round1")
+    assert res.status_code == 200
+    res = client.post(f"/api/projects/{p1.id}/workflow/cases/{c1.id}/entry-qc/resolve", json={"reason": "ok"})
+    assert res.status_code == 200
     
     # change policy
     policy = test_db.query(ProjectPolicy).filter_by(project_id=p1.id).first()

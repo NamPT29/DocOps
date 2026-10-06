@@ -1,0 +1,194 @@
+/* global authFetch, formatApiErrorDetail, formatVietnamDateTime, refreshProjectWorkflow, projectWorkflowProjectId, scanSubmitErrorText, WORKFLOW_STATUS_LABELS */
+
+function _entryQcElement(tag, className, text) {
+    const el = document.createElement(tag);
+    if (className) el.className = className;
+    if (text !== undefined && text !== null) el.textContent = String(text);
+    return el;
+}
+
+async function _loadEntryQcData(projectId, caseId, body, errorBox) {
+    body.replaceChildren();
+    errorBox.textContent = '';
+    errorBox.classList.add('d-none');
+    
+    const res = await authFetch(`/api/projects/${projectId}/workflow/cases/${caseId}/entry-qc`);
+    const payload = await res.json().catch(() => ({}));
+    if (!res.ok || payload.status !== 'ok') {
+        errorBox.textContent = scanSubmitErrorText(payload, 'Lỗi khi tải dữ liệu Check nhập liệu.');
+        errorBox.classList.remove('d-none');
+        return null;
+    }
+    return payload.data;
+}
+
+async function openEntryQc(caseId, caseName) {
+    const projectId = Number(projectWorkflowProjectId);
+    
+    const overlay = _entryQcElement('div', 'modal fade show');
+    overlay.style.display = 'block';
+    overlay.style.backgroundColor = 'rgba(0,0,0,0.5)';
+    
+    const dialog = _entryQcElement('div', 'modal-dialog modal-dialog-scrollable modal-lg');
+    const content = _entryQcElement('div', 'modal-content');
+    
+    const header = _entryQcElement('div', 'modal-header bg-info text-white');
+    const title = _entryQcElement('h5', 'modal-title', `Check nhập liệu: ${caseName}`);
+    const closeBtn = _entryQcElement('button', 'btn-close btn-close-white');
+    
+    header.append(title, closeBtn);
+    
+    const bodyContainer = _entryQcElement('div', 'modal-body');
+    const errorBox = _entryQcElement('div', 'alert alert-danger d-none');
+    const contentBox = _entryQcElement('div', '');
+    bodyContainer.append(errorBox, contentBox);
+    
+    const footer = _entryQcElement('div', 'modal-footer');
+    
+    const closeOverlay = () => overlay.remove();
+    closeBtn.addEventListener('click', closeOverlay);
+    
+    async function render() {
+        const data = await _loadEntryQcData(projectId, caseId, contentBox, errorBox);
+        if (!data) return;
+        
+        // 1. Trạng thái
+        const statusDiv = _entryQcElement('div', 'mb-3');
+        statusDiv.appendChild(_entryQcElement('strong', '', 'Trạng thái Check nhập liệu: '));
+        const statusLabel = WORKFLOW_STATUS_LABELS[data.entry_qc_status] || data.entry_qc_status;
+        statusDiv.appendChild(document.createTextNode(statusLabel));
+        contentBox.appendChild(statusDiv);
+        
+        // 2. Số liệu hiện tại (live)
+        const liveDiv = _entryQcElement('div', 'card mb-3');
+        const liveHeader = _entryQcElement('div', 'card-header fw-bold', 'Số liệu hiện tại');
+        const liveBody = _entryQcElement('div', 'card-body');
+        
+        if (!data.live) {
+            liveBody.appendChild(_entryQcElement('div', 'text-muted fst-italic', 'Chưa có biên bản nào được kiểm.'));
+        } else {
+            const l = data.live;
+            liveBody.appendChild(_entryQcElement('div', '', `Biên bản đã kiểm ${l.reports_assessed}/${l.reports_total}; Biên bản lỗi ${l.error_reports}`));
+            liveBody.appendChild(_entryQcElement('div', '', `Trường lỗi ${l.error_fields}/${l.total_fields}`));
+            
+            const rateStr = `Tỷ lệ lỗi ${l.rate_percent}% (ngưỡng ${l.threshold_percent}%)`;
+            const predictStr = l.rate_percent <= l.threshold_percent ? 'Dự kiến: Đạt' : 'Dự kiến: Không đạt';
+            const rateDiv = _entryQcElement('div', 'fw-bold mt-2', `${rateStr} -> ${predictStr}`);
+            if (l.rate_percent <= l.threshold_percent) {
+                rateDiv.classList.add('text-success');
+            } else {
+                rateDiv.classList.add('text-danger');
+            }
+            liveBody.appendChild(rateDiv);
+        }
+        liveDiv.append(liveHeader, liveBody);
+        contentBox.appendChild(liveDiv);
+        
+        // 3. Kết quả đã chốt (rounds)
+        if (data.rounds && data.rounds.length > 0) {
+            const roundsDiv = _entryQcElement('div', 'card mb-3');
+            const roundsHeader = _entryQcElement('div', 'card-header fw-bold', 'Kết quả đã chốt');
+            const roundsList = _entryQcElement('ul', 'list-group list-group-flush');
+            
+            data.rounds.forEach(r => {
+                const li = _entryQcElement('li', 'list-group-item');
+                const pText = r.passed ? 'Đạt' : 'Không đạt';
+                const mainStr = `Vòng ${r.round}: ${r.rate_percent}% / ngưỡng ${r.threshold_percent}% - ${pText}`;
+                
+                const mDiv = _entryQcElement('div', 'fw-bold', mainStr);
+                if (r.passed) mDiv.classList.add('text-success');
+                else mDiv.classList.add('text-danger');
+                li.appendChild(mDiv);
+                
+                const dt = typeof formatVietnamDateTime === 'function' ? formatVietnamDateTime(r.created_at) : r.created_at;
+                li.appendChild(_entryQcElement('div', 'small text-muted', `Chốt bởi ${r.created_by_name} lúc ${dt}`));
+                
+                if (r.resolution) {
+                    const rdt = typeof formatVietnamDateTime === 'function' ? formatVietnamDateTime(r.resolved_at) : r.resolved_at;
+                    const resDiv = _entryQcElement('div', 'small mt-1');
+                    resDiv.appendChild(_entryQcElement('strong', '', 'Admin duyệt: '));
+                    resDiv.appendChild(document.createTextNode(`${r.resolved_by_name} lúc ${rdt}. Lý do: ${r.resolution_reason}`));
+                    li.appendChild(resDiv);
+                }
+                
+                roundsList.appendChild(li);
+            });
+            roundsDiv.append(roundsHeader, roundsList);
+            contentBox.appendChild(roundsDiv);
+        }
+        
+        // 4. Ô gate
+        if (data.gate) {
+            if (data.gate.blocked) {
+                contentBox.appendChild(_entryQcElement('div', 'alert alert-warning', data.gate.message));
+            } else {
+                contentBox.appendChild(_entryQcElement('div', 'alert alert-success', 'Hộp được phép chuyển bước sau.'));
+            }
+        }
+        
+        // 5. Buttons (footer)
+        footer.replaceChildren();
+        
+        const closeBtn2 = _entryQcElement('button', 'btn btn-secondary', 'Đóng');
+        closeBtn2.addEventListener('click', closeOverlay);
+        footer.appendChild(closeBtn2);
+        
+        const round1 = (data.rounds || []).find(r => r.round === 1);
+        
+        if (data.entry_qc_status === 'done' && !round1) {
+            const chotBtn = _entryQcElement('button', 'btn btn-primary ms-2', 'Chốt vòng 1');
+            chotBtn.addEventListener('click', async () => {
+                if (!window.confirm(`Chốt kết quả vòng 1 cho hộp ${caseName}? Sau khi chốt không sửa được.`)) return;
+                chotBtn.disabled = true;
+                const r = await authFetch(`/api/projects/${projectId}/workflow/cases/${caseId}/entry-qc/round1`, { method: 'POST' });
+                const rData = await r.json().catch(() => ({}));
+                if (!r.ok || rData.status !== 'ok') {
+                    errorBox.textContent = scanSubmitErrorText(rData, 'Lỗi khi chốt kết quả.');
+                    errorBox.classList.remove('d-none');
+                    chotBtn.disabled = false;
+                } else {
+                    await render();
+                    if (typeof refreshProjectWorkflow === 'function') refreshProjectWorkflow();
+                }
+            });
+            footer.appendChild(chotBtn);
+        }
+        
+        if (round1 && round1.passed === false && !round1.resolution) {
+            const resolveBtn = _entryQcElement('button', 'btn btn-warning ms-2', 'Duyệt kèm lý do');
+            resolveBtn.addEventListener('click', async () => {
+                let reason = window.prompt('Nhập lý do duyệt:');
+                if (reason === null) return;
+                reason = reason.trim();
+                if (!reason) return;
+                if (reason.length > 500) {
+                    window.alert('Lý do quá dài (tối đa 500 ký tự).');
+                    return;
+                }
+                resolveBtn.disabled = true;
+                const r = await authFetch(`/api/projects/${projectId}/workflow/cases/${caseId}/entry-qc/resolve`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ reason })
+                });
+                const rData = await r.json().catch(() => ({}));
+                if (!r.ok || rData.status !== 'ok') {
+                    errorBox.textContent = scanSubmitErrorText(rData, 'Lỗi khi duyệt.');
+                    errorBox.classList.remove('d-none');
+                    resolveBtn.disabled = false;
+                } else {
+                    await render();
+                    if (typeof refreshProjectWorkflow === 'function') refreshProjectWorkflow();
+                }
+            });
+            footer.appendChild(resolveBtn);
+        }
+    }
+    
+    content.append(header, bodyContainer, footer);
+    dialog.appendChild(content);
+    overlay.appendChild(dialog);
+    document.body.appendChild(overlay);
+    
+    await render();
+}
