@@ -3,6 +3,9 @@
 from urllib.parse import quote
 
 from server.utils.folder_utils import NO_FOLDER_SENTINEL
+import os
+from fastapi import HTTPException
+from fastapi.responses import FileResponse
 
 
 COMPLETED_WITHOUT_FOLDER = NO_FOLDER_SENTINEL
@@ -12,9 +15,6 @@ def _pdf_url(uuid_filename: str) -> str:
     return f"/api/files/{quote(uuid_filename, safe='')}"
 
 def create_document_file_response(document, storage_path: str):
-    import os
-    from fastapi import HTTPException
-    from fastapi.responses import FileResponse
     
     filepath = os.path.join(storage_path, document.uuid_filename)
     if not os.path.isfile(filepath):

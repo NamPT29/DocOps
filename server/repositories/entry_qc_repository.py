@@ -131,7 +131,7 @@ class EntryQcRepository:
         )
 
     def get_submission(self, submission_id: int) -> Submission | None:
-        return self.session.query(Submission).get(submission_id)
+        return self.session.get(Submission, submission_id)
 
     def get_quality_assessment(self, submission_id: int):
         from server.models import SubmissionQualityAssessment
@@ -154,4 +154,13 @@ class EntryQcRepository:
 
     def get_project(self, project_id: int):
         from server.models import Project
-        return self.session.query(Project).get(project_id)
+        return self.session.get(Project, project_id)
+
+    def get_report_name(self, assigned_document_id: int) -> str:
+        from server.models import ProjectDocumentAsset, ProjectReportUnit
+        asset = self.session.query(ProjectDocumentAsset).filter_by(assigned_document_id=assigned_document_id).first()
+        if asset and asset.report_unit_id:
+            unit = self.session.get(ProjectReportUnit, asset.report_unit_id)
+            if unit:
+                return unit.display_name
+        return "Unknown"

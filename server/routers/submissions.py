@@ -37,7 +37,7 @@ from server.repositories.submission_view_repository import (
 from server.services.submission_metadata_service import (
     apply_submission_metadata,
 )
-from server.services.submission_service import COMPLETED_WITHOUT_FOLDER, SubmissionService, _load_submission_document_metadata, _pdf_url
+from server.services.submission_service import COMPLETED_WITHOUT_FOLDER, SubmissionService, _load_submission_document_metadata
 from server.services.export_job_service import (
     ExportJobBusyError,
     cleanup_export_job,

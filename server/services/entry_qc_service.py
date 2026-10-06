@@ -12,6 +12,11 @@ import secrets
 import random
 import json
 from sqlalchemy.exc import IntegrityError
+from server.models import ProjectReportUnit
+from server.repositories.document_repository import DocumentRepository
+from server.services.submission_quality_service import _visible_schema_fields, _effective_project_config
+from server.services.submission_helpers import create_document_file_response
+from server.settings import settings
 
 def _user_display_name(user):
     if not user:
@@ -401,21 +406,13 @@ def get_round2_item(db, project_id, case_id, submission_id, actor):
     current = json.loads(submission.data_json or "{}")
     final_data = json.loads(item.final_data_json or "{}") if item.checked_at else None
     
-    # We need to get the schema from the project, which is done by SubmissionQualityService
-    from server.services.submission_quality_service import _json_dict, _visible_schema_fields
     project = repo.get_project(project_id)
     try:
         schema = json.loads(project.form_schema_json_snapshot or "[]")
     except (TypeError, ValueError, json.JSONDecodeError):
         schema = []
         
-    config = _json_dict(project.template_config_json_snapshot)
-    if project.template_id:
-        from server.repositories.template_repository import TemplateRepository
-        template = TemplateRepository(db).get(project.template_id)
-        if template:
-            config.update(_json_dict(template.config_json))
-            
+    config = _effective_project_config(db, project)
     fields = _visible_schema_fields(schema, config)
     
     for f in fields:
@@ -424,12 +421,8 @@ def get_round2_item(db, project_id, case_id, submission_id, actor):
             f["value"] = final_data.get(name)
         else:
             f["value"] = current.get(name)
-
-    from server.services.submission_helpers import _pdf_url
     
-    from server.repositories.document_repository import DocumentRepository
-    document = DocumentRepository(db).get(submission.assigned_document_id)
-    report_name = document.original_filename if document else "Unknown"
+    report_name = repo.get_report_name(submission.assigned_document_id)
     
     return {
         "submission_id": item.submission_id,
@@ -445,13 +438,10 @@ def get_round2_item(db, project_id, case_id, submission_id, actor):
 def get_round2_item_pdf(db, project_id, case_id, submission_id, actor):
     repo, item, submission = _check_round2_item_access(db, project_id, case_id, submission_id, actor)
     
-    from server.repositories.document_repository import DocumentRepository
     document = DocumentRepository(db).get(submission.assigned_document_id)
     if not document:
         raise HTTPException(status_code=404, detail="File không tồn tại")
         
-    from server.services.submission_helpers import create_document_file_response
-    from server.settings import settings
     return create_document_file_response(document, str(settings.pdf_storage_path))
 
 def finalize_round2(db, project_id, case_id, actor):

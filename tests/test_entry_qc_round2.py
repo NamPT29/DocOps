@@ -590,3 +590,187 @@ def test_round2_count_current_data(client, test_db, mock_data):
     
     item = test_db.query(CaseEntryQcSampleItem).filter_by(submission_id=sid).first()
     assert item.changed_field_count == 0
+
+def test_api_contract_round2_status_ok(client, test_db, mock_data):
+    admin = mock_data["admin"]
+    reviewer = mock_data["reviewer"]
+    p1 = mock_data["p1"]
+    c1 = mock_data["c1"]
+    p1.form_schema_json_snapshot = json.dumps([{"name": "f1"}])
+    test_db.commit()
+    
+    setup_headers(client.app.dependency_overrides, admin)
+    subs = make_submissions(test_db, p1.id, c1.id, reviewer["id"], 5)
+    
+    # GET summary
+    res = client.get(f"/api/projects/{p1.id}/workflow/cases/{c1.id}/entry-qc")
+    assert res.json().get("status") == "ok"
+    
+    # round2/sample
+    res = client.post(f"/api/projects/{p1.id}/workflow/cases/{c1.id}/entry-qc/round2/sample")
+    assert res.json().get("status") == "ok"
+    
+    sid = subs[0].id
+    
+    sampling = test_db.query(CaseEntryQcSampling).filter_by(case_id=c1.id).first()
+    items = test_db.query(CaseEntryQcSampleItem).filter_by(sampling_id=sampling.id).all()
+    
+    setup_headers(client.app.dependency_overrides, admin)
+    # GET item
+    res = client.get(f"/api/projects/{p1.id}/workflow/cases/{c1.id}/entry-qc/round2/items/{items[0].submission_id}")
+    assert res.json().get("status") == "ok"
+    
+    for item in items:
+        # Simulate errors to make it fail so we can test resolve
+        sub = test_db.query(Submission).get(item.submission_id)
+        sub.data_json = json.dumps({"f1": "old"})
+        item.baseline_data_json = sub.data_json
+        test_db.commit()
+        
+        # PUT item
+        res = client.put(f"/api/projects/{p1.id}/workflow/cases/{c1.id}/entry-qc/round2/items/{item.submission_id}", json={"data": {"f1": "new"}})
+        assert res.json().get("status") == "ok"
+    
+    # round2 finalize
+    res = client.post(f"/api/projects/{p1.id}/workflow/cases/{c1.id}/entry-qc/round2")
+    assert res.json().get("status") == "ok"
+    
+    setup_headers(client.app.dependency_overrides, admin)
+    # round2/resolve
+    res = client.post(f"/api/projects/{p1.id}/workflow/cases/{c1.id}/entry-qc/round2/resolve", json={"reason": "test"})
+    assert res.status_code == 200, res.text
+    assert res.json().get("status") == "ok"
+
+def test_round2_gate_failed_and_approved(client, test_db, mock_data):
+    admin = mock_data["admin"]
+    reviewer = mock_data["reviewer"]
+    p1 = mock_data["p1"]
+    c1 = mock_data["c1"]
+    
+    setup_headers(client.app.dependency_overrides, admin)
+    subs = make_submissions(test_db, p1.id, c1.id, reviewer["id"], 5)
+    
+    p1.form_schema_json_snapshot = json.dumps([{"name": "f1"}])
+    pol = test_db.query(ProjectPolicy).first()
+    pol.error_threshold_percent = 0 # strict threshold
+    test_db.commit()
+    
+    client.post(f"/api/projects/{p1.id}/workflow/cases/{c1.id}/entry-qc/round2/sample")
+    
+    sampling = test_db.query(CaseEntryQcSampling).filter_by(case_id=c1.id).first()
+    items = test_db.query(CaseEntryQcSampleItem).filter_by(sampling_id=sampling.id).all()
+    
+    setup_headers(client.app.dependency_overrides, admin)
+    for item in items:
+        # Simulate errors
+        sub = test_db.query(Submission).get(item.submission_id)
+        sub.data_json = json.dumps({"f1": "old"})
+        item.baseline_data_json = sub.data_json
+        test_db.commit()
+        
+        client.put(f"/api/projects/{p1.id}/workflow/cases/{c1.id}/entry-qc/round2/items/{item.submission_id}", json={"data": {"f1": "new"}})
+        
+    client.post(f"/api/projects/{p1.id}/workflow/cases/{c1.id}/entry-qc/round2")
+    
+    # Check gate is blocked with round2_failed
+    from server.services.entry_qc_service import check_entry_qc_gate
+    gate = check_entry_qc_gate(test_db, p1.id, c1.id)
+    assert gate["blocked"] is True
+    assert gate["code"] == "entry_qc_round2_failed"
+    assert "Vòng 2 không đạt ngưỡng lỗi" in gate["message"]
+    
+    # Approve
+    setup_headers(client.app.dependency_overrides, admin)
+    res = client.post(f"/api/projects/{p1.id}/workflow/cases/{c1.id}/entry-qc/round2/resolve", json={"reason": "ok"})
+    assert res.status_code == 200, res.text
+    
+    # Check gate passes
+    test_db.expire_all()
+    gate = check_entry_qc_gate(test_db, p1.id, c1.id)
+    assert gate["blocked"] is False
+
+def test_round2_get_item_pdf(client, test_db, mock_data, tmp_path, monkeypatch):
+    import os
+    monkeypatch.setattr("server.routers.submissions.PDF_STORAGE_PATH", str(tmp_path))
+    class MockSettings:
+        pdf_storage_path = tmp_path
+    monkeypatch.setattr("server.services.entry_qc_service.settings", MockSettings())
+    
+    admin = mock_data["admin"]
+    reviewer = mock_data["reviewer"]
+    p1 = mock_data["p1"]
+    c1 = mock_data["c1"]
+    
+    # Create fake pdf
+    uuid_filename = "test.pdf"
+    pdf_path = tmp_path / uuid_filename
+    pdf_path.write_bytes(b"%PDF-1.4\n1 0 obj\n<<>>\nendobj\ntrailer\n<<>>\n%%EOF")
+    
+    setup_headers(client.app.dependency_overrides, admin)
+    subs = make_submissions(test_db, p1.id, c1.id, admin["id"], 5)
+    sub = subs[0]
+    
+    # Update assignment with uuid_filename
+    doc = test_db.query(AssignedDocument).get(sub.assigned_document_id)
+    doc.uuid_filename = uuid_filename
+    test_db.commit()
+    
+    client.post(f"/api/projects/{p1.id}/workflow/cases/{c1.id}/entry-qc/round2/sample")
+    
+    sampling = test_db.query(CaseEntryQcSampling).filter_by(case_id=c1.id).first()
+    item = test_db.query(CaseEntryQcSampleItem).filter_by(sampling_id=sampling.id).first()
+    
+    # Update submission to be the one we know the pdf of
+    item.submission_id = sub.id
+    test_db.commit()
+    
+    sid = sub.id
+    
+    # Not part of project
+    outsider = User(username="out", role="user", password="")
+    test_db.add(outsider)
+    test_db.commit()
+    setup_headers(client.app.dependency_overrides, {"id": outsider.id, "username": "out", "role": "user"})
+    assert client.get(f"/api/projects/{p1.id}/workflow/cases/{c1.id}/entry-qc/round2/items/{sid}/pdf").status_code == 403
+    
+    # Self review (Admin inputted this submission)
+    setup_headers(client.app.dependency_overrides, admin)
+    assert client.get(f"/api/projects/{p1.id}/workflow/cases/{c1.id}/entry-qc/round2/items/{sid}/pdf").status_code == 409
+    
+    # Reviewer can view
+    setup_headers(client.app.dependency_overrides, reviewer)
+    res = client.get(f"/api/projects/{p1.id}/workflow/cases/{c1.id}/entry-qc/round2/items/{sid}/pdf")
+    assert res.status_code == 200
+    assert res.headers["content-type"] == "application/pdf"
+    assert res.content == b"%PDF-1.4\n1 0 obj\n<<>>\nendobj\ntrailer\n<<>>\n%%EOF"
+    
+    # Old API works
+    setup_headers(client.app.dependency_overrides, admin)
+    assert client.get(f"/api/files/{uuid_filename}").status_code == 200
+    
+    setup_headers(client.app.dependency_overrides, {"id": outsider.id, "username": "out", "role": "user"})
+    assert client.get(f"/api/files/{uuid_filename}").status_code == 403
+
+def test_round2_get_item_report_name(client, test_db, mock_data):
+    admin = mock_data["admin"]
+    reviewer = mock_data["reviewer"]
+    p1 = mock_data["p1"]
+    c1 = mock_data["c1"]
+    
+    setup_headers(client.app.dependency_overrides, admin)
+    subs = make_submissions(test_db, p1.id, c1.id, admin["id"], 5)
+    
+    client.post(f"/api/projects/{p1.id}/workflow/cases/{c1.id}/entry-qc/round2/sample")
+    
+    res = client.get(f"/api/projects/{p1.id}/workflow/cases/{c1.id}/entry-qc")
+    summary = res.json()["data"]
+    item_in_summary = summary["round2"]["sampling"]["items"][0]
+    sid = item_in_summary["submission_id"]
+    expected_name = item_in_summary["report_name"]
+    
+    setup_headers(client.app.dependency_overrides, reviewer)
+    res = client.get(f"/api/projects/{p1.id}/workflow/cases/{c1.id}/entry-qc/round2/items/{sid}")
+    item_in_detail = res.json()["data"]
+    
+    assert item_in_detail["report_name"] == expected_name
+
