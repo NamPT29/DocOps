@@ -17,7 +17,7 @@ assert.doesNotMatch(
 );
 const scripts = Array.from(html.matchAll(/<script src="([^"]+)"/g), match => match[1]);
 const managementIndex = scripts.findIndex(src => src.startsWith('js/project_management.js'));
-const scanIndex = scripts.indexOf('js/project_scan_submit.js?v=1.00');
+const scanIndex = scripts.indexOf('js/project_scan_submit.js?v=1.01');
 assert.ok(scanIndex > managementIndex && managementIndex >= 0, 'project_scan_submit.js loads after project_management.js');
 assert.ok(scripts.includes('js/project_workflow.js?v=1.06'), 'project_workflow.js version was bumped');
 const ids = Array.from(html.matchAll(/\sid="([^"]+)"/g), match => match[1]);
@@ -46,6 +46,7 @@ function element(tag) {
         disabled: false,
         value: '',
         classList: {
+            add: name => classes.add(name),
             toggle(name, force) { if (force) classes.add(name); else classes.delete(name); },
             contains: name => classes.has(name),
         },
@@ -77,17 +78,25 @@ function respond(status, body) {
     return { ok: status >= 200 && status < 300, status, json: async () => body };
 }
 const formatter = managementSource.match(/function formatVietnamDateTime[\s\S]*?\n\}/)[0];
+const authSource = fs.readFileSync('frontend/auth.js', 'utf8');
+const errorFormatter = authSource.match(/function formatApiErrorDetail[\s\S]*?\n\}/)[0];
+const body = element('body');
+let openModal = null;
 const sandbox = {
     console,
     Promise,
     Intl,
     Date,
     projectWorkflowProjectId: 7,
-    document: { getElementById: id => elements[id] || null, createElement: tag => element(tag) },
+    document: {
+        body,
+        getElementById: id => elements[id] || null,
+        createElement: tag => element(tag),
+        querySelector: selector => (selector === '.modal.show' ? openModal : null),
+    },
     bootstrap: { Modal: class { show() { requests.push({ url: 'modal:show' }); } } },
     setTimeout(callback) { timers.push(callback); return timers.length; },
     clearTimeout(handle) { timers[handle - 1] = null; },
-    formatApiErrorDetail: detail => (typeof detail === 'string' ? detail : JSON.stringify(detail)),
     async authFetch(url, options = {}) {
         requests.push({ url, method: options.method || 'GET', body: options.body });
         const route = Object.keys(routes).find(prefix => url.startsWith(prefix));
@@ -97,7 +106,7 @@ const sandbox = {
     async refreshProjectWorkflow() { refreshCount += 1; },
 };
 vm.createContext(sandbox);
-vm.runInContext(`${formatter}\n${source}`, sandbox);
+vm.runInContext(`${formatter}\n${errorFormatter}\n${source}`, sandbox);
 
 async function flush() {
     // Let every pending await chain (fetch -> json -> render) settle.
@@ -114,19 +123,90 @@ async function runTimers() {
 }
 
 (async () => {
-    // scanSubmitCanSubmit: open Scan and Check scan still pending (or not enabled).
-    const can = (scan, qc) => sandbox.scanSubmitCanSubmit(scan === undefined ? undefined : { status: scan }, qc === undefined ? undefined : { status: qc });
+    // scanSubmitCanSubmit: open Scan, Check scan still pending (or not enabled);
+    // a waiting or returned box also needs its previous stage done.
+    const can = (scan, qc, available) => sandbox.scanSubmitCanSubmit(
+        scan === undefined ? undefined : { status: scan, ...(available === undefined ? {} : { available }) },
+        qc === undefined ? undefined : { status: qc },
+    );
     for (const scan of ['pending', 'rejected', 'in_progress']) {
-        assert.equal(can(scan, undefined), true, `${scan} without scan_qc`);
-        assert.equal(can(scan, 'pending'), true, `${scan} with scan_qc pending`);
-        assert.equal(can(scan, 'in_progress'), false, `${scan} with scan_qc in progress`);
-        assert.equal(can(scan, 'done'), false);
-        assert.equal(can(scan, 'rejected'), false);
+        for (const available of [undefined, true]) {
+            assert.equal(can(scan, undefined, available), true, `${scan} without scan_qc`);
+            assert.equal(can(scan, 'pending', available), true, `${scan} with scan_qc pending`);
+            assert.equal(can(scan, 'in_progress', available), false, `${scan} with scan_qc in progress`);
+            assert.equal(can(scan, 'done', available), false);
+            assert.equal(can(scan, 'rejected', available), false);
+        }
     }
+    assert.equal(can('pending', 'pending', false), false, 'pending but previous stage not done');
+    assert.equal(can('rejected', undefined, false), false, 'rejected but previous stage reopened');
+    assert.equal(can('in_progress', 'pending', false), true, 'in_progress always accepts another package');
+    assert.equal(can('in_progress', 'in_progress', false), false);
     assert.equal(can('done', undefined), false);
-    assert.equal(can('done', 'pending'), false);
+    assert.equal(can('done', 'pending', true), false);
     assert.equal(sandbox.scanSubmitCanSubmit(undefined, undefined), false, 'Scan not enabled');
     assert.equal(sandbox.scanSubmitCanSubmit({ status: 'pending' }, {}), true, 'scan_qc without status = pending');
+
+    // Error text: {code, message} shows the message, everything else the shared formatter.
+    assert.equal(sandbox.scanSubmitErrorText({ detail: 'Hộp không tồn tại.' }), 'Hộp không tồn tại.');
+    assert.equal(
+        sandbox.scanSubmitErrorText({ detail: { code: 'stage_blocked', message: 'Bước trước chưa hoàn tất' } }),
+        'Bước trước chưa hoàn tất',
+    );
+    assert.equal(
+        sandbox.scanSubmitErrorText({ detail: [{ loc: ['body', 'folder_path'], msg: 'Field required' }] }),
+        'folder_path: Field required',
+    );
+    assert.equal(sandbox.scanSubmitErrorText({ message: 'Lỗi máy chủ' }), 'Lỗi máy chủ');
+    assert.equal(sandbox.scanSubmitErrorText({}, 'Không nộp được gói scan.'), 'Không nộp được gói scan.');
+    assert.equal(sandbox.scanSubmitErrorText(null), 'Không thực hiện được thao tác.');
+    assert.equal(sandbox.scanSubmitErrorText({ detail: { code: 'x' } }), '{"code":"x"}', 'object without message');
+
+    // Without injected timers the poller must call setTimeout as a plain
+    // function: browsers throw "Illegal invocation" for any other receiver.
+    const browserQueue = [];
+    const browser = { console, Promise };
+    function browserSetTimeout(callback) {
+        'use strict';
+        if (this !== undefined && this !== browser && this !== browserGlobal) {
+            throw new TypeError('Illegal invocation');
+        }
+        browserQueue.push(callback);
+        return browserQueue.length;
+    }
+    function browserClearTimeout(handle) {
+        'use strict';
+        if (this !== undefined && this !== browser && this !== browserGlobal) {
+            throw new TypeError('Illegal invocation');
+        }
+        browserQueue[handle - 1] = null;
+    }
+    browser.setTimeout = browserSetTimeout;
+    browser.clearTimeout = browserClearTimeout;
+    vm.createContext(browser);
+    const browserGlobal = vm.runInContext('globalThis', browser);
+    vm.runInContext(source, browser);
+    const answers = ['processing', 'processing', 'done'];
+    let browserFetches = 0;
+    const unhandled = [];
+    const onUnhandled = reason => unhandled.push(reason);
+    process.on('unhandledRejection', onUnhandled);
+    const browserPoller = browser.scanSubmitStartPolling(async () => {
+        browserFetches += 1;
+        return { status: answers.shift() };
+    }, () => {});
+    await flush();
+    while (browserQueue.some(Boolean)) {
+        const index = browserQueue.findIndex(Boolean);
+        const callback = browserQueue[index];
+        browserQueue[index] = null;
+        await callback();
+        await flush();
+    }
+    process.off('unhandledRejection', onUnhandled);
+    assert.deepEqual(unhandled.map(String), [], 'no Illegal invocation while polling');
+    assert.equal(browserFetches, 3, 'polling keeps running until the package is done');
+    assert.equal((await browserPoller.done).status, 'done');
 
     // Warning labels.
     assert.deepEqual(
@@ -257,6 +337,13 @@ async function runTimers() {
     const before = requests.length;
     await runTimers();
     assert.equal(requests.length, before, 'no polling after the dialog closed');
+    assert.equal(body.classList.contains('modal-open'), false, 'no other dialog: body untouched');
+
+    // Closing it over the still-open pipeline dialog keeps body.modal-open.
+    openModal = element('div');
+    elements.scanSubmitModal.listeners['hidden.bs.modal']();
+    assert.equal(body.classList.contains('modal-open'), true);
+    openModal = null;
 
     // The pipeline table offers "Nộp S" only where it is allowed.
     const tableElements = { workflowCasesHead: element('thead'), workflowCasesBody: element('tbody') };

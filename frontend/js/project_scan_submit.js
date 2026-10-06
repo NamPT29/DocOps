@@ -30,11 +30,25 @@ var scanSubmitState = {
 
 // --- pure helpers ---------------------------------------------------------------
 
-/** "Nộp S" is offered while Scan is open and Check scan has not started. */
+/**
+ * "Nộp S" is offered while Scan is open and Check scan has not started. A
+ * waiting or returned box also needs its previous stage done (available).
+ */
 function scanSubmitCanSubmit(scanCell, qcCell) {
     if (!scanCell || !SCAN_SUBMIT_OPEN_STATUSES.includes(scanCell.status)) return false;
+    if (scanCell.status !== 'in_progress' && scanCell.available === false) return false;
     const qcStatus = qcCell && qcCell.status ? qcCell.status : 'pending';
     return qcStatus === 'pending';
+}
+
+/** Error text for an API answer; a {code, message} detail shows its message. */
+function scanSubmitErrorText(data, fallback = 'Không thực hiện được thao tác.') {
+    const body = data || {};
+    const detail = body.detail;
+    if (detail && typeof detail === 'object' && !Array.isArray(detail) && typeof detail.message === 'string') {
+        return detail.message;
+    }
+    return formatApiErrorDetail(detail || body.message || fallback);
 }
 
 function scanWarningLabels(flags) {
@@ -73,7 +87,12 @@ function scanSubmitTime(value) {
  * package, or ``null`` when stopped.
  */
 function scanSubmitStartPolling(fetchPackage, onUpdate, timers, intervalMs = SCAN_SUBMIT_POLL_MS) {
-    const clock = timers || { setTimeout, clearTimeout };
+    // Browsers throw "Illegal invocation" when setTimeout is called as a method
+    // of another object, so the defaults are wrapped in plain functions.
+    const clock = timers || {
+        setTimeout: (callback, ms) => setTimeout(callback, ms),
+        clearTimeout: handle => clearTimeout(handle),
+    };
     let stopped = false;
     let handle = null;
     let finish;
@@ -216,7 +235,7 @@ async function loadScanSubmitFolder(path) {
     const response = await authFetch(`/api/documents/server-folders?path=${encodeURIComponent(path || '')}`);
     const { ok, data } = await scanSubmitReadJson(response);
     if (!ok) {
-        setScanSubmitError(formatApiErrorDetail(data.detail || data.message || 'Không mở được thư mục.'));
+        setScanSubmitError(scanSubmitErrorText(data, 'Không mở được thư mục.'));
         return;
     }
     renderScanFolderList(data);
@@ -257,7 +276,7 @@ async function sendScanSubmit() {
     });
     const { ok, data } = await scanSubmitReadJson(response);
     if (!ok) {
-        setScanSubmitError(formatApiErrorDetail(data.detail || data.message || 'Không nộp được gói scan.'));
+        setScanSubmitError(scanSubmitErrorText(data, 'Không nộp được gói scan.'));
         if (send) send.disabled = false;
         return;
     }
@@ -285,7 +304,14 @@ function bindScanSubmitModal() {
     });
     document.getElementById('scanSubmitChooseButton')?.addEventListener('click', chooseScanSubmitFolder);
     document.getElementById('scanSubmitSendButton')?.addEventListener('click', sendScanSubmit);
-    document.getElementById('scanSubmitModal')?.addEventListener('hidden.bs.modal', stopScanSubmitPolling);
+    document.getElementById('scanSubmitModal')?.addEventListener('hidden.bs.modal', onScanSubmitHidden);
+}
+
+function onScanSubmitHidden() {
+    stopScanSubmitPolling();
+    // Bootstrap removes body.modal-open on close even if the pipeline dialog
+    // underneath is still open, which breaks its scrolling.
+    if (document.querySelector('.modal.show')) document.body.classList.add('modal-open');
 }
 
 async function openScanSubmit(caseId, caseName) {
