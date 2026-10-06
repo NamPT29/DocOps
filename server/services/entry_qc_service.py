@@ -3,14 +3,14 @@ from fastapi import HTTPException
 from server.repositories.entry_qc_repository import EntryQcRepository
 from server.services.project_policy_service import get_effective_policy
 from server.services.workflow_engine import derive_entry_statuses, DONE
+from server.models import get_utc_now
 from server.models_entry_qc import CaseEntryQcResult
 from server.repositories.workflow_repository import WorkflowRepository
 
-def _check_permission(db, project_id, actor):
-    workflow_repo = WorkflowRepository(db)
-    if actor.get("role") != "admin":
-        if not workflow_repo.user_has_legacy_role(project_id, actor["id"], "reviewer"):
-            raise HTTPException(status_code=403, detail={"code": "forbidden", "message": "Bạn không có quyền thực hiện bước này."})
+def _user_display_name(user):
+    if not user:
+        return None
+    return user.full_name if user.full_name else user.username
 
 def check_entry_qc_gate(db, case_id):
     repo = EntryQcRepository(db)
@@ -22,8 +22,18 @@ def check_entry_qc_gate(db, case_id):
         return {"blocked": True, "code": "entry_qc_failed", "message": f"Hộp vượt ngưỡng lỗi ({float(round1.rate_percent)}% > {float(round1.threshold_percent)}%). Cần Admin duyệt kèm lý do."}
     return {"blocked": False, "code": None, "message": None}
 
+def _check_permission(db, project_id, case_id, actor):
+    workflow_repo = WorkflowRepository(db)
+    case = workflow_repo.get_case(project_id, case_id)
+    if not case:
+        raise HTTPException(status_code=404, detail="Không tìm thấy hồ sơ")
+        
+    if actor.get("role") != "admin":
+        if not workflow_repo.user_has_legacy_role(project_id, actor["id"], "reviewer"):
+            raise HTTPException(status_code=403, detail={"code": "forbidden", "message": "Bạn không có quyền thực hiện bước này."})
+
 def get_entry_qc_summary(db, project_id, case_id, actor):
-    _check_permission(db, project_id, actor)
+    _check_permission(db, project_id, case_id, actor)
     repo = EntryQcRepository(db)
     
     # 1. Workflow Status
@@ -55,7 +65,7 @@ def get_entry_qc_summary(db, project_id, case_id, actor):
     # 3. Previous Rounds
     rounds = []
     for r in repo.get_rounds(case_id):
-        creator_name = r.created_by.full_name if r.created_by and r.created_by.full_name else (r.created_by.username if r.created_by else None)
+        creator_name = _user_display_name(r.created_by)
         rounds.append({
             "round": r.round,
             "reports_total": r.reports_total,
@@ -68,7 +78,7 @@ def get_entry_qc_summary(db, project_id, case_id, actor):
             "passed": r.passed,
             "resolution": r.resolution,
             "resolution_reason": r.resolution_reason,
-            "resolved_by_name": r.resolved_by.full_name if r.resolved_by and r.resolved_by.full_name else (r.resolved_by.username if r.resolved_by else None) if r.resolved_by else None,
+            "resolved_by_name": _user_display_name(r.resolved_by),
             "resolved_at": r.resolved_at.isoformat() if r.resolved_at else None,
             "created_at": r.created_at.isoformat(),
             "created_by_name": creator_name
@@ -84,7 +94,7 @@ def get_entry_qc_summary(db, project_id, case_id, actor):
 def finalize_round1(db, project_id, case_id, actor):
     repo = EntryQcRepository(db)
     
-    _check_permission(db, project_id, actor)
+    _check_permission(db, project_id, case_id, actor)
     
     # Validation 2: Self-review
     if repo.has_submission_by_user(project_id, case_id, actor["id"]):
@@ -140,7 +150,7 @@ def finalize_round1(db, project_id, case_id, actor):
     db.commit()
     
     # Return same structure as a round object in GET
-    creator_name = actor.get("full_name") or actor.get("username")
+    creator_name = _user_display_name(actor) if hasattr(actor, 'full_name') else (actor.get("full_name") or actor.get("username"))
     return {
         "round": row.round,
         "reports_total": row.reports_total,
@@ -156,6 +166,7 @@ def finalize_round1(db, project_id, case_id, actor):
     }
 
 def resolve_round1(db, project_id, case_id, actor, reason: str):
+    _check_permission(db, project_id, case_id, actor)
     if actor.get("role") != "admin":
         raise HTTPException(status_code=403, detail={"code": "forbidden", "message": "Bạn không có quyền thực hiện bước này."})
     
@@ -182,7 +193,6 @@ def resolve_round1(db, project_id, case_id, actor, reason: str):
     if round1.resolution:
         raise HTTPException(status_code=409, detail={"code": "already_resolved", "message": "Hộp đã được duyệt."})
         
-    from server.models import get_utc_now
     round1.resolution = "approved"
     round1.resolution_reason = reason.strip()
     round1.resolved_by_user_id = actor["id"]
@@ -190,7 +200,7 @@ def resolve_round1(db, project_id, case_id, actor, reason: str):
     
     db.commit()
     
-    creator_name = actor.get("full_name") or actor.get("username")
+    creator_name = _user_display_name(actor) if hasattr(actor, 'full_name') else (actor.get("full_name") or actor.get("username"))
     return {
         "resolution": round1.resolution,
         "resolution_reason": round1.resolution_reason,

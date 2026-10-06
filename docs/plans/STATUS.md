@@ -21,7 +21,8 @@ Cổng: python scripts/gate.py  (dùng --static để kiểm nhanh)
 - [x] B3 (chặn check scan trùng người scan)
 ## Check nhập hộp
 - [x] C1a (model, service tính toán, API GET/POST round 1)
-- [ ] C1b (nối vào xử lý nền hoặc test bổ sung - TBD)
+- [ ] C1b (giao diện Check nhập hộp)
 - [x] C1c-1 (backend): hộp vượt ngưỡng BR-07 thì chặn bước sau, Admin duyệt kèm lý do.
+- [x] C1c-1b (sửa lỗi C1c-1, gọn migration, refactor test)
 - [ ] C2 (TBD)
 
