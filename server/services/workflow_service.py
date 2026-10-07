@@ -45,8 +45,14 @@ def stage_catalog():
     ]
 
 
+def _is_ctv(db, current_user):
+    from server.repositories import UserRepository
+    user = UserRepository(db).get(current_user["id"])
+    return account_policy.account_type_of(user) == "ctv"
+
+
 def get_my_projects(db, current_user):
-    if account_policy.account_type_of(current_user) == "ctv":
+    if _is_ctv(db, current_user):
         return []
     repository = WorkflowRepository(db)
     return repository.get_my_projects_data(current_user["id"])
@@ -697,7 +703,7 @@ def list_my_work(db, *, project_id, user):
 def enforce_can_create_scan_package(db, project_id: int, current_user: dict):
     if current_user["role"] == "admin":
         return
-    if account_policy.account_type_of(current_user) == "ctv":
+    if _is_ctv(db, current_user):
         raise HTTPException(status_code=403, detail="Không có quyền thực hiện thao tác này")
     repository = WorkflowRepository(db)
     if not repository.user_is_stage_member(project_id, current_user["id"], "scan"):
@@ -706,7 +712,7 @@ def enforce_can_create_scan_package(db, project_id: int, current_user: dict):
 def enforce_can_view_scan_packages(db, project_id: int, current_user: dict):
     if current_user["role"] == "admin":
         return
-    if account_policy.account_type_of(current_user) == "ctv":
+    if _is_ctv(db, current_user):
         raise HTTPException(status_code=403, detail="Không có quyền thực hiện thao tác này")
     repository = WorkflowRepository(db)
     if not (repository.user_is_stage_member(project_id, current_user["id"], "scan") or 
@@ -716,8 +722,9 @@ def enforce_can_view_scan_packages(db, project_id: int, current_user: dict):
 def enforce_can_access_server_folders(db, current_user: dict):
     if current_user["role"] == "admin":
         return
-    if account_policy.account_type_of(current_user) == "ctv":
+    if _is_ctv(db, current_user):
         raise HTTPException(status_code=403, detail="Không có quyền thực hiện thao tác này")
     repository = WorkflowRepository(db)
     if not repository.user_is_stage_member_in_any_project(current_user["id"], "scan"):
         raise HTTPException(status_code=403, detail="Không có quyền thực hiện thao tác này")
+

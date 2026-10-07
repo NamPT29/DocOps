@@ -64,6 +64,13 @@ Giao diện: Tab **Dự án → Thao tác → Quy trình số hóa** (`frontend/
 - Đổi Hành chính → CTV bị từ chối (409) nếu còn phân công không dành cho CTV; hệ thống liệt kê,
   không tự gỡ. Không đổi qua lại với Admin.
 
+## Việc của Hành chính (BA mục 3)
+
+- Scan/nhập liệu phải chọn hộp. Hộp là đối tượng phân giao theo bước quy trình.
+- Trang Hành chính liệt kê các dự án người dùng tham gia bước tương ứng (scan/nhập); bấm vào mở danh sách hộp.
+- Danh sách hộp chỉ hiện các hộp có giao cho Hành chính đó.
+- Nộp S là tính năng (hành chính gom phiếu đã scan để báo cáo tiến độ).
+
 ## Admin nhập liệu (03/10, BA 3.3, BR-04)
 
 - Admin được phân làm người nhập trong dự án (bỏ quy tắc cũ "Quản trị viên không được phân làm

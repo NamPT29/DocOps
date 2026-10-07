@@ -43,3 +43,9 @@ Cổng: python scripts/gate.py  (dùng --static để kiểm nhanh)
 - [x] C2d-2c (test dùng biểu mẫu thật; vòng 2 chỉ nhận trường đang hiện)
 - [x] C2e (sửa ForeignKeyViolation trên PostgreSQL khi xóa dự án/phiếu có mẫu vòng 2)
 - [x] C3a (Hành chính tự làm Nộp S, Check scan, Check nhập; API my-projects, my-work)
+
+## Trang Hành chính (C3)
+- [x] C3a (Hành chính tự làm Nộp S, Check scan, Check nhập; API my-projects, my-work)
+- [x] C3a-2 (Sửa lỗi logic C3a, phân loại tài khoản db)
+- [ ] C3b
+- [ ] C3c

@@ -324,6 +324,8 @@ class WorkflowRepository:
         for pid in project_ids:
             if pid not in project_names:
                 continue
+            if pid not in enabled_stages_by_project:
+                continue
             # Only include enabled stages that the user is a member of
             enabled = [s[1] for s in enabled_stages_by_project.get(pid, [])]
             allowed = allowed_stages_by_project.get(pid, set())

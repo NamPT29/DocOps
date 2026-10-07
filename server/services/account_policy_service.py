@@ -33,11 +33,9 @@ def vietnam_today() -> date:
 
 
 def account_type_of(user) -> str:
-    role = user.get("role") if isinstance(user, dict) else getattr(user, "role", None)
-    if role == "admin":
+    if getattr(user, "role", None) == "admin":
         return ADMIN
-    acct = user.get("account_type") if isinstance(user, dict) else getattr(user, "account_type", None)
-    return CTV if acct == CTV else STAFF
+    return CTV if getattr(user, "account_type", None) == CTV else STAFF
 
 
 def role_labels(account_types) -> str:
