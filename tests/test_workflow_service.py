@@ -11,6 +11,7 @@ from server.database import Base, get_db, get_utc_now
 from server.models import (
     AssignedDocument,
     CaseStageEvent,
+    CaseStageState,
     Project,
     ProjectCase,
     ProjectDocumentAsset,
@@ -271,6 +272,33 @@ def test_my_work_lists_only_actionable_cases(world):
     ).json()["data"]
     assert other == []
 
+
+
+def test_my_work_lists_in_progress_case_without_assignee(world):
+    """Nộp S không nhận ra người scan -> Scan đang làm nhưng assigned_user_id = NULL (C3b-2).
+
+    Thành viên bước vẫn hoàn tất được hộp đó, nên hộp phải còn trong "Việc của tôi"."""
+    scanner, qc = world["scanner"], world["qc"]
+    _configure(world, members={"scan": [scanner.id, qc.id], "scan_qc": [world["outsider"].id]})
+    c1 = world["cases"][0]
+    project_id = world["project"].id
+
+    def scan_work(user):
+        data = world["client"].get(
+            f"/api/projects/{project_id}/workflow/my-work", headers=world["headers"](user)
+        ).json()["data"]
+        return {(item["case_id"], item["status"]) for item in data if item["stage_key"] == "scan"}
+
+    assert _transition(world, scanner, c1, "scan", "start").status_code == 200
+    assert (c1.id, "in_progress") in scan_work(scanner)
+    assert (c1.id, "in_progress") not in scan_work(qc), "Hộp đang do người khác làm thì không hiện"
+
+    state = world["db"].query(CaseStageState).filter_by(case_id=c1.id, stage_key="scan").one()
+    state.assigned_user_id = None
+    world["db"].commit()
+    assert (c1.id, "in_progress") in scan_work(scanner)
+    assert (c1.id, "in_progress") in scan_work(qc)
+    assert _transition(world, qc, c1, "scan", "complete").status_code == 200
 
 def test_admin_assignment_requires_stage_membership(world):
     _configure(world)

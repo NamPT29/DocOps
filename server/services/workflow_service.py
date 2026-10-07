@@ -678,7 +678,10 @@ def list_my_work(db, *, project_id, user):
                 and cell["assigned_user_id"] in (None, user["id"])
                 and engine.is_available(key, statuses, enabled)
             )
-            if claimable or (cell["status"] == engine.IN_PROGRESS and mine):
+            # Đang làm mà chưa có người phụ trách (vd. Nộp S không nhận ra người scan nên
+            # assigned_user_id = NULL): thành viên bước vẫn hoàn tất được, nên phải thấy.
+            unassigned = cell["assigned_user_id"] is None
+            if claimable or (cell["status"] == engine.IN_PROGRESS and (mine or unassigned)):
                 items.append({
                     "case_id": case.id,
                     "case_key": case.case_key,
