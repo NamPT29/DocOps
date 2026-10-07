@@ -3,6 +3,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from server.database import get_db, get_utc_now
+from datetime import timezone
 from server.models import Notification, NotificationRecipient
 from server.repositories import NotificationRepository
 from server.routers.auth import get_admin_user, get_current_user
@@ -21,8 +22,8 @@ def _notification_payload(notification, recipient, creator_username=None):
         "id": notification.id,
         "title": notification.title,
         "message": notification.message,
-        "created_at": notification.created_at.isoformat() if notification.created_at else None,
-        "read_at": recipient.read_at.isoformat() if recipient.read_at else None,
+        "created_at": notification.created_at.replace(tzinfo=timezone.utc).isoformat() if notification.created_at else None,
+        "read_at": recipient.read_at.replace(tzinfo=timezone.utc).isoformat() if recipient.read_at else None,
         "created_by": creator_username,
     }
 
