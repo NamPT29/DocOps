@@ -4,6 +4,7 @@ Cổng: python scripts/gate.py  (dùng --static để kiểm nhanh)
 - [x] R1 scripts/preflight.py (chỉ đọc) + tests/test_preflight.py + docs/plans/runbook-trien-khai.md
 - [x] R2 tests/test_migrations_postgres_offline.py (SQL PostgreSQL offline 0010 -> head); đã chạy thật 0001 -> 0014 trên PostgreSQL 16
 - [x] R3 Runbook + test offline cập nhật cho 0015_entry_qc_round2; đã chạy thật hạ 0015 -> 0010 -> head trên PostgreSQL 16 (0 khác biệt)
+- [x] R4 Cổng thêm luật: cổng đầy đủ phải chạy trên cây đã commit, test không sinh file trong repo, selfcheck chỉ dùng module có sẵn của Node, trang HTML không dán/nạp trùng; AGENTS.md thêm "Bài học từ review" và mẫu báo cáo
 ## Chấm công (nhánh claude/nice-hamilton-7pg8bk)
 - [x] T1 Sheet "Chấm công theo ngày" trong mọi file Excel xuất (mỗi người mỗi ngày: số hàng đã nhập, đã duyệt)
 ## 4b Nộp S: sửa theo review c4e1a0f. Đặc tả sửa: docs/plans/4b-fix-checklist.md

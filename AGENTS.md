@@ -22,6 +22,34 @@ check nhập liệu → chuẩn hóa → bàn giao.
 - Chỗ nghiệp vụ chưa rõ: hỏi người dùng, không tự đoán. Giá trị mặc định lấy theo QC-01, cấu hình được theo dự án.
 - Sau mỗi nhiệm vụ: chỉ người dùng các bước bấm trên web để kiểm tra.
 
+## Bài học từ review (đọc kỹ, mỗi dòng là một lần bị trả lại)
+1. Commit TRƯỚC rồi mới chạy `python scripts/gate.py`. Cây chưa commit thì cổng đầy đủ báo KHÔNG ĐẠT.
+2. Test phải kiểm hành vi, không chỉ `status_code == 200`. Mỗi mutation trong prompt phải làm test FAIL thật;
+   mutation còn sống nghĩa là thiếu test.
+3. Người dùng giả trong test phải giống hệt `get_current_user` thật: `{id, username, full_name, role, session_id}`,
+   KHÔNG có `account_type`. Cần loại tài khoản thì đọc User từ DB.
+4. SQLite mặc định không kiểm khóa ngoại. Xóa dữ liệu có bảng tham chiếu tới thì test thêm với
+   `PRAGMA foreign_keys=ON` (xem tests/test_entry_qc_delete.py).
+5. Không chép khối HTML/script giữa các trang. Trang nào chỉ nạp đúng script nó cần; nội dung sau `</html>` hoặc
+   script nạp trùng làm trang hỏng (C3b: index.html tải lại liên tục). Cổng có luật chặn.
+6. Selfcheck JS chỉ dùng `node:assert`, `node:fs`, `node:vm`… (module có sẵn). Repo không có jsdom.
+   Mẫu DOM giả: tests/my_work_selfcheck.js.
+7. Index.html (nhân viên) khác admin.html: không có project_management.js, project_workflow.js, formatVietnamDateTime.
+   Hàm dùng chung phải chạy được khi thiếu các thứ đó.
+8. Làm ĐỦ mọi mục của prompt, kể cả "BƯỚC 0", sửa tài liệu, gộp nhánh. Đoạn tài liệu reviewer đưa thì chép nguyên văn,
+   không tự viết nội dung nghiệp vụ.
+9. Không viết "các bước kiểm tra trên web" cho phần chưa có giao diện; không nói đã kiểm trình duyệt nếu chưa chạy.
+
+## Mẫu báo cáo cuối lát (bắt buộc, thiếu mục nào là trả lại)
+```
+LÁT <mã>: <một dòng nội dung>
+Commit đã push: <mã>
+Checklist mục trong prompt: 1 ✅ ... 2 ✅ ... (mục nào không làm: ❌ + lý do)
+Mutation: (a) <sửa gì> -> <N> test FAIL | (b) ...
+Đầu ra gate (nguyên văn, dòng đầu phải là "Cổng chạy trên commit <mã> (cây sạch)"):
+<dán toàn bộ>
+```
+
 ## Test (bắt buộc pass trước khi commit)
 ```
 python scripts/gate.py           # đầy đủ

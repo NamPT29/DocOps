@@ -1,6 +1,7 @@
 """Cổng kiểm tra một lệnh: chạy trước mỗi commit, dán nguyên đầu ra vào báo cáo.
 
-    python scripts/gate.py                      đầy đủ (luật tĩnh + selfcheck JS + toàn bộ pytest)
+    python scripts/gate.py                      đầy đủ (luật tĩnh + selfcheck JS + toàn bộ pytest);
+                                                PHẢI commit trước, cây chưa commit là KHÔNG ĐẠT
     python scripts/gate.py --static             chỉ luật tĩnh (vài giây)
     python scripts/gate.py tests/test_x.py      luật tĩnh + selfcheck JS + pytest chỉ các file/đường dẫn này
 
@@ -39,12 +40,29 @@ def run(cmd: list[str]) -> tuple[int, str]:
     return proc.returncode, proc.stdout + proc.stderr
 
 
-def describe_tree() -> str:
-    _, head = run(["git", "rev-parse", "--short", "HEAD"])
+def tree_status() -> list[str]:
     _, status = run(["git", "status", "--short"])
-    dirty = len([line for line in status.splitlines() if line.strip()])
-    suffix = f" + {dirty} file chưa commit (kết quả KHÔNG đại diện cho commit)" if dirty else " (cây sạch)"
+    return [line for line in status.splitlines() if line.strip()]
+
+
+def describe_tree(dirty: list[str]) -> str:
+    _, head = run(["git", "rev-parse", "--short", "HEAD"])
+    suffix = f" + {len(dirty)} file chưa commit (kết quả KHÔNG đại diện cho commit)" if dirty else " (cây sạch)"
     return f"Cổng chạy trên commit {head.strip()}{suffix}"
+
+
+def check_committed_tree(dirty: list[str]) -> None:
+    """Cổng đầy đủ dùng để báo cáo phải chạy SAU khi commit (AGENTS.md)."""
+    record(
+        "Cây đã commit trước khi chạy cổng đầy đủ",
+        not dirty,
+        "commit rồi chạy lại: " + ", ".join(line[3:] for line in dirty[:8]) if dirty else "",
+    )
+
+
+def check_tests_leave_no_files(before: list[str]) -> None:
+    created = [line[3:] for line in tree_status() if line not in before]
+    record("Test không ghi file vào thư mục repo", not created, ", ".join(created[:8]))
 
 
 def check_frozen_files() -> None:
@@ -100,6 +118,36 @@ def check_js_swallow_errors() -> None:
     record("Luật chặn selfcheck nuốt lỗi", not bad, ", ".join(bad))
 
 
+def check_js_selfcheck_requires() -> None:
+    """Selfcheck chạy ở máy sạch: chỉ module có sẵn của Node hoặc file trong repo (không jsdom...)."""
+    code, out = run(["node", "-p", "require('module').builtinModules.join(',')"])
+    builtins = set(out.strip().split(",")) if code == 0 else set()
+    bad = []
+    for path in sorted((ROOT / "tests").glob("*selfcheck*.js")):
+        source = path.read_text(encoding="utf-8")
+        for name in re.findall(r"""require\(\s*['"]([^'"]+)['"]\s*\)""", source):
+            if name.startswith((".", "/", "node:")) or name in builtins:
+                continue
+            bad.append(f"{path.name}: {name}")
+    record("Selfcheck JS chỉ dùng module có sẵn của Node", not bad, ", ".join(bad))
+
+
+def check_html_pages() -> None:
+    """Mỗi trang một </html>, không gì sau nó, không nạp trùng script (lỗi dán trùng trang)."""
+    bad = []
+    for path in sorted((ROOT / "frontend").glob("*.html")):
+        if path.name == "temp.html":  # bản nháp cũ, không phục vụ người dùng
+            continue
+        html = path.read_text(encoding="utf-8")
+        if html.count("</html>") != 1 or not html.rstrip().endswith("</html>"):
+            bad.append(f"{path.name}: phải có đúng một </html> ở cuối file")
+        scripts = [src.split("?")[0] for src in re.findall(r'<script[^>]+src="([^"]+)"', html)]
+        duplicates = sorted({src for src in scripts if scripts.count(src) > 1})
+        if duplicates:
+            bad.append(f"{path.name}: nạp trùng {', '.join(duplicates)}")
+    record("Trang HTML không dán trùng, không nạp trùng script", not bad, "; ".join(bad))
+
+
 def check_js_selfchecks() -> None:
     files = sorted(glob.glob(str(ROOT / "tests" / "*selfcheck*.js")))
     failed = [Path(item).name for item in files if run(["node", item])[0] != 0]
@@ -125,16 +173,24 @@ def check_pytest(targets: list[str]) -> None:
 
 def main(argv: list[str]) -> int:
     sys.stdout.reconfigure(encoding="utf-8")
+    dirty = tree_status()
+    targets = [a for a in argv if not a.startswith("--")]
+    full = "--static" not in argv and not targets
+    if full:
+        check_committed_tree(dirty)
     check_frozen_files()
     check_empty_migrations()
     check_tests_do_not_touch_global_engine()
     check_sensitive_data_ignored()
     check_js_swallow_errors()
+    check_js_selfcheck_requires()
+    check_html_pages()
     if "--static" not in argv:
         check_js_selfchecks()
-        check_pytest([a for a in argv if not a.startswith("--")])
+        check_pytest(targets)
+        check_tests_leave_no_files(dirty)
     print()
-    print(describe_tree())
+    print(describe_tree(dirty))
     for name, ok, detail in results:
         print(f"[{'ĐẠT' if ok else 'LỖI'}] {name}" + (f": {detail}" if detail else ""))
     passed = all(ok for _, ok, _ in results)
