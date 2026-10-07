@@ -1,166 +1,241 @@
-const fs = require('fs');
-const jsdom = require('jsdom');
-const { JSDOM } = jsdom;
+// C3b: tab "Việc của tôi" (frontend/js/my_work.js) trên index.html.
+// Chạy bằng node thuần, không cần thư viện ngoài (gate chạy ở máy sạch).
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const vm = require('node:vm');
 
-const html = `
-<!DOCTYPE html>
-<html>
-<body>
-    <li id="myWorkTabItem" class="d-none"></li>
-    <select id="myWorkProjectSelect"></select>
-    <table id="myWorkTable"><tbody></tbody></table>
-</body>
-</html>
-`;
+const source = fs.readFileSync('frontend/js/my_work.js', 'utf8');
+const html = fs.readFileSync('frontend/index.html', 'utf8');
 
-const dom = new JSDOM(html);
-global.document = dom.window.document;
-global.window = dom.window;
+// --- kiểm tĩnh index.html: không dán trùng trang, không nạp script của trang Admin ---
+assert.equal((html.match(/<\/html>/g) || []).length, 1, 'index.html chỉ có một </html>');
+assert.match(html.trimEnd(), /<\/html>$/, 'Không có nội dung sau </html>');
+const scripts = Array.from(html.matchAll(/<script src="([^"]+)"/g), match => match[1].split('?')[0]);
+assert.equal(new Set(scripts).size, scripts.length, `Script bị nạp hai lần: ${scripts}`);
+for (const adminOnly of ['admin-page.js', 'js/project_management.js', 'js/project_workflow.js']) {
+    assert.ok(!scripts.includes(adminOnly), `index.html không được nạp ${adminOnly}`);
+}
+const authIndex = scripts.indexOf('auth.js');
+const scanIndex = scripts.indexOf('js/project_scan_submit.js');
+const myWorkIndex = scripts.indexOf('js/my_work.js');
+assert.ok(authIndex >= 0 && scanIndex > authIndex && myWorkIndex > scanIndex, 'Thứ tự: auth.js, project_scan_submit.js, my_work.js');
+assert.equal((html.match(/id="scanSubmitModal"/g) || []).length, 1, 'Có đúng một hộp thoại Nộp S');
+for (const id of ['myWorkTabItem', 'myWorkProjectSelect', 'myWorkTable', 'btnRefreshMyWork']) {
+    assert.equal((html.match(new RegExp(`id="${id}"`, 'g')) || []).length, 1, `Có đúng một #${id}`);
+}
+assert.match(html, /<li[^>]*class="[^"]*\bd-none\b[^"]*"[^>]*id="myWorkTabItem"|<li[^>]*id="myWorkTabItem"[^>]*class="[^"]*\bd-none\b/, 'Tab ẩn sẵn');
+assert.doesNotMatch(source, /innerHTML|insertAdjacentHTML|document\.write/, 'Hiển thị bằng textContent');
 
-let myWorkJs = fs.readFileSync('frontend/js/my_work.js', 'utf-8');
+// --- DOM giả tối thiểu ---
+function element(tag) {
+    const classes = new Set();
+    return {
+        tagName: String(tag).toUpperCase(),
+        className: '',
+        textContent: '',
+        children: [],
+        listeners: {},
+        value: '',
+        classList: {
+            add: name => classes.add(name),
+            remove: name => classes.delete(name),
+            contains: name => classes.has(name),
+        },
+        appendChild(child) { this.children.push(child); return child; },
+        replaceChildren(...nodes) { this.children = nodes; },
+        addEventListener(type, handler) { this.listeners[type] = handler; },
+    };
+}
 
-global.authFetchRequests = [];
-global.authFetchMockResponses = {};
-global.authFetch = async (url, options = {}) => {
-    global.authFetchRequests.push({ url, options });
-    if (global.authFetchMockResponses[url]) {
-        return global.authFetchMockResponses[url](options);
-    }
-    return { ok: true, json: async () => ({}) };
-};
+function select() {
+    const node = element('select');
+    Object.defineProperty(node, 'value', {
+        get() { return node.children.length ? node.children[0].value : ''; },
+    });
+    return node;
+}
 
-global.openScanSubmitCalls = [];
-global.openScanSubmit = (caseId, displayName) => {
-    global.openScanSubmitCalls.push({ caseId, displayName });
-};
+function setup() {
+    const nodes = {
+        myWorkTabItem: element('li'),
+        myWorkProjectSelect: select(),
+        btnRefreshMyWork: element('button'),
+        tbody: element('tbody'),
+    };
+    nodes.myWorkTabItem.classList.add('d-none');
+    const requests = [];
+    const routes = {};
+    const calls = { alert: [], openScanSubmit: [], openScanMatch: [] };
+    const answers = { confirm: true, prompt: null };
+    const context = {
+        console,
+        document: {
+            getElementById: id => nodes[id] || null,
+            querySelector: selector => (selector === '#myWorkTable tbody' ? nodes.tbody : null),
+            createElement: tag => element(tag),
+            addEventListener: () => {},
+        },
+        localStorage: { getItem: () => null },
+        authFetch: async (url, options = {}) => {
+            const method = options.method || 'GET';
+            const body = options.body ? JSON.parse(options.body) : undefined;
+            requests.push({ method, url, body });
+            const handler = routes[`${method} ${url}`];
+            const reply = handler ? handler(body) : { status: 200, json: { status: 'ok', data: [] } };
+            return {
+                ok: reply.status >= 200 && reply.status < 300,
+                status: reply.status,
+                json: async () => reply.json,
+            };
+        },
+        alert: message => calls.alert.push(message),
+        confirm: () => answers.confirm,
+        prompt: () => answers.prompt,
+        openScanSubmit: (caseId, name) => calls.openScanSubmit.push([caseId, name, context.projectWorkflowProjectId]),
+        openScanMatch: (caseId, name) => calls.openScanMatch.push([caseId, name, context.projectWorkflowProjectId]),
+    };
+    vm.createContext(context);
+    vm.runInContext(source, context);
+    const run = code => vm.runInContext(code, context);
+    return { nodes, requests, routes, calls, answers, context, run };
+}
 
-global.alertCalls = [];
-global.alert = (msg) => { global.alertCalls.push(msg); };
+function rows(tbody) {
+    return tbody.children.map(tr => ({
+        cells: tr.children.map(td => td.textContent),
+        buttons: tr.children[3] ? tr.children[3].children : [],
+    }));
+}
 
-global.confirmMock = true;
-global.confirm = () => global.confirmMock;
+function button(row, text) {
+    const found = row.buttons.find(node => node.textContent === text);
+    assert.ok(found, `Thiếu nút "${text}" (có: ${row.buttons.map(node => node.textContent)})`);
+    return found;
+}
 
-global.promptMock = null;
-global.prompt = () => global.promptMock;
+const PROJECTS = [{ project_id: 7, name: 'Dự án A', stages: ['scan', 'scan_qc'], is_reviewer: true },
+                  { project_id: 9, name: 'Dự án B', stages: ['arrangement'], is_reviewer: false }];
+const ITEMS = [
+    { case_id: 1, case_key: '0001', display_name: 'Hộp 1', stage_key: 'arrangement', status: 'pending' },
+    { case_id: 2, case_key: '0002', display_name: 'Hộp 2', stage_key: 'arrangement', status: 'in_progress' },
+    { case_id: 3, case_key: '0003', display_name: 'Hộp 3', stage_key: 'scan', status: 'rejected' },
+    { case_id: 4, case_key: '0004', display_name: 'Hộp 4', stage_key: 'scan', status: 'in_progress' },
+    { case_id: 5, case_key: '0005', display_name: 'Hộp 5', stage_key: 'scan_qc', status: 'pending' },
+    { case_id: 6, case_key: '0006', display_name: 'Hộp 6', stage_key: 'scan_qc', status: 'in_progress' },
+    { case_id: 8, case_key: '0008', display_name: 'Hộp 8', stage_key: 'entry_qc', status: 'in_progress',
+      gate_code: 'entry_qc_not_finalized' },
+];
+const EXPECTED_BUTTONS = [
+    ['Bắt đầu'],
+    ['Hoàn tất'],
+    ['Nộp S'],
+    ['Nộp S', 'Hoàn tất scan'],
+    ['Xem so khớp', 'Bắt đầu'],
+    ['Xem so khớp', 'Duyệt', 'Trả lại'],
+    [],
+];
+const TRANSITION = (caseId, stage) => `POST /api/projects/7/workflow/cases/${caseId}/stages/${stage}/transition`;
 
-global.localStorage = {
-    getItem: () => null,
-    setItem: () => {}
-};
-
-eval(myWorkJs);
+async function loaded() {
+    const page = setup();
+    page.routes['GET /api/workflow/my-projects'] = () => ({ status: 200, json: { status: 'ok', data: PROJECTS } });
+    page.routes['GET /api/projects/7/workflow/my-work'] = () => ({ status: 200, json: { status: 'ok', data: ITEMS } });
+    await page.run('fetchMyProjects()');
+    return page;
+}
 
 async function runTests() {
-    console.log("Running selfcheck...");
-
-    // Test (a) my-projects [] -> tab vẫn ẩn
-    global.authFetchMockResponses['/api/workflow/my-projects'] = () => ({
-        ok: true, json: async () => ({ data: [] })
-    });
-    await fetchMyProjects();
-    if (!document.getElementById('myWorkTabItem').classList.contains('d-none')) {
-        throw new Error("Test a1 failed: Tab should be hidden");
+    // a) Không có dự án -> tab vẫn ẩn, không tải việc.
+    {
+        const page = setup();
+        page.routes['GET /api/workflow/my-projects'] = () => ({ status: 200, json: { status: 'ok', data: [] } });
+        await page.run('fetchMyProjects()');
+        assert.ok(page.nodes.myWorkTabItem.classList.contains('d-none'));
+        assert.deepEqual(page.requests.map(r => r.url), ['/api/workflow/my-projects']);
     }
+    // a) Có dự án -> tab hiện, đủ dự án trong ô chọn, tải việc của dự án đầu tiên.
+    {
+        const page = await loaded();
+        assert.ok(!page.nodes.myWorkTabItem.classList.contains('d-none'));
+        assert.deepEqual(page.nodes.myWorkProjectSelect.children.map(o => [Number(o.value), o.textContent]),
+                         [[7, 'Dự án A'], [9, 'Dự án B']]);
+        assert.equal(page.requests.at(-1).url, '/api/projects/7/workflow/my-work');
 
-    // Test (a) có dự án -> tab hiện, ô chọn có đủ dự án
-    global.authFetchMockResponses['/api/workflow/my-projects'] = () => ({
-        ok: true, json: async () => ({
-            data: [
-                { project_id: 1, name: "Project 1" },
-                { project_id: 2, name: "Project 2" }
-            ]
-        })
-    });
-    global.authFetchMockResponses['/api/projects/1/workflow/my-work'] = () => ({
-        ok: true, json: async () => ({ data: [] })
-    });
-    await fetchMyProjects();
-    if (document.getElementById('myWorkTabItem').classList.contains('d-none')) {
-        throw new Error("Test a2 failed: Tab should be visible");
+        // b) nút theo bước/trạng thái; f) dòng entry_qc có nhãn cổng, không có nút.
+        const table = rows(page.nodes.tbody);
+        assert.deepEqual(table.map(row => row.buttons.map(node => node.textContent)), EXPECTED_BUTTONS);
+        assert.deepEqual(table[0].cells.slice(0, 3), ['Hộp 1', 'Chỉnh lý', 'Chờ']);
+        assert.deepEqual(table[2].cells.slice(0, 3), ['Hộp 3', 'Scan', 'Bị trả lại']);
+        assert.deepEqual(table[5].cells.slice(0, 3), ['Hộp 6', 'Check scan', 'Đang làm']);
+        assert.deepEqual(table[6].cells.slice(0, 3), ['Hộp 8', 'Check nhập', 'Chưa chốt vòng 1']);
     }
-    if (document.getElementById('myWorkProjectSelect').options.length !== 2) {
-        throw new Error("Test a3 failed: Select should have 2 options");
+    // c) Trả lại: Hủy hoặc toàn dấu cách -> không gửi; có lý do -> gửi đúng URL và body.
+    {
+        const page = await loaded();
+        const reject = button(rows(page.nodes.tbody)[5], 'Trả lại');
+        const before = page.requests.length;
+        page.answers.prompt = null;
+        await reject.listeners.click();
+        page.answers.prompt = '   ';
+        await reject.listeners.click();
+        assert.equal(page.requests.length, before, 'Không gửi khi chưa nhập lý do');
+        page.answers.prompt = 'Thiếu trang';
+        page.routes[TRANSITION(6, 'scan_qc')] = () => ({ status: 200, json: { status: 'ok' } });
+        await reject.listeners.click();
+        await new Promise(resolve => setImmediate(resolve));
+        const sent = page.requests.find(r => `${r.method} ${r.url}` === TRANSITION(6, 'scan_qc'));
+        assert.deepEqual(sent.body, { action: 'reject', reason: 'Thiếu trang' });
     }
+    // d) Duyệt: không xác nhận -> không gửi; lỗi 409 -> báo đúng message; thành công -> tải lại.
+    {
+        const page = await loaded();
+        const approve = button(rows(page.nodes.tbody)[5], 'Duyệt');
+        const before = page.requests.length;
+        page.answers.confirm = false;
+        await approve.listeners.click();
+        assert.equal(page.requests.length, before);
 
-    // Test (b) bảng có đúng nút theo từng bước/trạng thái ở mục 3 (kiểm chữ trên nút).
-    const mockMyWorkData = [
-        { case_id: 1, display_name: "Case 1", stage_key: "arrangement", status: "pending" },
-        { case_id: 2, display_name: "Case 2", stage_key: "arrangement", status: "in_progress" },
-        { case_id: 3, display_name: "Case 3", stage_key: "scan", status: "in_progress" },
-        { case_id: 4, display_name: "Case 4", stage_key: "scan_qc", status: "in_progress" },
-        { case_id: 5, display_name: "Case 5", stage_key: "entry_qc", gate_code: "entry_qc_not_finalized" },
-        { case_id: 6, display_name: "Case 6", stage_key: "scan_qc", status: "pending" }
-    ];
-    global.authFetchMockResponses['/api/projects/1/workflow/my-work'] = () => ({
-        ok: true, json: async () => ({ data: mockMyWorkData })
-    });
-    await fetchMyWork();
-    
-    const rows = document.querySelectorAll('#myWorkTable tbody tr');
-    const getButtons = (tr) => Array.from(tr.querySelectorAll('button')).map(b => b.textContent);
-    
-    if (getButtons(rows[0]).join(',') !== 'Bắt đầu') throw new Error("Test b1 failed");
-    if (getButtons(rows[1]).join(',') !== 'Hoàn tất') throw new Error("Test b2 failed");
-    if (getButtons(rows[2]).join(',') !== 'Nộp S,Hoàn tất scan') throw new Error("Test b3 failed");
-    if (getButtons(rows[3]).join(',') !== 'Xem so khớp,Duyệt,Trả lại') throw new Error("Test b4 failed");
-    if (getButtons(rows[5]).join(',') !== 'Xem so khớp,Bắt đầu') throw new Error("Test b5 failed");
-    
-    // Test (c) Trả lại
-    const rejectBtn = Array.from(rows[3].querySelectorAll('button')).find(b => b.textContent === 'Trả lại');
-    
-    global.promptMock = null;
-    const reqCountBefore = global.authFetchRequests.length;
-    rejectBtn.click();
-    if (global.authFetchRequests.length !== reqCountBefore) throw new Error("Test c1 failed: Should not send request if prompt is null");
-    
-    global.promptMock = "Thiếu trang";
-    global.authFetchMockResponses['/api/projects/1/workflow/cases/4/stages/scan_qc/transition'] = () => ({
-        ok: true, json: async () => ({})
-    });
-    rejectBtn.click();
-    await new Promise(r => setTimeout(r, 100)); // wait for async
-    const lastReq = global.authFetchRequests.find(r => r.options && r.options.method === 'POST');
-    if (lastReq.url !== '/api/projects/1/workflow/cases/4/stages/scan_qc/transition') throw new Error("Test c2 failed: URL mismatch. Actual: " + lastReq.url);
-    const bodyObj = JSON.parse(lastReq.options.body);
-    if (bodyObj.action !== 'reject' || bodyObj.reason !== 'Thiếu trang') throw new Error("Test c3 failed: body mismatch");
+        page.answers.confirm = true;
+        page.routes[TRANSITION(6, 'scan_qc')] = () => ({
+            status: 409,
+            json: { detail: { code: 'scan_catalog_mismatch', message: 'Hồ sơ scan lệch với mục lục. Chỉ Admin được duyệt.' } },
+        });
+        await approve.listeners.click();
+        await new Promise(resolve => setImmediate(resolve));
+        assert.deepEqual(page.calls.alert, ['Hồ sơ scan lệch với mục lục. Chỉ Admin được duyệt.']);
+        assert.deepEqual(page.requests.at(-1).body, { action: 'complete' });
 
-    // Test (d) Duyệt -> POST {action: "complete"}; phản hồi 409 {detail: {code, message}} -> alert đúng message
-    const completeBtn = Array.from(rows[3].querySelectorAll('button')).find(b => b.textContent === 'Duyệt');
-    global.authFetchMockResponses['/api/projects/1/workflow/cases/4/stages/scan_qc/transition'] = () => ({
-        ok: false, status: 409, json: async () => ({ detail: { code: "err", message: "Chỉ Admin được duyệt" } })
-    });
-    global.alertCalls = [];
-    completeBtn.click();
-    await new Promise(r => setTimeout(r, 10)); // wait for async
-    if (global.alertCalls[0] !== "Chỉ Admin được duyệt") throw new Error("Test d1 failed: alert mismatch: " + global.alertCalls[0]);
-    
-    // thành công -> bảng được tải lại
-    global.authFetchMockResponses['/api/projects/1/workflow/cases/4/stages/scan_qc/transition'] = () => ({
-        ok: true, json: async () => ({})
-    });
-    let fetchMyWorkCalled = 0;
-    global.authFetchMockResponses['/api/projects/1/workflow/my-work'] = () => {
-        fetchMyWorkCalled++;
-        return { ok: true, json: async () => ({ data: mockMyWorkData }) };
-    };
-    completeBtn.click();
-    await new Promise(r => setTimeout(r, 10)); // wait for async
-    if (fetchMyWorkCalled === 0) throw new Error("Test d2 failed: Should reload table");
+        page.routes[TRANSITION(6, 'scan_qc')] = () => ({ status: 200, json: { status: 'ok' } });
+        await approve.listeners.click();
+        await new Promise(resolve => setImmediate(resolve));
+        assert.equal(page.requests.at(-1).url, '/api/projects/7/workflow/my-work', 'Tải lại bảng sau khi duyệt');
+        assert.equal(page.calls.alert.length, 1);
 
-    // Test (e) Nộp S
-    const nopsBtn = Array.from(rows[2].querySelectorAll('button')).find(b => b.textContent === 'Nộp S');
-    global.openScanSubmitCalls = [];
-    nopsBtn.click();
-    if (global.openScanSubmitCalls.length === 0) throw new Error("Test e1 failed: openScanSubmit not called");
-    if (global.openScanSubmitCalls[0].caseId !== 3 || global.openScanSubmitCalls[0].displayName !== 'Case 3') throw new Error("Test e2 failed");
-    if (projectWorkflowProjectId != 1) throw new Error("Test e3 failed: projectWorkflowProjectId mismatch");
-
-    // Test (f) entry_qc: hiện nhãn theo gate_code, không có nút
-    if (getButtons(rows[4]).length !== 0) throw new Error("Test f1 failed: Should have no buttons");
-    const statusText = rows[4].querySelectorAll('td')[2].textContent;
-    if (statusText !== "Chưa chốt vòng 1") throw new Error("Test f2 failed: status text mismatch");
-
-    console.log("Selfcheck passed!");
+        // Bắt đầu / Hoàn tất gửi đúng hành động.
+        await button(rows(page.nodes.tbody)[0], 'Bắt đầu').listeners.click();
+        await new Promise(resolve => setImmediate(resolve));
+        assert.ok(page.requests.some(r => `${r.method} ${r.url}` === TRANSITION(1, 'arrangement') && r.body.action === 'start'));
+    }
+    // e) Nộp S / Xem so khớp: gán dự án đang chọn trước khi mở hộp thoại dùng chung.
+    {
+        const page = await loaded();
+        button(rows(page.nodes.tbody)[3], 'Nộp S').listeners.click();
+        button(rows(page.nodes.tbody)[4], 'Xem so khớp').listeners.click();
+        assert.deepEqual(page.calls.openScanSubmit.map(([id, name, pid]) => [id, name, Number(pid)]), [[4, 'Hộp 4', 7]]);
+        assert.deepEqual(page.calls.openScanMatch.map(([id, name, pid]) => [id, name, Number(pid)]), [[5, 'Hộp 5', 7]]);
+        // project_scan_submit.js gọi refreshProjectWorkflow() sau khi nộp: phải tải lại bảng.
+        const before = page.requests.length;
+        await page.run('refreshProjectWorkflow()');
+        assert.deepEqual(page.requests.slice(before).map(r => r.url), ['/api/projects/7/workflow/my-work']);
+    }
+    // Lỗi tải việc -> dòng báo lỗi hiển thị bằng textContent.
+    {
+        const page = await loaded();
+        page.routes['GET /api/projects/7/workflow/my-work'] = () => ({ status: 500, json: {} });
+        await page.run('fetchMyWork()');
+        assert.match(rows(page.nodes.tbody)[0].cells[0], /^Lỗi: /);
+    }
+    console.log('My work self-check: OK');
 }
 
 runTests().catch(error => { console.error(error); process.exitCode = 1; });

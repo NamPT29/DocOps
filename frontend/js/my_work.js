@@ -17,7 +17,7 @@ async function fetchMyProjects() {
         
         if (data.data && data.data.length > 0) {
             myWorkTabItem.classList.remove('d-none');
-            myWorkProjectSelect.innerHTML = '';
+            myWorkProjectSelect.replaceChildren();
             
             data.data.forEach(proj => {
                 const option = document.createElement('option');
@@ -41,7 +41,7 @@ async function fetchMyWork() {
     if (!projectId) return;
     
     const tbody = document.querySelector('#myWorkTable tbody');
-    tbody.innerHTML = '<tr><td colspan="4" class="text-center text-muted">Đang tải...</td></tr>';
+    setMyWorkMessage(tbody, 'Đang tải...', 'text-muted');
     
     try {
         const response = await authFetch(`/api/projects/${projectId}/workflow/my-work`);
@@ -50,8 +50,18 @@ async function fetchMyWork() {
         const data = await response.json();
         renderMyWorkTable(data.data);
     } catch (error) {
-        tbody.innerHTML = `<tr><td colspan="4" class="text-center text-danger">Lỗi: ${error.message}</td></tr>`;
+        setMyWorkMessage(tbody, `Lỗi: ${error.message}`, 'text-danger');
     }
+}
+
+function setMyWorkMessage(tbody, text, className) {
+    const tr = document.createElement('tr');
+    const td = document.createElement('td');
+    td.colSpan = 4;
+    td.className = `text-center ${className}`;
+    td.textContent = text;
+    tr.appendChild(td);
+    tbody.replaceChildren(tr);
 }
 
 const STAGE_LABELS = {
@@ -77,10 +87,10 @@ const STATUS_LABELS = {
 
 function renderMyWorkTable(items) {
     const tbody = document.querySelector('#myWorkTable tbody');
-    tbody.innerHTML = '';
+    tbody.replaceChildren();
     
     if (!items || items.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="4" class="text-center text-muted">Không có việc cần làm</td></tr>';
+        setMyWorkMessage(tbody, 'Không có việc cần làm', 'text-muted');
         return;
     }
     
@@ -184,7 +194,7 @@ function renderActionButtons(td, item) {
             btnReject.className = 'btn btn-sm btn-danger mb-1';
             btnReject.textContent = 'Trả lại';
             btnReject.addEventListener('click', () => {
-                const reason = prompt('Lý do trả lại (bắt buộc):');
+                const reason = (prompt('Lý do trả lại (bắt buộc):') || '').trim();
                 if (reason) {
                     transitionStage(cid, stage_key, 'reject', reason);
                 }
@@ -211,7 +221,7 @@ async function transitionStage(caseId, stageKey, action, reason = null) {
         });
         
         if (!response.ok) {
-            const err = await response.json();
+            const err = await response.json().catch(() => ({}));
             const detail = err.detail;
             const message = typeof detail === 'string' ? detail : (detail && detail.message) ? detail.message : 'Đã có lỗi xảy ra';
             alert(message);
