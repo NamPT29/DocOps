@@ -215,6 +215,8 @@ function configureCapabilityUI() {
             pane.classList.remove('show', 'active');
         });
     }
+    // Tab "Việc của tôi" (js/my_work.js, chỉ có trên index.html) tự hiện lại thanh tab.
+    if (typeof applyMyWorkVisibility === 'function') applyMyWorkVisibility();
 }
 
 async function refreshCurrentUserProfile() {

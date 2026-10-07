@@ -1,6 +1,35 @@
 // js/my_work.js
 
 var projectWorkflowProjectId = null;
+var myWorkHasProjects = false;
+
+/**
+ * Hiện tab "Việc của tôi" khi người dùng có việc quy trình. auth.js
+ * (configureCapabilityUI) ẩn cả thanh tab với người không có quyền nhập/kiểm tra
+ * và gọi lại hàm này ở cuối, nên thứ tự chạy của hai bên không quan trọng.
+ */
+function applyMyWorkVisibility() {
+    const item = document.getElementById('myWorkTabItem');
+    if (!item) return;
+    item.classList.toggle('d-none', !myWorkHasProjects);
+    if (!myWorkHasProjects) return;
+    const tabs = document.getElementById('employeeTabs');
+    if (tabs) tabs.classList.remove('d-none');
+    const notice = document.getElementById('noAssignmentNotice');
+    if (notice) notice.classList.add('d-none');
+    const hasOtherTab = ['inputTabItem', 'dataTabItem', 'reviewTabItem'].some(id => {
+        const node = document.getElementById(id);
+        return node && !node.classList.contains('d-none');
+    });
+    if (hasOtherTab) return;
+    // Chỉ làm việc quy trình: mở luôn tab này.
+    document.querySelectorAll('#appTabsContent > .tab-pane').forEach(pane => pane.classList.remove('show', 'active'));
+    document.querySelectorAll('#employeeTabs .nav-link').forEach(link => link.classList.remove('active'));
+    const pane = document.getElementById('my-work-pane');
+    if (pane) pane.classList.add('show', 'active');
+    const button = document.getElementById('my-work-tab');
+    if (button) button.classList.add('active');
+}
 
 async function refreshProjectWorkflow() {
     await fetchMyWork();
@@ -12,11 +41,11 @@ async function fetchMyProjects() {
         if (!response.ok) throw new Error('Không thể tải danh sách dự án');
         
         const data = await response.json();
-        const myWorkTabItem = document.getElementById('myWorkTabItem');
         const myWorkProjectSelect = document.getElementById('myWorkProjectSelect');
         
-        if (data.data && data.data.length > 0) {
-            myWorkTabItem.classList.remove('d-none');
+        myWorkHasProjects = Boolean(data.data && data.data.length > 0);
+        applyMyWorkVisibility();
+        if (myWorkHasProjects) {
             myWorkProjectSelect.replaceChildren();
             
             data.data.forEach(proj => {
@@ -28,8 +57,6 @@ async function fetchMyProjects() {
             
             
             await fetchMyWork();
-        } else {
-            myWorkTabItem.classList.add('d-none');
         }
     } catch (error) {
         console.error('Lỗi tải danh sách dự án Việc của tôi:', error);

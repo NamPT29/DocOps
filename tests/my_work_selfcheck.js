@@ -25,6 +25,10 @@ for (const id of ['myWorkTabItem', 'myWorkProjectSelect', 'myWorkTable', 'btnRef
 }
 assert.match(html, /<li[^>]*class="[^"]*\bd-none\b[^"]*"[^>]*id="myWorkTabItem"|<li[^>]*id="myWorkTabItem"[^>]*class="[^"]*\bd-none\b/, 'Tab ẩn sẵn');
 assert.doesNotMatch(source, /innerHTML|insertAdjacentHTML|document\.write/, 'Hiển thị bằng textContent');
+const authSource = fs.readFileSync('frontend/auth.js', 'utf8');
+const capabilityUi = authSource.slice(authSource.indexOf('function configureCapabilityUI'), authSource.indexOf('async function refreshCurrentUserProfile'));
+assert.match(capabilityUi, /typeof applyMyWorkVisibility === 'function'\) applyMyWorkVisibility\(\)/,
+             'configureCapabilityUI phải gọi applyMyWorkVisibility (nó ẩn cả thanh tab với người chỉ làm quy trình)');
 
 // --- DOM giả tối thiểu ---
 function element(tag) {
@@ -37,9 +41,14 @@ function element(tag) {
         listeners: {},
         value: '',
         classList: {
-            add: name => classes.add(name),
-            remove: name => classes.delete(name),
+            add: (...names) => names.forEach(name => classes.add(name)),
+            remove: (...names) => names.forEach(name => classes.delete(name)),
             contains: name => classes.has(name),
+            toggle: (name, force) => {
+                const on = force === undefined ? !classes.has(name) : Boolean(force);
+                if (on) classes.add(name); else classes.delete(name);
+                return on;
+            },
         },
         appendChild(child) { this.children.push(child); return child; },
         replaceChildren(...nodes) { this.children = nodes; },
@@ -61,8 +70,21 @@ function setup() {
         myWorkProjectSelect: select(),
         btnRefreshMyWork: element('button'),
         tbody: element('tbody'),
+        employeeTabs: element('ul'),
+        noAssignmentNotice: element('div'),
+        inputTabItem: element('li'),
+        dataTabItem: element('li'),
+        reviewTabItem: element('li'),
+        'my-work-pane': element('div'),
+        'my-work-tab': element('button'),
+        'form-pane': element('div'),
+        'form-tab': element('button'),
     };
     nodes.myWorkTabItem.classList.add('d-none');
+    // Mặc định: người chỉ làm quy trình -> auth.js đã ẩn thanh tab và các tab nhập/kiểm tra.
+    for (const id of ['employeeTabs', 'inputTabItem', 'dataTabItem', 'reviewTabItem']) nodes[id].classList.add('d-none');
+    const panes = [nodes['my-work-pane'], nodes['form-pane']];
+    const links = [nodes['my-work-tab'], nodes['form-tab']];
     const requests = [];
     const routes = {};
     const calls = { alert: [], openScanSubmit: [], openScanMatch: [] };
@@ -72,6 +94,10 @@ function setup() {
         document: {
             getElementById: id => nodes[id] || null,
             querySelector: selector => (selector === '#myWorkTable tbody' ? nodes.tbody : null),
+            querySelectorAll: selector => ({
+                '#appTabsContent > .tab-pane': panes,
+                '#employeeTabs .nav-link': links,
+            }[selector] || []),
             createElement: tag => element(tag),
             addEventListener: () => {},
         },
@@ -168,6 +194,30 @@ async function runTests() {
         assert.deepEqual(table[2].cells.slice(0, 3), ['Hộp 3', 'Scan', 'Bị trả lại']);
         assert.deepEqual(table[5].cells.slice(0, 3), ['Hộp 6', 'Check scan', 'Đang làm']);
         assert.deepEqual(table[6].cells.slice(0, 3), ['Hộp 8', 'Check nhập', 'Chưa chốt vòng 1']);
+    }
+    // Người chỉ làm quy trình: hiện lại thanh tab, ẩn thông báo "chưa phân công", mở luôn tab này;
+    // auth.js ẩn lại thanh tab sau đó thì applyMyWorkVisibility hiện lại.
+    {
+        const page = await loaded();
+        assert.ok(!page.nodes.employeeTabs.classList.contains('d-none'), 'Hiện thanh tab');
+        assert.ok(page.nodes.noAssignmentNotice.classList.contains('d-none'), 'Ẩn thông báo chưa phân công');
+        assert.ok(page.nodes['my-work-pane'].classList.contains('active') && page.nodes['my-work-pane'].classList.contains('show'));
+        assert.ok(page.nodes['my-work-tab'].classList.contains('active'));
+        page.nodes.employeeTabs.classList.add('d-none');
+        page.run('applyMyWorkVisibility()');
+        assert.ok(!page.nodes.employeeTabs.classList.contains('d-none'), 'Gọi lại sau configureCapabilityUI vẫn hiện');
+    }
+    // Người vừa nhập liệu vừa làm quy trình: không giành tab đang mở.
+    {
+        const page = setup();
+        page.nodes.inputTabItem.classList.remove('d-none');
+        page.nodes.employeeTabs.classList.remove('d-none');
+        page.nodes['form-pane'].classList.add('show', 'active');
+        page.routes['GET /api/workflow/my-projects'] = () => ({ status: 200, json: { status: 'ok', data: PROJECTS } });
+        await page.run('fetchMyProjects()');
+        assert.ok(!page.nodes.myWorkTabItem.classList.contains('d-none'));
+        assert.ok(page.nodes['form-pane'].classList.contains('active'), 'Giữ tab Nhập hồ sơ');
+        assert.ok(!page.nodes['my-work-pane'].classList.contains('active'));
     }
     // c) Trả lại: Hủy hoặc toàn dấu cách -> không gửi; có lý do -> gửi đúng URL và body.
     {
