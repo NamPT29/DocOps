@@ -389,6 +389,7 @@ async function openScanSubmit(caseId, caseName) {
     setScanSubmitError('');
     // Load folder list and history concurrently
     await Promise.all([loadScanSubmitFolder(''), reloadScanPackageHistory()]);
+    new bootstrap.Modal(document.getElementById('scanSubmitModal')).show();
     // After loading history, check for any processing package and follow it automatically
     const packages = await scanSubmitListPackages();
     const processingPkg = packages.find(p => p.status === 'processing');
@@ -397,9 +398,8 @@ async function openScanSubmit(caseId, caseName) {
         if (result) renderScanPackage(result, processingPkg);
         const send = document.getElementById('scanSubmitSendButton');
         if (send) send.disabled = true;
-        await followScanPackage(processingPkg.id);
+        followScanPackage(processingPkg.id);
     }
-    new bootstrap.Modal(document.getElementById('scanSubmitModal')).show();
 }
 async function openScanMatch(caseId, caseName) {
     scanSubmitState.projectId = Number(projectWorkflowProjectId);
