@@ -20,7 +20,6 @@ from server.models import (
     Submission,
     SubmissionViewPresence,
     SubmissionReviewAssignment,
-    SubmissionQualityAssessment,
     SubmissionReviewHistory,
 )
 from server.models_entry_qc import CaseEntryQcSampleItem, CaseEntryQcSampling, CaseEntryQcResult

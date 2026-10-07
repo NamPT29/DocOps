@@ -584,12 +584,6 @@ class SubmissionService:
         if not sub:
             raise HTTPException(status_code=404, detail="Không tìm thấy hồ sơ.")
 
-        if submission_repository.is_entry_qc_sampled(sub_id):
-            raise HTTPException(
-                status_code=409, 
-                detail={"code": "entry_qc_sampled", "message": "Phiếu đã được lấy mẫu Check nhập vòng 2, không xóa được."}
-            )
-
         if current_user["role"] != "admin":
             is_active_input = submission_repository.is_active_input_assignee(
                 sub,
@@ -599,6 +593,12 @@ class SubmissionService:
                 raise HTTPException(status_code=409, detail="Nhân viên chỉ có thể xóa hồ sơ đang lưu nháp")
             if not is_active_input:
                 raise HTTPException(status_code=403, detail="Bạn không có quyền xóa hồ sơ này")
+
+        if submission_repository.is_entry_qc_sampled(sub_id):
+            raise HTTPException(
+                status_code=409, 
+                detail={"code": "entry_qc_sampled", "message": "Phiếu đã được lấy mẫu Check nhập vòng 2, không xóa được."}
+            )
 
         doc_id = sub.assigned_document_id
         ReviewRepository(db).delete_for_submissions([sub_id])
