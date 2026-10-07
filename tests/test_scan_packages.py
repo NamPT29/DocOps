@@ -78,7 +78,7 @@ def test_data(database, tmp_path, monkeypatch):
 
     app.dependency_overrides[get_db] = lambda: db
     app.dependency_overrides[get_admin_user] = lambda: {"id": user_admin.id, "role": "admin"}
-    app.dependency_overrides[get_current_user] = lambda: {"id": user_normal.id, "role": "user"}
+    app.dependency_overrides[get_current_user] = lambda: {"id": user_admin.id, "role": "admin"}
 
     yield {"db": db, "project": project, "case": case, "admin": user_admin, "user": user_normal, "tmp_path": tmp_path}
 
@@ -138,12 +138,11 @@ def test_403_and_basic(test_data):
     project = test_data["project"]
     case = test_data["case"]
 
-    # 403: chỉ ghi đè get_current_user, bỏ override get_admin_user
-    app.dependency_overrides.pop(get_admin_user)
+    # 403: change get_current_user to normal user
     app.dependency_overrides[get_current_user] = lambda: {"id": test_data["user"].id, "role": "user"}
     res = client.post(f"/api/projects/{project.id}/cases/{case.id}/scan-packages", json={"folder_path": "test"})
     assert res.status_code == 403
-    app.dependency_overrides[get_admin_user] = lambda: {"id": test_data["admin"].id, "role": "admin"}
+    app.dependency_overrides[get_current_user] = lambda: {"id": test_data["admin"].id, "role": "admin"}
 
 
 def test_3a_3b_stage_logic(test_data):

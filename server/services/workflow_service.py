@@ -45,6 +45,13 @@ def stage_catalog():
     ]
 
 
+def get_my_projects(db, current_user):
+    if account_policy.account_type_of(current_user) == "ctv":
+        return []
+    repository = WorkflowRepository(db)
+    return repository.get_my_projects_data(current_user["id"])
+
+
 def _project_or_404(repository, project_id):
     project = repository.get_project(project_id)
     if not project:
@@ -648,7 +655,8 @@ def list_my_work(db, *, project_id, user):
         if not engine.STAGES_BY_KEY[key].derived
         and repository.user_is_stage_member(project_id, user["id"], key)
     ]
-    if not stage_keys:
+    is_reviewer = "entry_qc" in enabled and repository.user_has_legacy_role(project_id, user["id"], "reviewer")
+    if not stage_keys and not is_reviewer:
         return []
     cases = repository.list_cases(project_id)
     matrix = _status_matrix(repository, project_id, enabled, cases)
@@ -672,4 +680,44 @@ def list_my_work(db, *, project_id, user):
                     "stage_key": key,
                     "status": cell["status"],
                 })
+        
+        if is_reviewer and statuses.get("data_entry") == engine.DONE:
+            gate = check_entry_qc_gate(db, project_id, case.id)
+            if gate.get("blocked"):
+                items.append({
+                    "case_id": case.id,
+                    "case_key": case.case_key,
+                    "display_name": case.display_name,
+                    "stage_key": "entry_qc",
+                    "status": statuses.get("entry_qc", "pending"),
+                    "gate_code": gate.get("code"),
+                })
     return items
+
+def enforce_can_create_scan_package(db, project_id: int, current_user: dict):
+    if current_user["role"] == "admin":
+        return
+    if account_policy.account_type_of(current_user) == "ctv":
+        raise HTTPException(status_code=403, detail="Không có quyền thực hiện thao tác này")
+    repository = WorkflowRepository(db)
+    if not repository.user_is_stage_member(project_id, current_user["id"], "scan"):
+        raise HTTPException(status_code=403, detail="Không có quyền thực hiện thao tác này")
+
+def enforce_can_view_scan_packages(db, project_id: int, current_user: dict):
+    if current_user["role"] == "admin":
+        return
+    if account_policy.account_type_of(current_user) == "ctv":
+        raise HTTPException(status_code=403, detail="Không có quyền thực hiện thao tác này")
+    repository = WorkflowRepository(db)
+    if not (repository.user_is_stage_member(project_id, current_user["id"], "scan") or 
+            repository.user_is_stage_member(project_id, current_user["id"], "scan_qc")):
+        raise HTTPException(status_code=403, detail="Không có quyền thực hiện thao tác này")
+
+def enforce_can_access_server_folders(db, current_user: dict):
+    if current_user["role"] == "admin":
+        return
+    if account_policy.account_type_of(current_user) == "ctv":
+        raise HTTPException(status_code=403, detail="Không có quyền thực hiện thao tác này")
+    repository = WorkflowRepository(db)
+    if not repository.user_is_stage_member_in_any_project(current_user["id"], "scan"):
+        raise HTTPException(status_code=403, detail="Không có quyền thực hiện thao tác này")

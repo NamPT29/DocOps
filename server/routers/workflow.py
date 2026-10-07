@@ -31,6 +31,17 @@ def api_stage_catalog(current_user: dict = Depends(get_current_user)):
     return {"status": "ok", "data": workflow_service.stage_catalog()}
 
 
+@catalog_router.get("/my-projects")
+def api_get_my_projects(
+    current_user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    return {
+        "status": "ok",
+        "data": workflow_service.get_my_projects(db, current_user),
+    }
+
+
 @router.get("")
 def api_get_workflow(
     project_id: int,

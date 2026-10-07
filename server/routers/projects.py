@@ -378,10 +378,13 @@ def api_create_scan_package(
     case_id: int,
     request: ScanPackageCreateRequest,
     background_tasks: BackgroundTasks,
-    current_user: dict = Depends(get_admin_user),
+    current_user: dict = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     from server.services.scan_ingestion_service import submit_scan_package, process_scan_package_background
+    from server.services.workflow_service import enforce_can_create_scan_package
+
+    enforce_can_create_scan_package(db, project_id, current_user)
 
     pkg = submit_scan_package(
         db,
@@ -401,12 +404,15 @@ def api_create_scan_package(
 def api_list_scan_packages(
     project_id: int,
     case_id: int,
-    current_user: dict = Depends(get_admin_user),
+    current_user: dict = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     from server.repositories.scan_repository import get_case_by_id, list_scan_packages
+    from server.services.workflow_service import enforce_can_view_scan_packages
     import json
     
+    enforce_can_view_scan_packages(db, project_id, current_user)
+
     case = get_case_by_id(db, project_id, case_id)
     if not case:
         raise HTTPException(status_code=404, detail="Hộp không thuộc dự án này hoặc không tồn tại.")

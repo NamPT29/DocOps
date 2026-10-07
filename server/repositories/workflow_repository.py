@@ -108,6 +108,18 @@ class WorkflowRepository:
             is not None
         )
 
+    def user_is_stage_member_in_any_project(self, user_id, stage_key):
+        return (
+            self.session.query(ProjectStageMember.user_id)
+            .filter(
+                ProjectStageMember.user_id == user_id,
+                ProjectStageMember.stage_key == stage_key,
+                ProjectStageMember.is_active.is_(True),
+            )
+            .first()
+            is not None
+        )
+
     def user_has_legacy_role(self, project_id, user_id, member_role):
         return (
             self.session.query(ProjectMember.user_id)
@@ -267,3 +279,67 @@ class WorkflowRepository:
         for row_case_id, units in entered_reports.items():
             progress[row_case_id]["reports_entered"] = len(units)
         return progress
+
+    def get_my_projects_data(self, user_id):
+        # 1. Get enabled stages per project
+        stage_rows = self.session.query(ProjectStage.project_id, ProjectStage.stage_key, ProjectStage.position).filter(
+            ProjectStage.is_enabled.is_(True)
+        ).all()
+        
+        # 2. Get user's stage memberships
+        member_rows = self.session.query(ProjectStageMember.project_id, ProjectStageMember.stage_key).filter(
+            ProjectStageMember.user_id == user_id,
+            ProjectStageMember.is_active.is_(True)
+        ).all()
+        
+        # 3. Get user's reviewer memberships
+        reviewer_rows = self.session.query(ProjectMember.project_id).filter(
+            ProjectMember.user_id == user_id,
+            ProjectMember.member_role == "reviewer",
+            ProjectMember.is_active.is_(True)
+        ).all()
+        
+        # 4. Get project names
+        project_ids = set([r[0] for r in member_rows] + [r[0] for r in reviewer_rows])
+        if not project_ids:
+            return []
+        projects = self.session.query(Project.id, Project.name).filter(Project.id.in_(project_ids)).all()
+        project_names = {p[0]: p[1] for p in projects}
+        
+        # Aggregate
+        enabled_stages_by_project = {}
+        for pid, stage_key, position in stage_rows:
+            enabled_stages_by_project.setdefault(pid, []).append((position, stage_key))
+            
+        for pid in enabled_stages_by_project:
+            enabled_stages_by_project[pid].sort()
+
+        allowed_stages_by_project = {}
+        for pid, stage_key in member_rows:
+            allowed_stages_by_project.setdefault(pid, set()).add(stage_key)
+            
+        reviewer_pids = {r[0] for r in reviewer_rows}
+        
+        result = []
+        for pid in project_ids:
+            if pid not in project_names:
+                continue
+            # Only include enabled stages that the user is a member of
+            enabled = [s[1] for s in enabled_stages_by_project.get(pid, [])]
+            allowed = allowed_stages_by_project.get(pid, set())
+            user_stages = [k for k in enabled if k in allowed]
+            is_reviewer = pid in reviewer_pids
+            
+            # Project is only included if they have some access
+            if user_stages or is_reviewer:
+                result.append({
+                    "project_id": pid,
+                    "name": project_names[pid],
+                    "stages": user_stages,
+                    "is_reviewer": is_reviewer
+                })
+                
+        # Sort by project_id descending (newest first)
+        result.sort(key=lambda x: x["project_id"], reverse=True)
+        return result
+

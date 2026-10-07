@@ -11,6 +11,7 @@ from server.settings import settings
 from server.routers.auth import (
     get_admin_user,
     get_input_user,
+    get_current_user,
 )
 from server.models import (
     AssignedDocument,
@@ -69,9 +70,11 @@ class RedistributeFolderReviewersRequest(BaseModel):
 @router.get("/documents/server-folders")
 def browse_server_folders(
     path: str = "",
-    current_user: dict = Depends(get_admin_user),
+    current_user: dict = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
+    from server.services.workflow_service import enforce_can_access_server_folders
+    enforce_can_access_server_folders(db, current_user)
     return {"status": "ok", **list_server_source_folders(path)}
 
 
