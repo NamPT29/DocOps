@@ -16,6 +16,7 @@ Cổng: python scripts/gate.py  (dùng --static để kiểm nhanh)
 - [x] L4 Giao diện Nộp S + selfcheck JS chạy hàm. Model: Flash
 - [x] L4b Sửa L4 theo review bd4a431: setTimeout bọc hàm (hết "Illegal invocation", poll chạy tiếp), scanSubmitErrorText cho detail {code,message}, scanSubmitCanSubmit xét available, giữ body.modal-open khi còn modal khác; project_scan_submit.js?v=1.01.
 - [x] L5 Tài liệu: mục "Nộp S" trong design doc viết lại theo code (điều kiện + mã lỗi, khớp số hộp, người scan, phiên bản, xử lý nền, QC-06, giao diện); thêm 2 việc sau 10/10. Model: Flash
+- [x] E1 Chặn Nộp S thư mục không có file nào (409 empty_folder)
 ## B0 Sửa khớp số hộp: case_key phân cấp ("phong01/0020") lấy nhầm số 1 thay vì 20
 - [x] B0 Dùng box_number_of_case_key (thành phần cuối) thay vì dãy số đầu tiên; xóa nhánh ::muc-luc trong _extract_box_number; 3 test mới; cập nhật design doc.
 ## BR-01 so khớp mục lục + Check scan

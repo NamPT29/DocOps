@@ -184,7 +184,7 @@ migration `0011_scan_packages`), giao diện `frontend/js/project_scan_submit.js
    - 403: không phải Admin. 422: body sai kiểu.
    - 404: dự án không tồn tại; hộp không tồn tại hoặc không thuộc dự án.
    - 400: `scan_user_name_level < 0`; thư mục không hợp lệ hoặc nằm ngoài `DOCUMENT_SOURCE_ROOT`.
-   - 409: số hộp không khớp; dự án chưa bật bước Scan; bước Scan đã `done`; bước `scan_qc` đã rời
+   - 409: số hộp không khớp; thư mục (kể cả thư mục con) không có file nào (`{code: empty_folder, message}`); dự án chưa bật bước Scan; bước Scan đã `done`; bước `scan_qc` đã rời
      `pending`; hộp đang có gói `processing`; bước liền trước Scan (vd. Chỉnh lý nếu được bật)
      chưa xong (`{code: stage_blocked, message}` do `transition_case_stage` trả về).
    - Trạng thái Scan: chưa có dòng = `pending`. `pending`/`rejected` → chuyển START (ghi sự kiện);
@@ -279,7 +279,6 @@ Code: `server/services/timesheet_service.py`, `server/repositories/timesheet_rep
 - FR-ARR-02: Theo dõi 5 mốc giao nhận hồ sơ giấy (nhận từ khách, giao chỉnh lý, giao scan, trả kho, trả khách).
 - Check scan phương án (b): hiển thị và mở từng file PDF trên web.
 - Chấm công KPI scan theo chuỗi tên người scan (`scanned_by_name`).
-- Nộp S: thư mục rỗng hiện vẫn được nhận (gói `done` với 0 file); cần chặn hoặc cảnh báo.
 - Nộp S: mở lại hộp thoại khi gói của hộp đang `processing` thì chưa tự hỏi tiến độ lại
   (chỉ hiện trong danh sách các lần nộp).
 

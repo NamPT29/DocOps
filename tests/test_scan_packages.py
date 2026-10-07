@@ -110,12 +110,21 @@ def _box_dir(test_data, relative="P1/Hộp 01"):
     return path
 
 
-def _submit(test_data, relative="P1/Hộp 01", case=None, **body):
+def _submit(test_data, relative="P1/Hộp 01", case=None, create_dummy_file=True, **body):
     case = case or test_data["case"]
-    return client.post(
+    folder_path = test_data["tmp_path"] / "samples_local" / relative
+    if create_dummy_file:
+        if folder_path.exists():
+            (folder_path / "dummy_for_test.txt").write_text("hello")
+    res = client.post(
         f"/api/projects/{test_data['project'].id}/cases/{case.id}/scan-packages",
         json={"folder_path": relative, **body},
     )
+    if create_dummy_file and folder_path.exists():
+        dummy_file = folder_path / "dummy_for_test.txt"
+        if dummy_file.exists():
+            dummy_file.unlink()
+    return res
 
 
 def _write_pdf(path, pages, *, rotate=None):
@@ -773,3 +782,27 @@ def test_scan_package_rollback_preserves_files(test_data, monkeypatch):
     files = db.query(CaseScanFile).filter_by(package_id=pkg.id).all()
     assert len(files) == 9
     assert pkg.total_files == 9
+
+def test_submit_empty_folder(test_data):
+    db = test_data["db"]
+    _enable_scan(test_data)
+    
+    # a) thư mục hộp rỗng -> 409 empty_folder
+    box_dir = _box_dir(test_data, "P1/0001")
+    
+    res = _submit(test_data, "P1/0001", create_dummy_file=False)
+    assert res.status_code == 409
+    assert res.json()["detail"]["code"] == "empty_folder"
+    assert db.query(CaseScanPackage).count() == 0
+    assert db.query(CaseStageState).filter_by(case_id=test_data["case"].id, stage_key="scan").first() is None
+
+    # b) thư mục hộp chỉ có thư mục con rỗng
+    (box_dir / "sub").mkdir()
+    res = _submit(test_data, "P1/0001", create_dummy_file=False)
+    assert res.status_code == 409
+    assert res.json()["detail"]["code"] == "empty_folder"
+    
+    # c) thư mục hộp chỉ có file nằm trong thư mục con
+    _write_pdf(box_dir / "sub" / "x.pdf", [A4])
+    res = _submit(test_data, "P1/0001", create_dummy_file=False)
+    assert res.status_code == 200

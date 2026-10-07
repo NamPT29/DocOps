@@ -53,6 +53,13 @@ def _extract_box_number(s: str | None) -> int | None:
     return int(match.group()) if match else None
 
 
+def _folder_has_any_file(path: Path) -> bool:
+    for root, dirs, files in os.walk(path):
+        if files:
+            return True
+    return False
+
+
 def submit_scan_package(
     db: Session,
     *,
@@ -83,6 +90,12 @@ def submit_scan_package(
     
     if case_box is None or folder_box is None or case_box != folder_box:
         raise HTTPException(status_code=409, detail=f"Thư mục đã chọn ({source_dir.name}) không khớp số hộp với hộp {case.display_name}.")
+
+    if not _folder_has_any_file(source_dir):
+        raise HTTPException(
+            status_code=409,
+            detail={"code": "empty_folder", "message": "Thư mục không có file nào."}
+        )
 
     workflow_repo = WorkflowRepository(db)
     enabled_stages = {s.stage_key for s in workflow_repo.stage_rows(project_id) if s.is_enabled}
