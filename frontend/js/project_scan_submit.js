@@ -314,6 +314,24 @@ function stopScanSubmitPolling() {
     scanSubmitState.poller = null;
 }
 
+async function followScanPackage(packageId) {
+    const result = document.getElementById('scanSubmitResult');
+    // Ensure any previous poller is stopped
+    stopScanSubmitPolling();
+    const poller = scanSubmitStartPolling(
+        async () => (await scanSubmitListPackages()).find(pkg => Number(pkg.id) === packageId) || null,
+        pkg => { if (result) renderScanPackage(result, pkg); },
+    );
+    scanSubmitState.poller = poller;
+    const finished = await poller.done;
+    if (scanSubmitState.poller === poller) scanSubmitState.poller = null;
+    if (!finished) return;
+    const send = document.getElementById('scanSubmitSendButton');
+    if (send) send.disabled = false;
+    await reloadScanPackageHistory();
+    if (typeof refreshProjectWorkflow === 'function') await refreshProjectWorkflow();
+}
+
 async function sendScanSubmit() {
     if (!scanSubmitState.selectedPath) return;
     setScanSubmitError('');
@@ -333,19 +351,8 @@ async function sendScanSubmit() {
         return;
     }
     const packageId = Number(data.package_id);
-    const result = document.getElementById('scanSubmitResult');
-    stopScanSubmitPolling();
-    const poller = scanSubmitStartPolling(
-        async () => (await scanSubmitListPackages()).find(pkg => Number(pkg.id) === packageId) || null,
-        pkg => { if (result) renderScanPackage(result, pkg); },
-    );
-    scanSubmitState.poller = poller;
-    const finished = await poller.done;
-    if (scanSubmitState.poller === poller) scanSubmitState.poller = null;
-    if (!finished) return;
-    if (send) send.disabled = false;
-    await reloadScanPackageHistory();
-    if (typeof refreshProjectWorkflow === 'function') await refreshProjectWorkflow();
+    // Start following the package progress
+    await followScanPackage(packageId);
 }
 
 function bindScanSubmitModal() {
@@ -380,7 +387,18 @@ async function openScanSubmit(caseId, caseName) {
     document.getElementById('scanSubmitResult')?.replaceChildren();
     renderScanSubmitSelection();
     setScanSubmitError('');
+    // Load folder list and history concurrently
     await Promise.all([loadScanSubmitFolder(''), reloadScanPackageHistory()]);
+    // After loading history, check for any processing package and follow it automatically
+    const packages = await scanSubmitListPackages();
+    const processingPkg = packages.find(p => p.status === 'processing');
+    if (processingPkg) {
+        const result = document.getElementById('scanSubmitResult');
+        if (result) renderScanPackage(result, processingPkg);
+        const send = document.getElementById('scanSubmitSendButton');
+        if (send) send.disabled = true;
+        await followScanPackage(processingPkg.id);
+    }
     new bootstrap.Modal(document.getElementById('scanSubmitModal')).show();
 }
 async function openScanMatch(caseId, caseName) {
