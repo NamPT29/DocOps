@@ -784,19 +784,16 @@ def test_round2_missing_dropdown_sent_as_empty_string(client, mock_data, test_db
     r = client.get(f'/api/projects/{mock_data["p1"].id}/workflow/cases/{mock_data["c1"].id}/entry-qc').json()
     sub_id = r['data']['round2']['sampling']['items'][0]['submission_id']
     
-    sub = test_db.query(Submission).get(sub_id)
+    sub = test_db.get(Submission, sub_id)
     sub.data_json = json.dumps({"field": "val1"})
     test_db.commit()
 
     from server.models import Project
-    proj = test_db.query(Project).get(mock_data['p1'].id)
-    proj.schema_json = json.dumps({
-        "name": "Report",
-        "fields": [
-            {"name": "field", "type": "text"},
-            {"name": "dd", "type": "dropdown", "options": ["A", "B"]}
-        ]
-    })
+    proj = test_db.get(Project, mock_data['p1'].id)
+    proj.form_schema_json_snapshot = json.dumps([{"category": "A", "fields": [
+        {"col_index": 0, "name": "field", "label": "F", "type": "text"},
+        {"col_index": 1, "name": "dd", "label": "D", "type": "dropdown", "options": ["A","B"]}
+    ]}])
     test_db.commit()
     
     res = client.put(
@@ -808,8 +805,9 @@ def test_round2_missing_dropdown_sent_as_empty_string(client, mock_data, test_db
     r = client.get(f'/api/projects/{mock_data["p1"].id}/workflow/cases/{mock_data["c1"].id}/entry-qc').json()
     item = r['data']['round2']['sampling']['items'][0]
     assert item['changed_field_count'] == 0
+    assert item['visible_field_count'] == 2
     
-    sub = test_db.query(Submission).get(sub_id)
+    sub = test_db.get(Submission, sub_id)
     assert sub.data_json == json.dumps({"field": "val1"})
 
 def test_round2_partial_update(client, mock_data, test_db):
@@ -821,19 +819,16 @@ def test_round2_partial_update(client, mock_data, test_db):
     r = client.get(f'/api/projects/{mock_data["p1"].id}/workflow/cases/{mock_data["c1"].id}/entry-qc').json()
     sub_id = r['data']['round2']['sampling']['items'][0]['submission_id']
     
-    sub = test_db.query(Submission).get(sub_id)
+    sub = test_db.get(Submission, sub_id)
     sub.data_json = json.dumps({"field": "val1", "field2": "val2"})
     test_db.commit()
 
     from server.models import Project
-    proj = test_db.query(Project).get(mock_data['p1'].id)
-    proj.schema_json = json.dumps({
-        "name": "Report",
-        "fields": [
-            {"name": "field", "type": "text"},
-            {"name": "field2", "type": "text"}
-        ]
-    })
+    proj = test_db.get(Project, mock_data['p1'].id)
+    proj.form_schema_json_snapshot = json.dumps([{"category": "A", "fields": [
+        {"col_index": 0, "name": "field", "label": "F", "type": "text"},
+        {"col_index": 1, "name": "field2", "label": "D", "type": "text"}
+    ]}])
     test_db.commit()
     
     res = client.put(
@@ -845,8 +840,45 @@ def test_round2_partial_update(client, mock_data, test_db):
     r = client.get(f'/api/projects/{mock_data["p1"].id}/workflow/cases/{mock_data["c1"].id}/entry-qc').json()
     item = r['data']['round2']['sampling']['items'][0]
     assert item['changed_field_count'] == 1
+    assert item['visible_field_count'] == 2
     
-    sub = test_db.query(Submission).get(sub_id)
+    sub = test_db.get(Submission, sub_id)
     data = json.loads(sub.data_json)
     assert data == {"field": "val1", "field2": "val3"}
+
+
+def test_round2_ignores_unknown_field(client, mock_data, test_db):
+    setup_headers(client.app.dependency_overrides, mock_data['admin'])
+    from server.models import Submission, Project
+    make_submissions(test_db, mock_data['p1'].id, mock_data['c1'].id, 999, 1)
+    
+    client.post(f'/api/projects/{mock_data["p1"].id}/workflow/cases/{mock_data["c1"].id}/entry-qc/round2/sample')
+    r = client.get(f'/api/projects/{mock_data["p1"].id}/workflow/cases/{mock_data["c1"].id}/entry-qc').json()
+    sub_id = r['data']['round2']['sampling']['items'][0]['submission_id']
+    
+    sub = test_db.get(Submission, sub_id)
+    sub.data_json = json.dumps({"field": "val"})
+    test_db.commit()
+
+    proj = test_db.get(Project, mock_data['p1'].id)
+    proj.form_schema_json_snapshot = json.dumps([{"category": "A", "fields": [
+        {"col_index": 0, "name": "field", "label": "F", "type": "text"}
+    ]}])
+    test_db.commit()
+    
+    res = client.put(
+        f'/api/projects/{mock_data["p1"].id}/workflow/cases/{mock_data["c1"].id}/entry-qc/round2/items/{sub_id}',
+        json={'data': {'field': 'val', 'la': 'XXX'}}
+    )
+    assert res.status_code == 200
+    
+    r = client.get(f'/api/projects/{mock_data["p1"].id}/workflow/cases/{mock_data["c1"].id}/entry-qc').json()
+    item = r['data']['round2']['sampling']['items'][0]
+    assert item['changed_field_count'] == 0
+    assert item['visible_field_count'] == 1
+    
+    sub = test_db.get(Submission, sub_id)
+    data = json.loads(sub.data_json)
+    assert "la" not in data
+    assert data == {"field": "val"}
 

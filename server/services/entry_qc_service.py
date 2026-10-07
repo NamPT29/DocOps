@@ -376,11 +376,23 @@ def check_round2_item(db, project_id, case_id, submission_id, request_data: dict
     if any(r.round == 2 for r in existing_rounds):
         raise HTTPException(status_code=409, detail={"code": "round2_finalized", "message": "Vòng kiểm tra này đã được chốt kết quả."})
 
+    try:
+        project = repo.get_project(project_id)
+        schema = json.loads(project.form_schema_json_snapshot or "[]")
+    except (TypeError, ValueError, json.JSONDecodeError):
+        schema = []
+        
+    config = _effective_project_config(db, project)
+    visible_fields = _visible_schema_fields(schema, config)
+    visible_names = {f["name"] for f in visible_fields} if visible_fields else None
+
     current = json.loads(submission.data_json or "{}")
     
     final_data = dict(current)
     for k, v in request_data.items():
         if isinstance(k, str) and not k.startswith("_"):
+            if visible_names is not None and k not in visible_names:
+                continue
             if k in current and _comparable(current[k]) == _comparable(v):
                 continue
             if k not in current and _comparable(v) == _comparable(None):

@@ -544,10 +544,17 @@ async function runTest() {
     assert.equal(requests.length, 1);
     assert.equal(requests[0].method, 'PUT');
     assert.deepEqual(requests[0].body, { data: { f1: 'old1', f2: 'C', f3: 'Y', f4: '', f5: '' } });
-    assert.equal(reloadCalled, true);
-    assert.equal(refreshCount, 1);
     
-    assert.equal(revokedUrls.length, 1);
+    requests.length = 0;
+    inputs[0].value = 'new1';
+    selects[1].value = 'X';
+    await btnSaveR2.listeners.click();
+    assert.equal(requests.length, 1);
+    assert.deepEqual(requests[0].body, { data: { f1: 'new1', f2: 'C', f3: 'X', f4: '', f5: '' } });
+    assert.equal(reloadCalled, true);
+    assert.equal(refreshCount, 2);
+    
+    assert.equal(revokedUrls.length, 2);
     assert.equal(revokedUrls[0], iframe.src);
     
     routes = {
@@ -579,7 +586,7 @@ async function runTest() {
     
     let btnCloseR2 = find(r2Overlay, n => n.tagName === 'BUTTON' && n.textContent === 'Đóng')[0];
     await btnCloseR2.listeners.click();
-    assert.equal(revokedUrls.length, 2);
+    assert.equal(revokedUrls.length, 3);
     
     routes = {
         'GET /api/projects/1/workflow/cases/2/entry-qc/round2/items/101': () => ({
