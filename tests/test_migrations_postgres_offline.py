@@ -59,6 +59,10 @@ def test_upgrade_to_head_generates_postgres_sql(offline_sql):
     assert "CREATE TABLE case_entry_qc_results" in sql
     assert "ALTER TABLE case_entry_qc_results ADD COLUMN resolution VARCHAR(20)" in sql
     assert "ADD CONSTRAINT ck_entry_qc_resolution CHECK (resolution = 'approved')" in sql
+    assert "CREATE TABLE case_entry_qc_samplings" in sql
+    assert "CREATE TABLE case_entry_qc_sample_items" in sql
+    assert "ALTER TABLE project_policies ADD COLUMN entry_qc_round2_enabled BOOLEAN" in sql
+    assert "CONSTRAINT chk_sampling_round_2 CHECK (round = 2)" in sql
     # Dialect PostgreSQL thật, không phải SQLite.
     assert "TIMESTAMP WITHOUT TIME ZONE" in sql
     assert f"version_num='{HEAD_REVISION}'" in sql
@@ -78,4 +82,7 @@ def test_downgrade_from_head_generates_postgres_sql(offline_sql):
     assert "DROP TABLE case_scan_packages" in sql
     assert "DROP TABLE case_entry_qc_results" in sql
     assert "DROP CONSTRAINT ck_entry_qc_resolution" in sql
+    assert "DROP TABLE case_entry_qc_sample_items" in sql
+    assert "DROP TABLE case_entry_qc_samplings" in sql
+    assert "ALTER TABLE project_policies DROP COLUMN entry_qc_round2_enabled" in sql
     assert f"version_num='{OFFLINE_BASE}'" in sql

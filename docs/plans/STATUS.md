@@ -3,6 +3,7 @@ Cổng: python scripts/gate.py  (dùng --static để kiểm nhanh)
 ## Triển khai (nhánh claude/nice-hamilton-7pg8bk)
 - [x] R1 scripts/preflight.py (chỉ đọc) + tests/test_preflight.py + docs/plans/runbook-trien-khai.md
 - [x] R2 tests/test_migrations_postgres_offline.py (SQL PostgreSQL offline 0010 -> head); đã chạy thật 0001 -> 0014 trên PostgreSQL 16
+- [x] R3 Runbook + test offline cập nhật cho 0015_entry_qc_round2; đã chạy thật hạ 0015 -> 0010 -> head trên PostgreSQL 16 (0 khác biệt)
 ## 4b Nộp S: sửa theo review c4e1a0f. Đặc tả sửa: docs/plans/4b-fix-checklist.md
 - [x] L0 Công cụ (lát này). Model: Flash
 - [x] L1 Migration 0011 viết tay + cô lập test khỏi DB dev + chuyển truy vấn vào repository. Model: Pro. Cổng phải hết lỗi tĩnh và 3 test đang fail.

@@ -72,7 +72,7 @@ Chỉ đọc, không sửa gì, không in mật khẩu. Dòng cuối phải là 
 Hai cách, chọn một:
 
 - **Tự động:** khởi động ở bước 5; cửa sổ host in dòng
-  `Database migration: <cũ> -> 0014_entry_qc_resolution` (hoặc revision mới nhất của bản bàn giao).
+  `Database migration: <cũ> -> 0015_entry_qc_round2` (hoặc revision mới nhất của bản bàn giao).
 - **Chạy riêng để xem kết quả trước:** `python scripts/migrate_database.py`. In ra
   `Database upgraded: <cũ> -> <mới>`.
 
@@ -80,7 +80,8 @@ Nếu thấy `KHÔNG THỂ MIGRATE DATABASE` thì dừng, không thử lại nhi
 
 Kiểm sau khi nâng: chạy lại `python scripts/preflight.py`, dòng `Migration` phải là `[ĐẠT]`.
 Hoặc trong psql: `select version_num from alembic_version` và `\dt` phải thấy thêm
-`case_scan_packages`, `case_scan_files`, `case_entry_qc_results`.
+`case_scan_packages`, `case_scan_files`, `case_entry_qc_results`, `case_entry_qc_samplings`,
+`case_entry_qc_sample_items`.
 
 ## 5. Khởi động
 
@@ -119,7 +120,15 @@ khôi phục cả CSDL lẫn mã.
 5. Khởi động lại bằng `host_server.bat`, kiểm như bước 6.
 6. Ghi lại lỗi gặp phải (ảnh chụp cửa sổ host, thời điểm) gửi người phụ trách kỹ thuật.
 
-## Đã kiểm trên PostgreSQL thật (06/10/2026)
+## Đã kiểm trên PostgreSQL thật
+
+07/10/2026, PostgreSQL 16, mã tại commit `53ddb4f` (head `0015_entry_qc_round2`):
+- Hạ từ `0015_entry_qc_round2` về `0010_case_input_assignment` rồi nâng lại `head`: thành công.
+- Mọi bảng/cột trong model khớp CSDL sau khi nâng (0 khác biệt); có cột
+  `project_policies.entry_qc_round2_enabled`, ràng buộc `chk_sampling_round_2`,
+  `chk_sampling_sample_size_pos`, `uq_case_entry_qc_sample_item`.
+
+06/10/2026:
 
 Trên PostgreSQL 16 trống, mã tại commit `133f6af`:
 - `scripts/migrate_database.py`: `<none> -> 0014_entry_qc_resolution`.
