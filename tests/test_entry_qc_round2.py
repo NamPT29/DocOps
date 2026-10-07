@@ -774,3 +774,79 @@ def test_round2_get_item_report_name(client, test_db, mock_data):
     
     assert item_in_detail["report_name"] == expected_name
 
+
+def test_round2_missing_dropdown_sent_as_empty_string(client, mock_data, test_db):
+    setup_headers(client.app.dependency_overrides, mock_data['admin'])
+    from server.models import Submission
+    make_submissions(test_db, mock_data['p1'].id, mock_data['c1'].id, 999, 1)
+    
+    client.post(f'/api/projects/{mock_data["p1"].id}/workflow/cases/{mock_data["c1"].id}/entry-qc/round2/sample')
+    r = client.get(f'/api/projects/{mock_data["p1"].id}/workflow/cases/{mock_data["c1"].id}/entry-qc').json()
+    sub_id = r['data']['round2']['sampling']['items'][0]['submission_id']
+    
+    sub = test_db.query(Submission).get(sub_id)
+    sub.data_json = json.dumps({"field": "val1"})
+    test_db.commit()
+
+    from server.models import Project
+    proj = test_db.query(Project).get(mock_data['p1'].id)
+    proj.schema_json = json.dumps({
+        "name": "Report",
+        "fields": [
+            {"name": "field", "type": "text"},
+            {"name": "dd", "type": "dropdown", "options": ["A", "B"]}
+        ]
+    })
+    test_db.commit()
+    
+    res = client.put(
+        f'/api/projects/{mock_data["p1"].id}/workflow/cases/{mock_data["c1"].id}/entry-qc/round2/items/{sub_id}',
+        json={'data': {'field': 'val1', 'dd': ''}}
+    )
+    assert res.status_code == 200
+    
+    r = client.get(f'/api/projects/{mock_data["p1"].id}/workflow/cases/{mock_data["c1"].id}/entry-qc').json()
+    item = r['data']['round2']['sampling']['items'][0]
+    assert item['changed_field_count'] == 0
+    
+    sub = test_db.query(Submission).get(sub_id)
+    assert sub.data_json == json.dumps({"field": "val1"})
+
+def test_round2_partial_update(client, mock_data, test_db):
+    setup_headers(client.app.dependency_overrides, mock_data['admin'])
+    from server.models import Submission
+    make_submissions(test_db, mock_data['p1'].id, mock_data['c1'].id, 999, 1)
+    
+    client.post(f'/api/projects/{mock_data["p1"].id}/workflow/cases/{mock_data["c1"].id}/entry-qc/round2/sample')
+    r = client.get(f'/api/projects/{mock_data["p1"].id}/workflow/cases/{mock_data["c1"].id}/entry-qc').json()
+    sub_id = r['data']['round2']['sampling']['items'][0]['submission_id']
+    
+    sub = test_db.query(Submission).get(sub_id)
+    sub.data_json = json.dumps({"field": "val1", "field2": "val2"})
+    test_db.commit()
+
+    from server.models import Project
+    proj = test_db.query(Project).get(mock_data['p1'].id)
+    proj.schema_json = json.dumps({
+        "name": "Report",
+        "fields": [
+            {"name": "field", "type": "text"},
+            {"name": "field2", "type": "text"}
+        ]
+    })
+    test_db.commit()
+    
+    res = client.put(
+        f'/api/projects/{mock_data["p1"].id}/workflow/cases/{mock_data["c1"].id}/entry-qc/round2/items/{sub_id}',
+        json={'data': {'field': 'val1', 'field2': 'val3'}}
+    )
+    assert res.status_code == 200
+    
+    r = client.get(f'/api/projects/{mock_data["p1"].id}/workflow/cases/{mock_data["c1"].id}/entry-qc').json()
+    item = r['data']['round2']['sampling']['items'][0]
+    assert item['changed_field_count'] == 1
+    
+    sub = test_db.query(Submission).get(sub_id)
+    data = json.loads(sub.data_json)
+    assert data == {"field": "val1", "field2": "val3"}
+

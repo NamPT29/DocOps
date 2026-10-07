@@ -14,7 +14,7 @@ import json
 from sqlalchemy.exc import IntegrityError
 
 from server.repositories.document_repository import DocumentRepository
-from server.services.submission_quality_service import _visible_schema_fields, _effective_project_config
+from server.services.submission_quality_service import _visible_schema_fields, _effective_project_config, _comparable
 from server.services.submission_helpers import create_document_file_response
 from server.settings import settings
 
@@ -381,6 +381,10 @@ def check_round2_item(db, project_id, case_id, submission_id, request_data: dict
     final_data = dict(current)
     for k, v in request_data.items():
         if isinstance(k, str) and not k.startswith("_"):
+            if k in current and _comparable(current[k]) == _comparable(v):
+                continue
+            if k not in current and _comparable(v) == _comparable(None):
+                continue
             final_data[k] = v
             
     visible_count, changed_count = SubmissionQualityService.count_field_changes(db, submission, current, final_data)
@@ -391,11 +395,7 @@ def check_round2_item(db, project_id, case_id, submission_id, request_data: dict
     item.checked_by_user_id = actor["id"]
     item.checked_at = get_utc_now()
 
-    sub_data = json.loads(submission.data_json or "{}")
-    for k, v in request_data.items():
-        if isinstance(k, str) and not k.startswith("_"):
-            sub_data[k] = v
-    submission.data_json = json.dumps(sub_data, ensure_ascii=False)
+    submission.data_json = json.dumps(final_data, ensure_ascii=False)
 
     db.commit()
     return {"message": "Đã lưu kết quả check."}

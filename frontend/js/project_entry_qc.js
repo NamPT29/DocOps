@@ -448,6 +448,10 @@ async function openRound2Item(projectId, caseId, submissionId, reload) {
         let input;
         if (f.type === 'dropdown') {
             input = _entryQcElement('select', 'form-select');
+            const emptyOpt = _entryQcElement('option', '', '— Chưa chọn —');
+            emptyOpt.value = '';
+            input.appendChild(emptyOpt);
+            
             let found = false;
             (f.options || []).forEach(opt => {
                 const o = _entryQcElement('option', '', opt);
@@ -464,12 +468,11 @@ async function openRound2Item(projectId, caseId, submissionId, reload) {
                 o.selected = true;
                 input.appendChild(o);
             }
+            if (!f.value) emptyOpt.selected = true;
         } else {
             input = _entryQcElement('input', 'form-control');
             input.type = 'text';
-            if (f.value !== null && f.value !== undefined) {
-                input.value = f.value;
-            }
+            input.value = (f.value !== null && f.value !== undefined) ? f.value : '';
         }
         
         if (item.checked) input.disabled = true;

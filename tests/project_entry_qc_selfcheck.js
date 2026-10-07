@@ -42,7 +42,24 @@ function element(tag) {
         listeners: {},
         dataset: {},
         disabled: false,
-        value: '',
+        _value: '',
+        get value() {
+            if (this.tagName === 'SELECT') {
+                const selectedOpt = this.children.find(c => c.tagName === 'OPTION' && c.selected);
+                if (selectedOpt) return selectedOpt.value;
+                if (this.children.length > 0 && this.children[0].tagName === 'OPTION') return this.children[0].value;
+                return '';
+            }
+            return this._value;
+        },
+        set value(v) {
+            this._value = v;
+            if (this.tagName === 'SELECT') {
+                this.children.forEach(c => {
+                    if (c.tagName === 'OPTION') c.selected = (c.value === v);
+                });
+            }
+        },
         classList: {
             add: name => classes.add(name),
             remove: name => classes.delete(name),
@@ -470,7 +487,10 @@ async function runTest() {
                 checked: false,
                 fields: [
                     {name: 'f1', label: 'Field 1', type: 'text', value: 'old1'},
-                    {name: 'f2', label: 'Field 2', type: 'dropdown', options: ['A', 'B'], value: 'C'}
+                    {name: 'f2', label: 'Field 2', type: 'dropdown', options: ['A', 'B'], value: 'C'},
+                    {name: 'f3', label: 'Field 3', type: 'dropdown', options: ['X', 'Y'], value: 'Y'},
+                    {name: 'f4', label: 'Field 4', type: 'dropdown', options: ['1', '2'], value: null},
+                    {name: 'f5', label: 'Field 5', type: 'dropdown', options: ['M', 'N'], value: ''}
                 ],
                 pdf_url: '/api/pdf/99'
             }
@@ -493,12 +513,24 @@ async function runTest() {
     let inputs = find(r2Overlay, n => n.tagName === 'INPUT');
     let selects = find(r2Overlay, n => n.tagName === 'SELECT');
     assert.equal(inputs.length, 1);
-    assert.equal(selects.length, 1);
+    assert.equal(selects.length, 4);
     assert.equal(inputs[0].value, 'old1');
-    assert.equal(selects[0].children.length, 3);
     
-    inputs[0].value = 'new1';
-    selects[0].value = 'A';
+    assert.equal(selects[0].value, 'C');
+    assert.equal(selects[0].children[0].value, '');
+    assert.equal(selects[0].children.length, 4);
+    
+    assert.equal(selects[1].value, 'Y');
+    assert.equal(selects[1].children[0].value, '');
+    assert.equal(selects[1].children.length, 3);
+    
+    assert.equal(selects[2].value, '');
+    assert.equal(selects[2].children[0].value, '');
+    assert.equal(selects[2].children.length, 3);
+    
+    assert.equal(selects[3].value, '');
+    assert.equal(selects[3].children[0].value, '');
+    assert.equal(selects[3].children.length, 3);
     
     let btnSaveR2 = find(r2Overlay, n => n.tagName === 'BUTTON' && n.textContent === 'Lưu kết quả check')[0];
     confirmResult = false;
@@ -511,7 +543,7 @@ async function runTest() {
     await btnSaveR2.listeners.click();
     assert.equal(requests.length, 1);
     assert.equal(requests[0].method, 'PUT');
-    assert.deepEqual(requests[0].body, { data: { f1: 'new1', f2: 'A' } });
+    assert.deepEqual(requests[0].body, { data: { f1: 'old1', f2: 'C', f3: 'Y', f4: '', f5: '' } });
     assert.equal(reloadCalled, true);
     assert.equal(refreshCount, 1);
     
