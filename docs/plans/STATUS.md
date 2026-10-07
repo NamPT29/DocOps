@@ -43,6 +43,7 @@ Cổng: python scripts/gate.py  (dùng --static để kiểm nhanh)
 - [x] C2d-2b (dropdown trống không còn bị tính là sửa; backend chỉ ghi trường thay đổi)
 - [x] C2d-2c (test dùng biểu mẫu thật; vòng 2 chỉ nhận trường đang hiện)
 - [x] C2e (sửa ForeignKeyViolation trên PostgreSQL khi xóa dự án/phiếu có mẫu vòng 2)
+- [x] C2f (dọn C2e: 403 trước 409 khi xóa phiếu đã lấy mẫu, bỏ code thừa)
 
 ## Trang Hành chính (C3)
 - [x] C3a (Hành chính tự làm Nộp S, Check scan, Check nhập; API my-projects, my-work)

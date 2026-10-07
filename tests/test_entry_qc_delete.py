@@ -59,18 +59,6 @@ def fk_client(fk_db, client):
     finally:
         client.app.dependency_overrides.pop(get_db, None)
 
-def setup_fk_mock_data(db):
-    admin = User(username="admin", full_name="Admin", role="admin", password="")
-    p1 = Project(name="Project 1", root_folder_name="P1", case_level=1, report_mode="pdf", created_by_user_id=admin.id)
-    db.add(admin)
-    db.add(p1)
-    db.commit()
-    c1 = ProjectCase(project_id=p1.id, case_key="Case1", display_name="Case 1")
-    db.add(c1)
-    db.commit()
-    from tests.test_entry_qc_round2 import setup_headers
-    return {"admin": admin, "p1": p1, "c1": c1}
-
 def test_delete_project_with_round2_sample(fk_client, fk_db):
     from server.models import User, Template
     admin = User(username="admin", full_name="Admin", role="admin", password="")
@@ -203,3 +191,42 @@ def test_pragma_foreign_keys_on(fk_db):
     with pytest.raises(IntegrityError):
         from sqlalchemy import text
         fk_db.execute(text(f"DELETE FROM submissions WHERE id = {sub_id}"))
+
+def test_delete_submission_with_round2_sample_non_admin(fk_client, fk_db):
+    from server.models import User, Template
+    admin = User(username="admin", full_name="Admin", role="admin", password="")
+    user1 = User(username="user1", full_name="User 1", role="user", account_type="staff", password="")
+    user2 = User(username="user2", full_name="User 2", role="user", account_type="staff", password="")
+    t1 = Template(name="T1", filename="t1")
+    fk_db.add_all([admin, user1, user2, t1])
+    fk_db.commit()
+    p1 = Project(name="Project 1", root_folder_name="P1", template_id=t1.id, template_name_snapshot="T1", template_filename_snapshot="t1", case_level=1, report_mode="pdf", created_by_user_id=admin.id)
+    fk_db.add(p1)
+    fk_db.commit()
+    c1 = ProjectCase(project_id=p1.id, case_key="Case1", display_name="Case 1")
+    fk_db.add(c1)
+    fk_db.commit()
+    from tests.test_entry_qc_round2 import setup_headers, make_submissions
+    
+    # User 1 makes the submission
+    make_submissions(fk_db, p1.id, c1.id, user1.id, 1)
+    fk_db.add(CaseEntryQcResult(project_id=p1.id, case_id=c1.id, round=1, reports_total=1, reports_assessed=1, error_reports=0, total_fields=1, error_fields=0, rate_percent=0, threshold_percent=5, passed=True, created_by_user_id=admin.id))
+    fk_db.commit()
+    
+    setup_headers(fk_client.app.dependency_overrides, {"id": admin.id, "username": admin.username, "role": admin.role})
+    fk_client.post(f"/api/projects/{p1.id}/workflow/cases/{c1.id}/entry-qc/round2/sample")
+    r = fk_client.get(f"/api/projects/{p1.id}/workflow/cases/{c1.id}/entry-qc").json()
+    sub_id = r["data"]["round2"]["sampling"]["items"][0]["submission_id"]
+    # Give user2 a dummy assigned document so they have can_input=True
+    from server.models import AssignedDocument
+    fk_db.add(AssignedDocument(original_filename="user2_dummy", uuid_filename="user2_dummy", assigned_to_user_id=user2.id))
+    fk_db.commit()
+
+    # Now login as user2 (not the creator)
+    setup_headers(fk_client.app.dependency_overrides, {"id": user2.id, "username": user2.username, "role": user2.role})
+    res = fk_client.delete(f"/api/submissions/{sub_id}")
+    assert res.status_code == 403
+    assert res.json()["detail"] == "Bạn không có quyền xóa hồ sơ này"
+
+    assert fk_db.get(Submission, sub_id) is not None
+
