@@ -30,6 +30,17 @@ const capabilityUi = authSource.slice(authSource.indexOf('function configureCapa
 assert.match(capabilityUi, /typeof applyMyWorkVisibility === 'function'\) applyMyWorkVisibility\(\)/,
              'configureCapabilityUI phải gọi applyMyWorkVisibility (nó ẩn cả thanh tab với người chỉ làm quy trình)');
 
+// index.html không có formatVietnamDateTime (của project_management.js): giờ Nộp S vẫn là giờ VN.
+{
+    const scanContext = { console, Intl, Date };
+    vm.createContext(scanContext);
+    vm.runInContext(fs.readFileSync('frontend/js/project_scan_submit.js', 'utf8'), scanContext);
+    assert.equal(typeof scanContext.formatVietnamDateTime, 'undefined');
+    assert.equal(vm.runInContext("scanSubmitTime('2026-10-05T17:30:00')", scanContext), '2026-10-06 00:30');
+    assert.equal(vm.runInContext("scanSubmitTime('2026-10-05T03:00:00+00:00')", scanContext), '2026-10-05 10:00');
+    assert.equal(vm.runInContext("scanSubmitTime('khong-phai-ngay')", scanContext), 'khong-phai-ngay');
+}
+
 // --- DOM giả tối thiểu ---
 function element(tag) {
     const classes = new Set();

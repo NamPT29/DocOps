@@ -78,7 +78,15 @@ function scanSubmitTime(value) {
     if (!value) return '';
     const text = String(value);
     const utc = /(Z|[+-]\d{2}:?\d{2})$/.test(text) ? text : `${text}Z`;
-    return typeof formatVietnamDateTime === 'function' ? formatVietnamDateTime(utc) : text;
+    if (typeof formatVietnamDateTime === 'function') return formatVietnamDateTime(utc);
+    // index.html không nạp project_management.js: tự đổi sang giờ Việt Nam, cùng định dạng.
+    const date = new Date(utc);
+    if (isNaN(date.getTime())) return text;
+    const parts = Object.fromEntries(new Intl.DateTimeFormat('en-GB', {
+        timeZone: 'Asia/Ho_Chi_Minh', year: 'numeric', month: '2-digit', day: '2-digit',
+        hour: '2-digit', minute: '2-digit', hour12: false,
+    }).formatToParts(date).map(part => [part.type, part.value]));
+    return `${parts.year}-${parts.month}-${parts.day} ${parts.hour}:${parts.minute}`;
 }
 
 /**
