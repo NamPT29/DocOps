@@ -357,13 +357,14 @@ def test_export_worker_retries_transient_file_error_and_completes(
     monkeypatch.setattr(export_worker.time, "sleep", lambda _seconds: None)
     attempts = []
 
-    def flaky_export(_template_path, _submissions, output_path):
+    def flaky_export(_template_path, _submissions, output_path, **_kwargs):
         attempts.append(output_path)
         if len(attempts) == 1:
             raise OSError("temporary file lock")
         Path(output_path).write_bytes(b"workbook")
 
     monkeypatch.setattr(export_worker, "export_submissions_to_excel", flaky_export)
+    monkeypatch.setattr(export_worker, "daily_timesheet_rows", lambda _db, _submissions: [])
     args = SimpleNamespace(
         job_id=job_id,
         extension=".xlsx",

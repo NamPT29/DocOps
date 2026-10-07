@@ -5,6 +5,8 @@ import logging
 import shutil
 import openpyxl
 from copy import copy
+from openpyxl.styles import Font
+from openpyxl.utils import get_column_letter
 
 
 logger = logging.getLogger(__name__)
@@ -338,9 +340,44 @@ def get_don_vi_do_mapping(excel_path):
         )
         return {}
 
-def export_submissions_to_excel(template_file_path: str, submissions: list, download_path: str):
+TIMESHEET_SHEET_TITLE = "Chấm công theo ngày"
+TIMESHEET_HEADERS = ("Ngày", "Họ và tên", "Số hàng đã nhập", "Số hàng đã duyệt")
+TIMESHEET_COLUMN_WIDTHS = (12, 32, 18, 18)
+
+
+def _unique_sheet_title(workbook, title):
+    existing = {name.casefold() for name in workbook.sheetnames}
+    candidate = title
+    suffix = 2
+    while candidate.casefold() in existing:
+        candidate = f"{title} ({suffix})"
+        suffix += 1
+    return candidate
+
+
+def _append_timesheet_sheet(workbook, rows):
+    """Thêm sheet chấm công ở CUỐI file; sheet dữ liệu và sheet đang mở giữ nguyên."""
+    worksheet = workbook.create_sheet(_unique_sheet_title(workbook, TIMESHEET_SHEET_TITLE))
+    worksheet.append(list(TIMESHEET_HEADERS))
+    for cell in worksheet[1]:
+        cell.font = Font(bold=True)
+    for row in rows:
+        worksheet.append([row.work_date, row.name, row.entered, row.reviewed])
+        worksheet.cell(worksheet.max_row, 1).number_format = "DD/MM/YYYY"
+    for column, width in enumerate(TIMESHEET_COLUMN_WIDTHS, start=1):
+        worksheet.column_dimensions[get_column_letter(column)].width = width
+    worksheet.freeze_panes = "A2"
+
+
+def export_submissions_to_excel(
+    template_file_path: str,
+    submissions: list,
+    download_path: str,
+    timesheet_rows: list | None = None,
+):
     """
     Exports a list of submissions into a provided Excel template.
+    When ``timesheet_rows`` is given, a "Chấm công theo ngày" sheet is appended.
     Returns the path to the exported file.
     """
     workbook = None
@@ -396,6 +433,9 @@ def export_submissions_to_excel(template_file_path: str, submissions: list, down
                         column=column_index + 1,
                         value=process_value(column_index, value),
                     )
+
+        if timesheet_rows is not None:
+            _append_timesheet_sheet(workbook, timesheet_rows)
 
         workbook.save(download_path)
         return download_path
