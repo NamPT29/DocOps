@@ -9,6 +9,7 @@ from server.models import (
     Template,
     User,
 )
+from server.models_entry_qc import CaseEntryQcSampleItem
 from server.repositories.base import BaseRepository
 from server.repositories.submission_query_helpers import (
     DUPLICATE_REPORT_STATUSES as _DUPLICATE_REPORT_STATUSES,
@@ -448,3 +449,8 @@ class SubmissionRepository(BaseRepository[Submission]):
             Submission.assigned_document_id,
         ).all()
         return {document_id: count for document_id, count in rows}
+
+    def is_entry_qc_sampled(self, submission_id: int) -> bool:
+        return self.session.query(CaseEntryQcSampleItem).filter(
+            CaseEntryQcSampleItem.submission_id == submission_id
+        ).first() is not None

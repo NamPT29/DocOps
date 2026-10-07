@@ -526,11 +526,16 @@ def test_round2_get_item_fields(client, test_db, mock_data):
     assert fields[0]["label"] == "L1"
     assert fields[0]["value"] == "v1"
     
-    # Check item and update final data
-    client.put(f"/api/projects/{p1.id}/workflow/cases/{c1.id}/entry-qc/round2/items/{sid}", json={"data": {"f1": "new_v1"}})
+    # Check item and update final data with malicious hidden column update
+    client.put(f"/api/projects/{p1.id}/workflow/cases/{c1.id}/entry-qc/round2/items/{sid}", json={"data": {"f1": "new_v1", "f2": "new_v2"}})
     
     res = client.get(f"/api/projects/{p1.id}/workflow/cases/{c1.id}/entry-qc/round2/items/{sid}")
     assert res.json()["data"]["fields"][0]["value"] == "new_v1"
+    
+    # Verify DB directly to ensure f2 was not changed
+    item_updated = test_db.query(CaseEntryQcSampleItem).filter_by(submission_id=sid).first()
+    final_data = json.loads(item_updated.final_data_json)
+    assert final_data.get("f2") == "v2"
 
 def test_round2_gate_states(client, test_db, mock_data):
     admin = mock_data["admin"]

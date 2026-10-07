@@ -18,10 +18,12 @@ from server.models import (
     ProjectUploadFile,
     ProjectUploadSession,
     Submission,
-    SubmissionReviewAssignment,
-    SubmissionReviewHistory,
     SubmissionViewPresence,
+    SubmissionReviewAssignment,
+    SubmissionQualityAssessment,
+    SubmissionReviewHistory,
 )
+from server.models_entry_qc import CaseEntryQcSampleItem, CaseEntryQcSampling, CaseEntryQcResult
 
 
 class ProjectAdminRepository:
@@ -316,6 +318,10 @@ class ProjectAdminRepository:
             counts["submission_review_assignments"] = 0
 
         if document_ids:
+            counts["entry_qc_sample_items"] = self.session.query(CaseEntryQcSampleItem).filter(
+                CaseEntryQcSampleItem.submission_id.in_(submission_ids),
+            ).delete(synchronize_session=False) if submission_ids else 0
+            
             counts["submissions"] = self.session.query(Submission).filter(
                 Submission.assigned_document_id.in_(document_ids),
             ).delete(synchronize_session=False)
@@ -332,6 +338,7 @@ class ProjectAdminRepository:
             ).delete(synchronize_session=False)
         else:
             counts.update({
+                "entry_qc_sample_items": 0,
                 "submissions": 0,
                 "document_review_assignments": 0,
                 "document_paths": 0,
@@ -350,6 +357,14 @@ class ProjectAdminRepository:
         counts["report_units"] = self.session.query(ProjectReportUnit).filter(
             ProjectReportUnit.project_id == project_id,
         ).delete(synchronize_session=False)
+        
+        counts["entry_qc_samplings"] = self.session.query(CaseEntryQcSampling).filter(
+            CaseEntryQcSampling.project_id == project_id,
+        ).delete(synchronize_session=False)
+        counts["entry_qc_results"] = self.session.query(CaseEntryQcResult).filter(
+            CaseEntryQcResult.project_id == project_id,
+        ).delete(synchronize_session=False)
+
         counts["cases"] = self.session.query(ProjectCase).filter(
             ProjectCase.project_id == project_id,
         ).delete(synchronize_session=False)

@@ -584,6 +584,12 @@ class SubmissionService:
         if not sub:
             raise HTTPException(status_code=404, detail="Không tìm thấy hồ sơ.")
 
+        if submission_repository.is_entry_qc_sampled(sub_id):
+            raise HTTPException(
+                status_code=409, 
+                detail={"code": "entry_qc_sampled", "message": "Phiếu đã được lấy mẫu Check nhập vòng 2, không xóa được."}
+            )
+
         if current_user["role"] != "admin":
             is_active_input = submission_repository.is_active_input_assignee(
                 sub,
