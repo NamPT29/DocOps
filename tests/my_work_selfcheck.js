@@ -17,8 +17,10 @@ for (const adminOnly of ['admin-page.js', 'js/project_management.js', 'js/projec
 }
 const authIndex = scripts.indexOf('auth.js');
 const scanIndex = scripts.indexOf('js/project_scan_submit.js');
+const entryQcIndex = scripts.indexOf('js/project_entry_qc.js');
 const myWorkIndex = scripts.indexOf('js/my_work.js');
-assert.ok(authIndex >= 0 && scanIndex > authIndex && myWorkIndex > scanIndex, 'Thứ tự: auth.js, project_scan_submit.js, my_work.js');
+assert.ok(authIndex >= 0 && scanIndex > authIndex && entryQcIndex > scanIndex && myWorkIndex > entryQcIndex,
+          'Thứ tự: auth.js, project_scan_submit.js, project_entry_qc.js, my_work.js');
 assert.equal((html.match(/id="scanSubmitModal"/g) || []).length, 1, 'Có đúng một hộp thoại Nộp S');
 for (const id of ['myWorkTabItem', 'myWorkProjectSelect', 'myWorkTable', 'btnRefreshMyWork']) {
     assert.equal((html.match(new RegExp(`id="${id}"`, 'g')) || []).length, 1, `Có đúng một #${id}`);
@@ -98,7 +100,7 @@ function setup() {
     const links = [nodes['my-work-tab'], nodes['form-tab']];
     const requests = [];
     const routes = {};
-    const calls = { alert: [], openScanSubmit: [], openScanMatch: [] };
+    const calls = { alert: [], openScanSubmit: [], openScanMatch: [], openEntryQc: [] };
     const answers = { confirm: true, prompt: null };
     const context = {
         console,
@@ -130,6 +132,7 @@ function setup() {
         prompt: () => answers.prompt,
         openScanSubmit: (caseId, name) => calls.openScanSubmit.push([caseId, name, context.projectWorkflowProjectId]),
         openScanMatch: (caseId, name) => calls.openScanMatch.push([caseId, name, context.projectWorkflowProjectId]),
+        openEntryQc: (caseId, name) => calls.openEntryQc.push([caseId, name, context.projectWorkflowProjectId]),
     };
     vm.createContext(context);
     vm.runInContext(source, context);
@@ -169,7 +172,7 @@ const EXPECTED_BUTTONS = [
     ['Nộp S', 'Hoàn tất scan'],
     ['Xem so khớp', 'Bắt đầu'],
     ['Xem so khớp', 'Duyệt', 'Trả lại'],
-    [],
+    ['Check nhập'],
 ];
 const TRANSITION = (caseId, stage) => `POST /api/projects/7/workflow/cases/${caseId}/stages/${stage}/transition`;
 
@@ -198,7 +201,7 @@ async function runTests() {
                          [[7, 'Dự án A'], [9, 'Dự án B']]);
         assert.equal(page.requests.at(-1).url, '/api/projects/7/workflow/my-work');
 
-        // b) nút theo bước/trạng thái; f) dòng entry_qc có nhãn cổng, không có nút.
+        // b) nút theo bước/trạng thái; f) dòng entry_qc có nhãn cổng và nút Check nhập (C3c).
         const table = rows(page.nodes.tbody);
         assert.deepEqual(table.map(row => row.buttons.map(node => node.textContent)), EXPECTED_BUTTONS);
         assert.deepEqual(table[0].cells.slice(0, 3), ['Hộp 1', 'Chỉnh lý', 'Chờ']);
@@ -284,6 +287,9 @@ async function runTests() {
         button(rows(page.nodes.tbody)[4], 'Xem so khớp').listeners.click();
         assert.deepEqual(page.calls.openScanSubmit.map(([id, name, pid]) => [id, name, Number(pid)]), [[4, 'Hộp 4', 7]]);
         assert.deepEqual(page.calls.openScanMatch.map(([id, name, pid]) => [id, name, Number(pid)]), [[5, 'Hộp 5', 7]]);
+        page.run('projectWorkflowProjectId = null');
+        button(rows(page.nodes.tbody)[6], 'Check nhập').listeners.click();
+        assert.deepEqual(page.calls.openEntryQc.map(([id, name, pid]) => [id, name, Number(pid)]), [[8, 'Hộp 8', 7]]);
         // project_scan_submit.js gọi refreshProjectWorkflow() sau khi nộp: phải tải lại bảng.
         const before = page.requests.length;
         await page.run('refreshProjectWorkflow()');

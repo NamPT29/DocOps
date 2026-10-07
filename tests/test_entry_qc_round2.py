@@ -887,3 +887,15 @@ def test_round2_ignores_unknown_field(client, mock_data, test_db):
     assert "la" not in data
     assert data == {"field": "val"}
 
+
+
+def test_entry_qc_times_carry_utc_offset(client, mock_data, test_db):
+    """Giờ không kèm múi giờ bị trình duyệt hiểu là giờ máy: lệch 7 tiếng ở Việt Nam (C3c)."""
+    setup_headers(client.app.dependency_overrides, mock_data['admin'])
+    make_submissions(test_db, mock_data['p1'].id, mock_data['c1'].id, 999, 1)
+    base = f'/api/projects/{mock_data["p1"].id}/workflow/cases/{mock_data["c1"].id}/entry-qc'
+    assert client.post(base + '/round2/sample').status_code == 200
+
+    data = client.get(base).json()['data']
+    stamps = [r['created_at'] for r in data['rounds']] + [data['round2']['sampling']['created_at']]
+    assert stamps and all(stamp.endswith('+00:00') for stamp in stamps), stamps

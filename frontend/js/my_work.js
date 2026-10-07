@@ -229,7 +229,17 @@ function renderActionButtons(td, item) {
             td.appendChild(btnReject);
         }
     } else if (stage_key === 'entry_qc') {
-        // Lát này chưa có nút cho entry_qc
+        // Check nhập vòng 1/2 dùng chung hộp thoại với trang Admin (js/project_entry_qc.js).
+        const btnQc = document.createElement('button');
+        btnQc.className = 'btn btn-sm btn-outline-primary me-2 mb-1';
+        btnQc.textContent = 'Check nhập';
+        btnQc.addEventListener('click', () => {
+            projectWorkflowProjectId = document.getElementById('myWorkProjectSelect').value;
+            if (typeof openEntryQc === 'function') {
+                openEntryQc(cid, display_name);
+            }
+        });
+        td.appendChild(btnQc);
     }
 }
 

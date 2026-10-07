@@ -138,6 +138,7 @@ const sandbox = {
         return respond(404, { status: 'error', detail: 'Not found' });
     },
     WORKFLOW_STATUS_LABELS: { done: 'Xong', in_progress: 'Đang xử lý', pending: 'Chờ' },
+    currentUser: { role: 'admin' },
     refreshProjectWorkflow: () => { refreshCount++; },
     URL: {
         createObjectURL: (blob) => {
@@ -599,6 +600,45 @@ async function runTest() {
     assert.match(r2Txt, /Không được tự check/);
     assert.doesNotMatch(r2Txt, /Lưu kết quả check/);
     assert.equal(find(r2Overlay, n => n.tagName === 'INPUT').length, 0);
+
+    // C3c: dùng ở index.html cho người kiểm tra không phải Admin.
+    // (1) Không có WORKFLOW_STATUS_LABELS (project_workflow.js) -> nhãn dự phòng; vòng 1 vượt ngưỡng ->
+    //     KHÔNG có nút "Duyệt kèm lý do", chỉ lời nhắc chờ Admin; giờ naive UTC hiện giờ Việt Nam.
+    // Máy người dùng ở Việt Nam: chuỗi giờ không kèm múi giờ sẽ bị hiểu là giờ máy nếu không thêm Z.
+    process.env.TZ = 'Asia/Ho_Chi_Minh';
+    const savedLabels = sandbox.WORKFLOW_STATUS_LABELS;
+    delete sandbox.WORKFLOW_STATUS_LABELS;
+    sandbox.currentUser = { role: 'user' };
+    routes = {
+        'GET /api/projects/1/workflow/cases/2/entry-qc': () => ({
+            status: 'ok', data: {
+                gate: { blocked: true, message: 'Hộp không đạt ngưỡng lỗi' },
+                entry_qc_status: 'done', live: null,
+                rounds: [{ round: 1, passed: false, rate_percent: 10, threshold_percent: 5,
+                           created_at: '2026-10-07T07:29:58', created_by_name: 'Kiểm tra A' }],
+                round2: { enabled: true, sampling: null },
+            }
+        }),
+    };
+    body.replaceChildren();
+    await sandbox.openEntryQc(2, 'Box NV');
+    let staffOverlay = body.children[body.children.length - 1];
+    let staffTxt = text(staffOverlay);
+    assert.match(staffTxt, /Trạng thái Check nhập liệu:\s+Xong/);
+    assert.doesNotMatch(staffTxt, /Duyệt kèm lý do/);
+    assert.match(staffTxt, /chờ Admin duyệt kèm lý do/);
+    assert.match(staffTxt, /Chốt bởi Kiểm tra A lúc 2026-10-07 14:29/);
+    sandbox.WORKFLOW_STATUS_LABELS = savedLabels;
+    sandbox.currentUser = { role: 'admin' };
+
+    // (2) Giờ: chuỗi đã có múi giờ giữ nguyên nghĩa; không có formatVietnamDateTime vẫn ra giờ Việt Nam.
+    assert.equal(sandbox._entryQcTime('2026-10-07T07:29:58+00:00'), '2026-10-07 14:29');
+    assert.equal(sandbox._entryQcTime(null), '—');
+    const bare = { Intl, Date };
+    vm.runInNewContext(source, bare);
+    assert.equal(typeof bare.formatVietnamDateTime, 'undefined');
+    assert.equal(bare._entryQcTime('2026-10-07T17:30:00'), '2026-10-08 00:30');
+    assert.equal(bare._entryQcTime('2026-10-07T17:30:00+00:00'), '2026-10-08 00:30');
 
     console.log("All tests passed");
 }

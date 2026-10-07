@@ -11,12 +11,17 @@ import math
 import secrets
 import random
 import json
+from datetime import timezone
 from sqlalchemy.exc import IntegrityError
 
 from server.repositories.document_repository import DocumentRepository
 from server.services.submission_quality_service import _visible_schema_fields, _effective_project_config, _comparable
 from server.services.submission_helpers import create_document_file_response
 from server.settings import settings
+
+def _utc_iso(value):
+    """Giờ lưu trong DB là UTC không kèm múi giờ; trả ISO có "+00:00" như các API khác."""
+    return value.replace(tzinfo=timezone.utc).isoformat() if value else None
 
 def _user_display_name(user):
     if not user:
@@ -105,8 +110,8 @@ def get_entry_qc_summary(db, project_id, case_id, actor):
             "resolution": r.resolution,
             "resolution_reason": r.resolution_reason,
             "resolved_by_name": _user_display_name(r.resolved_by),
-            "resolved_at": r.resolved_at.isoformat() if r.resolved_at else None,
-            "created_at": r.created_at.isoformat(),
+            "resolved_at": _utc_iso(r.resolved_at),
+            "created_at": _utc_iso(r.created_at),
             "created_by_name": creator_name
         })
 
@@ -129,7 +134,7 @@ def get_entry_qc_summary(db, project_id, case_id, actor):
             "sample_rate_percent": float(sampling.sample_rate_percent),
             "population_count": sampling.population_count,
             "sample_size": sampling.sample_size,
-            "created_at": sampling.created_at.isoformat(),
+            "created_at": _utc_iso(sampling.created_at),
             "created_by_name": _user_display_name(sampling.created_by),
             "items": items
         }
@@ -212,7 +217,7 @@ def finalize_round1(db, project_id, case_id, actor):
         "rate_percent": float(row.rate_percent),
         "threshold_percent": float(row.threshold_percent),
         "passed": row.passed,
-        "created_at": row.created_at.isoformat(),
+        "created_at": _utc_iso(row.created_at),
         "created_by_name": creator_name
     }
 
@@ -256,7 +261,7 @@ def _resolve_round(db, project_id, case_id, actor, reason: str, round_no: int):
         "resolution": round_obj.resolution,
         "resolution_reason": round_obj.resolution_reason,
         "resolved_by_name": resolver_name,
-        "resolved_at": round_obj.resolved_at.isoformat()
+        "resolved_at": _utc_iso(round_obj.resolved_at)
     }
 
 def resolve_round1(db, project_id, case_id, actor, reason: str):
@@ -517,6 +522,6 @@ def finalize_round2(db, project_id, case_id, actor):
         "rate_percent": float(row.rate_percent),
         "threshold_percent": float(row.threshold_percent),
         "passed": row.passed,
-        "created_at": row.created_at.isoformat(),
+        "created_at": _utc_iso(row.created_at),
         "created_by_name": actor.get("full_name") or actor.get("username")
     }

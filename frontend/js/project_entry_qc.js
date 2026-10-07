@@ -1,10 +1,33 @@
-/* global authFetch, formatApiErrorDetail, formatVietnamDateTime, refreshProjectWorkflow, projectWorkflowProjectId, scanSubmitErrorText, WORKFLOW_STATUS_LABELS */
+/* global authFetch, formatApiErrorDetail, formatVietnamDateTime, refreshProjectWorkflow, projectWorkflowProjectId, scanSubmitErrorText, WORKFLOW_STATUS_LABELS, currentUser */
 
 function _entryQcElement(tag, className, text) {
     const el = document.createElement(tag);
     if (className) el.className = className;
     if (text !== undefined && text !== null) el.textContent = String(text);
     return el;
+}
+
+// Dùng cả ở index.html (người kiểm tra), nơi không có project_workflow.js / project_management.js.
+const ENTRY_QC_STAGE_LABELS = { pending: 'Chờ', in_progress: 'Đang làm', done: 'Xong', rejected: 'Trả lại' };
+
+/** Giờ API: chuỗi không kèm múi giờ là giờ UTC; hiện theo giờ Việt Nam "YYYY-MM-DD HH:mm". */
+function _entryQcTime(value) {
+    if (!value) return '—';
+    const text = String(value);
+    const utc = /(Z|[+-]\d{2}:?\d{2})$/.test(text) ? text : `${text}Z`;
+    if (typeof formatVietnamDateTime === 'function') return formatVietnamDateTime(utc);
+    const date = new Date(utc);
+    if (isNaN(date.getTime())) return text;
+    const parts = Object.fromEntries(new Intl.DateTimeFormat('en-GB', {
+        timeZone: 'Asia/Ho_Chi_Minh', year: 'numeric', month: '2-digit', day: '2-digit',
+        hour: '2-digit', minute: '2-digit', hour12: false,
+    }).formatToParts(date).map(part => [part.type, part.value]));
+    return `${parts.year}-${parts.month}-${parts.day} ${parts.hour}:${parts.minute}`;
+}
+
+/** Duyệt kèm lý do (BR-07) chỉ Admin; người kiểm tra chỉ thấy lời nhắc. */
+function _entryQcIsAdmin() {
+    return typeof currentUser !== 'undefined' && Boolean(currentUser) && currentUser.role === 'admin';
 }
 
 async function _loadEntryQcData(projectId, caseId, body, errorBox) {
@@ -58,7 +81,8 @@ async function openEntryQc(caseId, caseName) {
         // 1. Trạng thái
         const statusDiv = _entryQcElement('div', 'mb-3');
         statusDiv.appendChild(_entryQcElement('strong', '', 'Trạng thái Check nhập liệu: '));
-        const statusLabel = WORKFLOW_STATUS_LABELS[data.entry_qc_status] || data.entry_qc_status;
+        const statusLabels = typeof WORKFLOW_STATUS_LABELS !== 'undefined' ? WORKFLOW_STATUS_LABELS : ENTRY_QC_STAGE_LABELS;
+        const statusLabel = statusLabels[data.entry_qc_status] || data.entry_qc_status;
         statusDiv.appendChild(document.createTextNode(statusLabel));
         contentBox.appendChild(statusDiv);
         
@@ -103,12 +127,12 @@ async function openEntryQc(caseId, caseName) {
                 else mDiv.classList.add('text-danger');
                 li.appendChild(mDiv);
                 
-                const dt = typeof formatVietnamDateTime === 'function' ? formatVietnamDateTime(r.created_at) : r.created_at;
+                const dt = _entryQcTime(r.created_at);
                 const createdBy = r.created_by_name || '—';
                 li.appendChild(_entryQcElement('div', 'small text-muted', `Chốt bởi ${createdBy} lúc ${dt}`));
                 
                 if (r.resolution) {
-                    const rdt = typeof formatVietnamDateTime === 'function' ? formatVietnamDateTime(r.resolved_at) : r.resolved_at;
+                    const rdt = _entryQcTime(r.resolved_at);
                     const resDiv = _entryQcElement('div', 'small mt-1');
                     resDiv.appendChild(_entryQcElement('strong', '', 'Admin duyệt: '));
                     const resolvedBy = r.resolved_by_name || '—';
@@ -241,7 +265,12 @@ async function openEntryQc(caseId, caseName) {
             footer.appendChild(chotBtn);
         }
         
-        if (round1 && round1.passed === false && !round1.resolution) {
+        const waitingAdmin = (round1 && round1.passed === false && !round1.resolution) || canResolveRound2;
+        if (waitingAdmin && !_entryQcIsAdmin()) {
+            footer.appendChild(_entryQcElement('span', 'text-muted small me-auto', 'Hộp vượt ngưỡng lỗi: chờ Admin duyệt kèm lý do.'));
+        }
+
+        if (round1 && round1.passed === false && !round1.resolution && _entryQcIsAdmin()) {
             const resolveBtn = _entryQcElement('button', 'btn btn-warning ms-2', 'Duyệt kèm lý do');
             resolveBtn.addEventListener('click', async () => {
                 let reason = window.prompt('Nhập lý do duyệt:');
@@ -321,7 +350,7 @@ async function openEntryQc(caseId, caseName) {
             footer.appendChild(r2ChotBtn);
         }
         
-        if (canResolveRound2) {
+        if (canResolveRound2 && _entryQcIsAdmin()) {
             const r2ResolveBtn = _entryQcElement('button', 'btn btn-warning ms-2', 'Duyệt vòng 2 kèm lý do');
             r2ResolveBtn.addEventListener('click', async () => {
                 let reason = window.prompt('Nhập lý do duyệt:');
