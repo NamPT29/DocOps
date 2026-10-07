@@ -246,6 +246,23 @@ migration `0011_scan_packages`), giao diện `frontend/js/project_scan_submit.js
   + Chặn các bước tiếp theo (Chuẩn hóa, Bàn giao) nếu tỷ lệ trường lỗi của toàn hộp vượt ngưỡng cho phép.
   + "Trả lại cả hộp": hệ thống không tự đổi trạng thái của các báo cáo thành `rejected`, mà chỉ ĐÁNH DẤU hộp vượt ngưỡng. Admin sẽ quyết định "Duyệt" kèm lý do để cho phép hộp đi tiếp.
 
+## Sheet "Chấm công theo ngày" trong file Excel xuất (07/10, T1, WorkLog/KPI)
+
+Code: `server/services/timesheet_service.py`, `server/repositories/timesheet_repository.py`,
+`_append_timesheet_sheet` trong `server/services/excel_service.py`. Không thêm bảng, không migration.
+
+- Mọi file Excel xuất (`GET /api/export`, xuất nền theo biểu mẫu và theo dự án trong
+  `server/export_worker.py`) có thêm sheet cuối "Chấm công theo ngày"; sheet dữ liệu và sheet
+  đang mở giữ nguyên. Trùng tên sheet có sẵn trong mẫu thì đặt "Chấm công theo ngày (2)".
+- Cột: Ngày (dd/mm/yyyy, giờ Việt Nam) | Họ và tên (họ tên, trống thì tên đăng nhập) |
+  Số hàng đã nhập | Số hàng đã duyệt. Mỗi dòng là một người trong một ngày; sắp theo ngày rồi tên.
+- Chỉ tính trên đúng các báo cáo có trong file xuất. Cách đếm giống bảng Thống kê nhân sự:
+  + Đã nhập: người = `input_user_id` của baseline chất lượng (không có thì `created_by_user_id`);
+    ngày = lúc tạo baseline, tức lần nộp kiểm tra đầu tiên (không có thì `created_at` của hồ sơ).
+  + Đã duyệt: lần `review_confirmed` đầu tiên của hồ sơ; người = `reviewer_user_id`; ngày = lúc duyệt.
+    Duyệt lại lần sau và `input_confirmed` không được tính.
+- Sheet có tên người và năng suất nội bộ: file xuất gửi khách hàng thì xóa sheet này trước khi gửi.
+
 ## Việc sau 10/10
 
 - Luồng cũ (giao tài liệu lẻ, nhập thư mục máy chủ) vẫn chỉ nhận tài khoản thường làm người nhập;

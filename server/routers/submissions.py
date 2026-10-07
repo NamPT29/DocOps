@@ -1070,6 +1070,7 @@ def api_export(
         download_path = os.path.join("scratch", download_filename)
         
         from server.services.excel_service import export_submissions_to_excel
+        from server.services.timesheet_service import daily_timesheet_rows
         
         submissions = SubmissionRepository(db).approved_for_export(
             template_id=template_id,
@@ -1084,7 +1085,12 @@ def api_export(
                 status_code=404,
                 detail=f"Không có hồ sơ {export_scope} để xuất báo cáo cho biểu mẫu này.",
             )
-        export_submissions_to_excel(template_file_path, submissions, download_path)
+        export_submissions_to_excel(
+            template_file_path,
+            submissions,
+            download_path,
+            timesheet_rows=daily_timesheet_rows(db, submissions),
+        )
         
         def remove_file(path):
             try:

@@ -22,6 +22,7 @@ from server.services.export_job_service import (
     update_export_job,
 )
 from server.services.project_reporting_service import resolve_project_template_path
+from server.services.timesheet_service import daily_timesheet_rows
 
 
 def _positive_int_environment(name: str, default: int) -> int:
@@ -98,6 +99,7 @@ def run_export_job(args) -> int:
                     template_file_path,
                     submissions,
                     str(output_path),
+                    timesheet_rows=daily_timesheet_rows(db, submissions),
                 )
                 payload = read_export_job(job_id) or {}
                 update_export_job(
