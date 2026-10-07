@@ -226,8 +226,38 @@ def test_f_my_work_entry_qc(client, db_session, setup_data):
         assert resp.status_code == 200
         
         data = resp.json()["data"]
-        has_entry_qc = any(c["stage_key"] == "entry_qc" for c in data)
-        assert has_entry_qc
+        entry_qc_item = next((c for c in data if c["stage_key"] == "entry_qc"), None)
+        assert entry_qc_item is not None
+        assert entry_qc_item["gate_code"] == "entry_qc_not_finalized"
+        
+        # Thêm CaseEntryQcResult vòng 1 đạt -> gate_code == "entry_qc_round2_required"
+        from server.models import CaseEntryQcResult
+        db_session.add(CaseEntryQcResult(project_id=pA.id, case_id=caseA.id, round=1, passed=True, threshold_percent=20.0, resolution='approved'))
+        db_session.commit()
+        
+        resp = get_as(client, staff, f"/api/projects/{pA.id}/workflow/my-work")
+        data = resp.json()["data"]
+        entry_qc_item = next((c for c in data if c["stage_key"] == "entry_qc"), None)
+        assert entry_qc_item is not None
+        assert entry_qc_item["gate_code"] == "entry_qc_round2_required"
+        
+        # Thêm ProjectPolicy tắt vòng 2 -> không còn mục entry_qc
+        from server.models import ProjectPolicy
+        db_session.add(ProjectPolicy(project_id=pA.id, entry_qc_round2_enabled=False))
+        db_session.commit()
+        
+        resp = get_as(client, staff, f"/api/projects/{pA.id}/workflow/my-work")
+        data = resp.json()["data"]
+        entry_qc_item = next((c for c in data if c["stage_key"] == "entry_qc"), None)
+        assert entry_qc_item is None
+        
+        # staff_not gọi my-work -> không có mục entry_qc
+        staff_not = setup_data["staff_not"]
+        resp = get_as(client, staff_not, f"/api/projects/{pA.id}/workflow/my-work")
+        data = resp.json()["data"]
+        entry_qc_item = next((c for c in data if c["stage_key"] == "entry_qc"), None)
+        assert entry_qc_item is None
+
 
 def test_g_admin_access(client, db_session, setup_data):
     admin = setup_data["admin"]

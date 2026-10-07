@@ -64,12 +64,7 @@ Giao diện: Tab **Dự án → Thao tác → Quy trình số hóa** (`frontend/
 - Đổi Hành chính → CTV bị từ chối (409) nếu còn phân công không dành cho CTV; hệ thống liệt kê,
   không tự gỡ. Không đổi qua lại với Admin.
 
-## Việc của Hành chính (BA mục 3)
 
-- Scan/nhập liệu phải chọn hộp. Hộp là đối tượng phân giao theo bước quy trình.
-- Trang Hành chính liệt kê các dự án người dùng tham gia bước tương ứng (scan/nhập); bấm vào mở danh sách hộp.
-- Danh sách hộp chỉ hiện các hộp có giao cho Hành chính đó.
-- Nộp S là tính năng (hành chính gom phiếu đã scan để báo cáo tiến độ).
 
 ## Admin nhập liệu (03/10, BA 3.3, BR-04)
 
@@ -185,7 +180,7 @@ API trong `server/routers/projects.py`, bảng `case_scan_packages` / `case_scan
 migration `0011_scan_packages`), giao diện `frontend/js/project_scan_submit.js`.
 
 1. **Điều kiện nộp và mã lỗi** (`POST /api/projects/{pid}/cases/{cid}/scan-packages`, body
-   `{folder_path, scan_user_name_level=1}`; chỉ Admin):
+   `{folder_path, scan_user_name_level=1}`; Admin hoặc thành viên bước Scan của dự án):
    - 403: không phải Admin. 422: body sai kiểu.
    - 404: dự án không tồn tại; hộp không tồn tại hoặc không thuộc dự án.
    - 400: `scan_user_name_level < 0`; thư mục không hợp lệ hoặc nằm ngoài `DOCUMENT_SOURCE_ROOT`.
@@ -269,6 +264,13 @@ Code: `server/services/timesheet_service.py`, `server/repositories/timesheet_rep
   + Đã duyệt: lần `review_confirmed` đầu tiên của hồ sơ; người = `reviewer_user_id`; ngày = lúc duyệt.
     Duyệt lại lần sau và `input_confirmed` không được tính.
 - Sheet có tên người và năng suất nội bộ: file xuất gửi khách hàng thì xóa sheet này trước khi gửi.
+
+## Việc của Hành chính (C3, 07/10)
+- GET /api/workflow/my-projects: dự án có ít nhất 1 bước đang bật mà người dùng là thành viên bước (project_stage_members, is_active) hoặc reviewer (project_members). Trả {project_id, name, stages, is_reviewer}. CTV luôn nhận [] (loại tài khoản đọc từ DB).
+- GET /api/projects/{pid}/workflow/my-work: hộp người dùng làm được ngay ở Chỉnh lý/Scan/Check scan (chờ hoặc bị trả lại và chưa ai nhận; đang làm do chính mình hoặc chưa có người phụ trách), cộng mục entry_qc cho reviewer khi hộp đã nhập xong và cổng Check nhập đang chặn (kèm gate_code).
+- Nộp S và xem gói scan: Admin hoặc thành viên bước Scan của dự án (xem gói: thêm thành viên Check scan). Chọn thư mục (GET /api/documents/server-folders): Admin hoặc thành viên bước Scan ở ít nhất 1 dự án.
+- Chuyển bước và BR-04 dùng luật cũ (_require_stage_worker). Duyệt Check scan khi lệch mục lục và duyệt hộp vượt ngưỡng Check nhập vẫn chỉ Admin.
+- Giao diện: tab "Việc của tôi" ở index.html (js/my_work.js). Người không có quyền nhập/kiểm tra: auth.js configureCapabilityUI gọi applyMyWorkVisibility() để hiện lại thanh tab và mở tab này.
 
 ## Việc sau 10/10
 
