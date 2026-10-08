@@ -146,7 +146,7 @@ register_exception_handlers(app)
 configure_http_middleware(app, settings.cors_origins)
 
 # Include routers
-from server.routers import auth, templates, submissions, documents, processing, dictionaries, notifications, projects, project_uploads, workflow, arrangement
+from server.routers import auth, templates, submissions, documents, processing, dictionaries, notifications, projects, project_uploads, workflow, arrangement, paper_handoffs
 app.include_router(auth.router)
 app.include_router(templates.router)
 app.include_router(submissions.router)
@@ -160,7 +160,6 @@ app.include_router(project_uploads.router)
 app.include_router(workflow.catalog_router)
 app.include_router(workflow.router)
 app.include_router(arrangement.router)
-from server.routers import paper_handoffs
 app.include_router(paper_handoffs.router)
 configure_openapi(app)
 
