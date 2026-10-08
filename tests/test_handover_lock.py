@@ -268,9 +268,8 @@ def test_handover_lock_revision_is_additive():
 
     from alembic import command
 
-    from server.migration_runner import HEAD_REVISION, _alembic_config, current_database_revision
+    from server.migration_runner import _alembic_config, current_database_revision
 
-    assert HEAD_REVISION == "0017_project_handover_lock"
     engine = create_engine("sqlite+pysqlite:///:memory:")
     config = _alembic_config(Path(__file__).resolve().parents[1])
     columns = {"handover_locked_at", "handover_locked_by_user_id", "handover_lock_note"}

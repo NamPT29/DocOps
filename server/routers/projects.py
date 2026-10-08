@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Any, Literal
 
-from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, Query
 from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.orm import Session
@@ -21,6 +21,7 @@ from server.services.normalization_plan_service import ascii_name, build_plan, p
 from server.services.project_dashboard_service import build_dashboard
 from server.services.reconciliation_service import build_reconciliation, reconciliation_workbook
 from server.services.handover_lock_service import ensure_project_editable, lock_project, unlock_project
+from server.services.payroll_service import compute_payroll, get_rates, parse_period, payroll_workbook, update_rates
 from server.services.handover_package_service import read_job, report_path, start_package
 from server.services.project_workspace_service import get_project_workspace
 from server.services.export_job_service import (
@@ -208,6 +209,52 @@ def api_get_normalization_plan(
     filename = f"Ke_hoach_chuan_hoa_{ascii_name(plan['project']['name']) or project_id}.xlsx"
     return Response(
         content=plan_workbook(plan),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+class WorkRatesRequest(BaseModel):
+    rates: dict[str, Any]
+
+
+@router.get("/{project_id}/work-rates")
+def api_get_work_rates(
+    project_id: int,
+    current_user: dict = Depends(get_admin_user),
+    db: Session = Depends(get_db),
+):
+    """Đơn giá loại 1 (P1); loại 2 = loại 1 × hệ số giấy xấu của Chính sách dự án."""
+    return {"status": "ok", "data": get_rates(db, project_id=project_id)}
+
+
+@router.put("/{project_id}/work-rates")
+def api_update_work_rates(
+    project_id: int,
+    request: WorkRatesRequest,
+    current_user: dict = Depends(get_admin_user),
+    db: Session = Depends(get_db),
+):
+    return {"status": "ok", "data": update_rates(db, project_id=project_id, rates=request.rates, actor=current_user)}
+
+
+@router.get("/{project_id}/payroll-preview")
+def api_get_payroll_preview(
+    project_id: int,
+    date_from: str = Query(..., alias="from"),
+    date_to: str = Query(..., alias="to"),
+    format: Literal["json", "xlsx"] = "json",
+    current_user: dict = Depends(get_admin_user),
+    db: Session = Depends(get_db),
+):
+    """Bảng tạm tính chi trả theo sản lượng (P1, không lưu)."""
+    start, end = parse_period(date_from, date_to)
+    result = compute_payroll(db, project_id=project_id, date_from=start, date_to=end)
+    if format == "json":
+        return {"status": "ok", "data": result}
+    filename = f"Tam_tinh_chi_tra_{project_id}_{start.isoformat()}_{end.isoformat()}.xlsx"
+    return Response(
+        content=payroll_workbook(result),
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )

@@ -428,6 +428,21 @@ Excel 5 sheet: "Tổng hợp" (mỗi mã: số dòng theo từng kết quả) v�
   `formatApiErrorDetail` (auth.js, dùng chung) hiện `detail.message` của lỗi dạng `{code, message}` thay vì chuỗi JSON,
   nên trang nhập liệu nhận 423 hiện "Dự án đã bàn giao...".
 
+## Chi trả theo sản lượng (P1, revision 0018_project_work_rates)
+
+Theo QC-07, QC-10; phần còn lại là giả định reviewer, chờ BA.
+- Đơn giá: bảng `project_work_rates`, Admin nhập theo dự án cho mã loại 1 (NL-1, CN-1, SC-A4-1, VNĐ/đơn vị);
+  `GET/PUT /api/projects/{pid}/work-rates` (đơn giá âm: 400 `negative_rate`; null: xóa đơn giá). Loại 2 (giấy xấu) =
+  đơn giá loại 1 × `bad_paper_factor` của Chính sách dự án (QC-07, mặc định 1,3).
+- Sản lượng theo người trong khoảng ngày (giờ Việt Nam, gồm cả hai đầu): NL = văn bản nộp kiểm tra lần đầu (baseline,
+  như sheet Chấm công) của người nhập; CN = văn bản duyệt lần đầu của người duyệt; SC-A4 = trang A4 quy đổi của gói S
+  `done` xong trong kỳ, người = người scan chọn khi Nộp S (trống: "Chưa xác định người scan"). Bìa và nháp không tính.
+  Loại 2: văn bản thuộc hồ sơ mục lục có giấy xấu; gói S thuộc hộp có ít nhất 1 hồ sơ giấy xấu.
+- `GET /api/projects/{pid}/payroll-preview?from=YYYY-MM-DD&to=YYYY-MM-DD[&format=xlsx]` (Admin): dòng (người, mã,
+  đơn vị, sản lượng, đơn giá, hệ số, thành tiền làm tròn đồng), tổng theo người, cảnh báo "Chưa có đơn giá <mã>"
+  (thành tiền trống, không lỗi). Excel 2 sheet "Tổng theo người", "Chi tiết". Từ ngày sau đến ngày hoặc kỳ quá 92 ngày:
+  400. Bảng tạm tính KHÔNG lưu (P2 chốt kỳ).
+
 ## Việc sau 10/10
 
 - Luồng cũ (giao tài liệu lẻ, nhập thư mục máy chủ) vẫn chỉ nhận tài khoản thường làm người nhập;

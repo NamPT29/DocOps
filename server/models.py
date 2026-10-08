@@ -949,3 +949,7 @@ from server.models_entry_qc import (  # noqa: E402,F401
 from server.models_paper import (  # noqa: E402,F401
     CasePaperHandoff,
 )
+
+from server.models_payroll import (  # noqa: E402,F401
+    ProjectWorkRate,
+)
