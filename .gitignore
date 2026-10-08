@@ -47,6 +47,7 @@ data.db
 
 # Uploaded PDF and images
 uploads/
+handover/
 source_documents/
 
 # IDEs and Editors

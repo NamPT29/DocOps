@@ -313,10 +313,41 @@ Code: `server/services/normalization_plan_service.py`, `server/repositories/norm
   đề) và "Kế hoạch đổi tên" (mỗi file một dòng; cột Vấn đề tô màu). Vấn đề: chưa có Mã cơ quan;
   file không nằm đúng `<Hộp>/<Hồ sơ>/`; tên thư mục không đọc được số; hồ sơ không có trong mục lục;
   THBQ ngoài QC-13; văn bản chưa "Hoàn thành" nhập liệu (trạng thái của lần lưu mới nhất).
-- Lát tiếp theo: G2 đóng gói (chép file theo kế hoạch vào thư mục bàn giao trên máy chủ, chỉ file
-  không còn vấn đề, ghi SHA-256 từng file + Excel metadata NN-SIP `Metadata_HS`/`MetadataVB`, chạy
-  nền, chạy lại được); G3 biên bản bàn giao tự sinh + khóa dự án. PDF/A và ký số làm ngoài hệ thống
-  (BA), gói G2 để dành hậu tố `_signed`.
+- Lát tiếp theo: G3 biên bản bàn giao tự sinh + khóa dự án. PDF/A và ký số làm ngoài hệ thống (BA);
+  file đã ký thêm hậu tố `_signed` (QC-04) do công cụ ký tạo.
+
+## Đóng gói bàn giao (08/10, G2)
+
+Code: `server/services/handover_package_service.py`; `POST/GET /api/projects/{pid}/handover-package`
+(chỉ Admin); menu dự án "Đóng gói bàn giao" (`startHandoverPackage` trong `frontend/js/project_reports.js`,
+hỏi tiến độ mỗi 3 giây). Biến `HANDOVER_DIR` (mặc định thư mục `handover` cạnh `PDF_STORAGE_PATH`).
+
+- Hồ sơ được đóng gói khi MỌI file trong thư mục hồ sơ không còn vấn đề ở kế hoạch G1 và mã hồ sơ
+  không trùng thư mục khác (ví dụ `012` và `0012` cùng ra một mã thì bỏ cả hai). Không có hồ sơ nào
+  sẵn sàng thì `409`.
+- Chạy nền trong máy chủ (luồng riêng). Khóa `HANDOVER_DIR/_jobs/project_<id>.lock` (tạo độc quyền,
+  ghi PID): đang chạy thì `409`; PID đã chết thì lấy lại khóa. Trạng thái
+  `_jobs/project_<id>.json` (queued/running/done/error, số file đã xử lý, thông báo). Khởi động máy
+  chủ: lần đóng gói của tiến trình đã chết chuyển `error`, nhả khóa.
+- Chép từ kho PDF sang `HANDOVER_DIR/<đường dẫn bàn giao G1>` qua file tạm `.part`; SHA-256 phải
+  khớp `content_sha256` lúc tải lên, sai thì không đặt file và cả hồ sơ không vào metadata. Chạy lại:
+  file đích đã đúng dung lượng và SHA-256 thì bỏ qua. File thừa của lần đóng gói cũ không bị xóa.
+- Kết quả trong `HANDOVER_DIR/<gốc>/`:
+  + `Metadata_NN-SIP.xlsx`: sheet `Metadata_HS` (18 trường chuẩn + Tệp tin hồ sơ, Mục lục số, Hộp số,
+    Hồ sơ số, Tên phông, Mã phông, Giai đoạn/Nhiệm kỳ, Path) và `MetadataVB` (fileCode + 21 trường
+    chuẩn + các trường bổ sung + Người ký, File gốc). Tên trường lấy theo
+    `2026-10-04-sample-files-analysis.md`; công cụ SIP cần tên khác thì sửa `HS_FIELDS`/`VB_FIELDS`.
+  + Hồ sơ: tiêu đề, THBQ, thời gian, số tờ, ghi chú lấy từ MỤC LỤC (QC-01); mode `01`, language `01`,
+    confidenceLevel `02`, format `Bình thường`; totalDoc = số văn bản (không tính bìa); numberOfPage =
+    tổng số trang PDF (đếm bằng pypdf, kể cả bìa).
+  + Văn bản: docId = STT, docCode = mã văn bản; typeName, codeNumber, codeNotation, issuedDate,
+    organName, subject, Người ký... lấy từ lần lưu mới nhất, dò cột theo NHÃN của biểu mẫu
+    (`VB_LABEL_ALIASES`, so nguyên nhãn không dấu); làm sạch QC-15 (gộp khoảng trắng, NFC); tên loại
+    và cơ quan ban hành IN HOA.
+  + `SHA256SUMS.txt` (đường dẫn tính từ thư mục gốc, kiểm bằng `sha256sum -c`).
+  + `Nhat_ky_dong_goi.xlsx`: Đã đóng gói (SHA-256, dung lượng, số trang, Đã chép/Đã có sẵn), Chưa
+    đóng gói (lý do), Lỗi chép file.
+- Hồ sơ xuất DANG-HD40 chưa hỗ trợ: gói luôn theo NN-SIP.
 
 ## Việc sau 10/10
 

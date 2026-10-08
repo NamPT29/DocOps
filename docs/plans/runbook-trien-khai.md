@@ -29,6 +29,7 @@ TRƯỚC khi khởi động bản mới lần đầu. Không có bước "chạy
    | `HOST` | Mặc định `0.0.0.0`. Khi chỉ cho truy cập qua Caddy có thể đặt `127.0.0.1` |
    | `APP_ENV` | `production` cho chạy thật. Khi đó bắt buộc thêm `PDF_STORAGE_PATH`, `TEMPLATE_STORAGE_PATH`, `EXPORT_WORK_DIR`, và nếu đặt `REDIS_URL` thì phải là `rediss://` |
    | `PUBLIC_HOSTNAME` | Tên miền cho Caddy (xem `Caddyfile`) |
+   | `HANDOVER_DIR` | Thư mục nhận gói bàn giao (Đóng gói, G2). Không đặt thì dùng thư mục `handover` cạnh `PDF_STORAGE_PATH`. Cần chỗ trống bằng dung lượng PDF của dự án; nên trỏ sang ổ dữ liệu lớn |
 
 ## 2. Sao lưu PostgreSQL (bắt buộc, trước khi khởi động bản mới)
 

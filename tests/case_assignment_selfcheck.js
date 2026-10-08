@@ -35,7 +35,7 @@ assert.match(workflowJs, /caseItem\.assigned_reviewer_user_id && u\.id === caseI
 assert.match(managementJs, /timeZone:\s*'Asia\/Ho_Chi_Minh'/, 'project_management.js must format with Asia/Ho_Chi_Minh');
 assert.doesNotMatch(managementJs, /due_at\.substring\(0,\s*16\)/, 'due_at must not use UTC substring');
 assert.doesNotMatch(managementJs, /assigned_at\.substring\(0,\s*16\)/, 'assigned_at must not use UTC substring');
-assert.match(html, /project_management\.js\?v=2\.17/, 'admin.html must load project_management.js?v=2.17');
+assert.match(html, /project_management\.js\?v=2\.18/, 'admin.html must load project_management.js?v=2.18');
 assert.match(html, /project_workflow\.js\?v=[\d.]+/, 'admin.html must load project_workflow.js with a ?v= version');
 
 // 6. Fix infinite recursion in formatVietnamDateTime and verify actual timezone output

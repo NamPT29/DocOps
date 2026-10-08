@@ -86,7 +86,8 @@ def _location(asset, case_level: int) -> tuple[str | None, str]:
     return None, filename
 
 
-def build_plan(db, *, project_id: int) -> dict:
+def build_plan(db, *, project_id: int, with_sources: bool = False) -> dict:
+    """Kế hoạch của cả dự án. with_sources=True thêm "asset" và "dossier" vào mỗi dòng (cho G2)."""
     repository = NormalizationRepository(db)
     project = repository.get(project_id)
     if project is None:
@@ -165,7 +166,7 @@ def build_plan(db, *, project_id: int) -> dict:
                 target = f"{base}/{document_code}.pdf" if base else ""
                 if status != "completed":
                     problems.append(PROBLEM_NOT_APPROVED)
-            rows.append({
+            row = {
                 "box": box,
                 "folder": folder or "",
                 "relative_path": asset.relative_path,
@@ -176,7 +177,11 @@ def build_plan(db, *, project_id: int) -> dict:
                 "target_path": target,
                 "entry_status": STATUS_LABELS.get(status, status),
                 "problems": problems,
-            })
+            }
+            if with_sources:
+                row["asset"] = asset
+                row["dossier"] = dossier
+            rows.append(row)
 
     problem_counts: dict[str, int] = {}
     for row in rows:

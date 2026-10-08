@@ -18,6 +18,7 @@ from server.services.project_admin_service import (
 )
 from server.services.project_policy_service import get_project_policy, update_project_policy
 from server.services.normalization_plan_service import ascii_name, build_plan, plan_workbook
+from server.services.handover_package_service import read_job, start_package
 from server.services.project_workspace_service import get_project_workspace
 from server.services.export_job_service import (
     ExportJobBusyError,
@@ -207,6 +208,27 @@ def api_get_normalization_plan(
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
+
+
+@router.post("/{project_id}/handover-package")
+def api_start_handover_package(
+    project_id: int,
+    current_user: dict = Depends(get_admin_user),
+    db: Session = Depends(get_db),
+):
+    """Đóng gói bàn giao (G2): chép file theo kế hoạch chuẩn hóa, SHA-256, metadata NN-SIP; chạy nền."""
+    from server.database import SessionLocal
+
+    job = start_package(db, project_id=project_id, current_user=current_user, session_factory=SessionLocal)
+    return {"status": "ok", "data": job}
+
+
+@router.get("/{project_id}/handover-package")
+def api_get_handover_package(
+    project_id: int,
+    current_user: dict = Depends(get_admin_user),
+):
+    return {"status": "ok", "data": read_job(project_id) or {"project_id": project_id, "state": "none"}}
 
 
 @router.get("/{project_id}/submission-folders")

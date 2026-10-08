@@ -43,6 +43,15 @@ def run_startup_maintenance() -> None:
         )
 
     try:
+        from server.services.handover_package_service import fail_stale_package_jobs
+
+        stale_packages = fail_stale_package_jobs()
+        if stale_packages:
+            logger.warning("Đóng gói bị ngắt khi máy chủ tắt: %d dự án", stale_packages)
+    except Exception:
+        logger.warning("Không thể kiểm các lần đóng gói cũ khi khởi động", exc_info=True)
+
+    try:
         state = migration_state(engine)
         if not state.ready:
             logger.warning("Bỏ qua dọn phiên upload vì database chưa migrate")

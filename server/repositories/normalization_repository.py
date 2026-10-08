@@ -32,6 +32,18 @@ class NormalizationRepository(BaseRepository[Project]):
             ProjectDocumentAsset.status == "active",
         ).all()
 
+    def latest_submission_data_by_document(self, document_ids: set[int]) -> dict[int, str]:
+        """data_json của lần lưu mới nhất cho từng văn bản."""
+        if not document_ids:
+            return {}
+        latest_ids = self.session.query(func.max(Submission.id)).filter(
+            Submission.assigned_document_id.in_(document_ids)
+        ).group_by(Submission.assigned_document_id)
+        rows = self.session.query(Submission.assigned_document_id, Submission.data_json).filter(
+            Submission.id.in_(latest_ids)
+        ).all()
+        return {document_id: data_json for document_id, data_json in rows}
+
     def latest_submission_status_by_document(self, document_ids: set[int]) -> dict[int, str]:
         if not document_ids:
             return {}

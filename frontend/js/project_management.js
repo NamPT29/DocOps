@@ -318,6 +318,12 @@ async function loadProjectList() {
                     handler: () => downloadNormalizationPlan(project),
                     trackExport: true,
                 },
+                {
+                    label: 'Đóng gói bàn giao',
+                    icon: 'fa-box',
+                    handler: () => startHandoverPackage(project),
+                    trackExport: true,
+                },
             ],
         );
         actionCell.append(projectActions);

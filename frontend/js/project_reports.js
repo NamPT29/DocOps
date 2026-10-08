@@ -384,6 +384,52 @@ async function downloadNormalizationPlan(project) {
     }
 }
 
+// Đóng gói bàn giao (G2): máy chủ chép file theo kế hoạch chuẩn hóa vào thư mục bàn giao, chạy nền.
+const HANDOVER_POLL_MS = 3000;
+
+function handoverProgressText(project, job) {
+    const total = Number(job.files_total) || 0;
+    const done = Number(job.files_done) || 0;
+    const percent = total ? Math.floor(done * 100 / total) : 0;
+    return `Đang đóng gói “${project.name}”: ${done}/${total} file (${percent}%).`;
+}
+
+async function startHandoverPackage(project, { pollMs = HANDOVER_POLL_MS, maxPolls = 28800 } = {}) {
+    if (!project || !Number(project.id)) return null;
+    const question = `Đóng gói bàn giao dự án “${project.name}”?\n\n`
+        + 'Chỉ hồ sơ không còn vấn đề trong Kế hoạch chuẩn hóa được chép sang thư mục bàn giao trên máy chủ. '
+        + 'Dữ liệu lớn có thể chạy nhiều giờ; chạy lại sẽ bỏ qua file đã chép đúng.';
+    if (!confirm(question)) return null;
+    const url = `/api/projects/${Number(project.id)}/handover-package`;
+    try {
+        const response = await authFetch(url, { method: 'POST' });
+        if (!response) return null;
+        if (!response.ok) {
+            const errorData = await response.json().catch(() => ({}));
+            const message = formatApiErrorDetail(errorData.detail || errorData.message);
+            // Đang có lần đóng gói khác của dự án: theo dõi lần đó thay vì báo lỗi.
+            if (response.status !== 409 || !message.includes('đang được đóng gói')) throw new Error(message);
+        }
+        for (let poll = 0; poll < maxPolls; poll++) {
+            const statusResponse = await authFetch(url, { cache: 'no-store' });
+            if (!statusResponse || !statusResponse.ok) throw new Error('Không đọc được trạng thái đóng gói');
+            const job = (await statusResponse.json()).data || {};
+            if (job.state === 'done') {
+                setProjectExportStatus(job.message);
+                return job;
+            }
+            if (job.state === 'error') throw new Error(job.message || 'Đóng gói thất bại');
+            setProjectExportStatus(handoverProgressText(project, job));
+            await new Promise(resolve => setTimeout(resolve, pollMs));
+        }
+        throw new Error('Đóng gói vẫn đang chạy trên máy chủ; bấm Đóng gói bàn giao lần nữa để xem tiến độ.');
+    } catch (error) {
+        setProjectExportStatus(error.message, true);
+        alert(`Lỗi đóng gói: ${error.message}`);
+        return null;
+    }
+}
+
 async function restoreProjectManagementNavigation() {
     if (window.location.hash !== '#projects') return false;
     const params = new URLSearchParams(window.location.search);
