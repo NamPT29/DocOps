@@ -69,10 +69,13 @@ Cổng: python scripts/gate.py  (dùng --static để kiểm nhanh)
 - [x] G3 Biên bản bàn giao Bien_ban_ban_giao.docx tự sinh mỗi lần đóng gói (docx_writer.py, không thêm thư viện); GET /api/projects/{pid}/handover-package/report; menu "Tải biên bản bàn giao"; project_reports.js v1.03, project_management.js v2.19
 ## Đợt B (giao Antigravity, nhánh claude/charming-planck-b2k42f; đặc tả docs/plans/2026-10-08-dot-b-spec.md)
 Làm lần lượt; lát trước được reviewer duyệt mới làm lát sau.
-- [ ] H1 Sổ giao nhận hồ sơ giấy 5 mốc (FR-ARR-02), revision 0016_case_paper_handoffs
+- [ ] H1a Sổ giao nhận hồ sơ giấy 5 mốc (FR-ARR-02): CSDL + API + Excel, revision 0016_case_paper_handoffs
+- [ ] H1b Sổ giao nhận hồ sơ giấy: giao diện
 - [ ] D1 Bảng tiến độ dự án: API GET /api/projects/{pid}/dashboard
 - [ ] D2 Bảng tiến độ dự án: giao diện
 - [ ] R1 Đối soát R1–R4 (Excel, giả định reviewer)
-- [ ] K1 Khóa sửa hồ sơ sau bàn giao (thay G4), revision 0017_project_handover_lock
-- [ ] P1 Chi trả theo sản lượng: đơn giá + bảng tạm tính, revision 0018_project_work_rates
+- [ ] K1a Khóa sửa hồ sơ sau bàn giao (thay G4): CSDL + API + chặn, revision 0017_project_handover_lock
+- [ ] K1b Khóa sửa hồ sơ sau bàn giao: giao diện
+- [ ] P1a Chi trả theo sản lượng: đơn giá + bảng tạm tính (API, Excel), revision 0018_project_work_rates
+- [ ] P1b Chi trả theo sản lượng: giao diện
 - [ ] P2 Chi trả: chốt kỳ, lưu kèm tham số, revision 0019_payroll_periods
