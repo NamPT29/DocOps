@@ -200,6 +200,10 @@ def _serialize_project(project, members, metrics, member_report_stats=None):
         "reviewer_user_ids": members["reviewer"],
         "metrics": metrics,
         "member_report_stats": member_report_stats or [],
+        # K1: dự án đã khóa bàn giao (giờ UTC kèm Z), null nếu chưa khóa.
+        "handover_locked_at": (
+            project.handover_locked_at.replace(microsecond=0).isoformat() + "Z" if project.handover_locked_at else None
+        ),
     }
 
 

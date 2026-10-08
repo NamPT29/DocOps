@@ -38,6 +38,7 @@ from server.services.submission_metadata_service import (
     apply_submission_metadata,
 )
 from server.services.submission_service import COMPLETED_WITHOUT_FOLDER, SubmissionService, _load_submission_document_metadata
+from server.services.handover_lock_service import ensure_document_editable, ensure_submission_editable
 from server.services.submission_helpers import create_document_file_response
 from server.services.export_job_service import (
     ExportJobBusyError,
@@ -136,6 +137,7 @@ def api_submit(req: SubmitRequest, current_user: dict = Depends(get_input_user),
         data_dict, document = SubmissionService.enrich_pdf_reference(
             req.data, db, current_user["id"], pending_only=True
         )
+        ensure_document_editable(db, document.id if document else None)
         SubmissionService.validate_copy_submission(
             source_submission_id=req.copy_source_submission_id,
             target_data=data_dict,
@@ -651,7 +653,8 @@ def api_update_submission(
         sub = repository.get(sub_id)
         if not sub:
             raise HTTPException(status_code=404, detail="Không tìm thấy hồ sơ.")
-            
+        ensure_submission_editable(db, sub)
+
         if (
             current_user["role"] != "admin"
             and not repository.is_active_input_assignee(sub, current_user["id"])
@@ -742,6 +745,7 @@ def api_update_review_content(
         submission = SubmissionRepository(db).get(sub_id)
         if not submission:
             raise HTTPException(status_code=404, detail="Không tìm thấy hồ sơ")
+        ensure_submission_editable(db, submission)
         ReviewWorkflowService.require_assigned_reviewer(submission, current_user, db)
         if submission.status not in {"pending_review", "rejected"}:
             raise HTTPException(status_code=409, detail="Hồ sơ không còn ở bước kiểm tra")
@@ -778,6 +782,7 @@ def api_update_review_content(
         raise
 
 def _confirm_review_content(submission, data, current_user, lease_token, db):
+    ensure_submission_editable(db, submission)
     ReviewWorkflowService.require_assigned_reviewer(submission, current_user, db)
     if submission.status != "pending_review":
         raise HTTPException(status_code=409, detail="Hồ sơ không ở trạng thái chờ duyệt")
@@ -882,6 +887,7 @@ def api_reopen_submission_review(
     submission = SubmissionRepository(db).get(sub_id)
     if not submission:
         raise HTTPException(status_code=404, detail="Không tìm thấy hồ sơ")
+    ensure_submission_editable(db, submission)
     if submission.status != "completed":
         raise HTTPException(
             status_code=409,
@@ -915,6 +921,7 @@ def api_confirm_input_correction(
         submission = SubmissionRepository(db).get(sub_id)
         if not submission:
             raise HTTPException(status_code=404, detail="Không tìm thấy hồ sơ.")
+        ensure_submission_editable(db, submission)
         if not SubmissionRepository(db).is_active_input_assignee(
             submission,
             current_user["id"],
@@ -960,6 +967,7 @@ def api_update_errors(
         sub = SubmissionRepository(db).get(sub_id)
         if not sub:
             raise HTTPException(status_code=404, detail="Không tìm thấy hồ sơ.")
+        ensure_submission_editable(db, sub)
         ReviewWorkflowService.require_assigned_reviewer(sub, current_user, db)
         if sub.status not in {"pending_review", "rejected"}:
             raise HTTPException(status_code=409, detail="Hồ sơ không ở trạng thái kiểm tra")
@@ -997,6 +1005,7 @@ def api_delete_submission(sub_id: int, current_user: dict = Depends(get_input_us
         sub = SubmissionRepository(db).get(sub_id)
         if not sub:
             raise HTTPException(status_code=404, detail="Không tìm thấy hồ sơ.")
+        ensure_submission_editable(db, sub)
         ReviewWorkflowService.require_no_other_active_view(
             sub,
             current_user,

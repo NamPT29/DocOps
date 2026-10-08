@@ -20,6 +20,7 @@ from server.services.project_policy_service import get_project_policy, update_pr
 from server.services.normalization_plan_service import ascii_name, build_plan, plan_workbook
 from server.services.project_dashboard_service import build_dashboard
 from server.services.reconciliation_service import build_reconciliation, reconciliation_workbook
+from server.services.handover_lock_service import ensure_project_editable, lock_project, unlock_project
 from server.services.handover_package_service import read_job, report_path, start_package
 from server.services.project_workspace_service import get_project_workspace
 from server.services.export_job_service import (
@@ -210,6 +211,38 @@ def api_get_normalization_plan(
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
+
+
+class HandoverLockRequest(BaseModel):
+    note: str | None = None
+
+
+class HandoverUnlockRequest(BaseModel):
+    reason: str | None = None
+
+
+@router.post("/{project_id}/handover-lock")
+def api_lock_project_handover(
+    project_id: int,
+    request: HandoverLockRequest | None = None,
+    current_user: dict = Depends(get_admin_user),
+    db: Session = Depends(get_db),
+):
+    """Khóa sửa hồ sơ sau bàn giao (K1): cần một lần đóng gói bàn giao đã xong."""
+    note = request.note if request else None
+    return {"status": "ok", "data": lock_project(db, project_id=project_id, note=note, actor=current_user)}
+
+
+@router.delete("/{project_id}/handover-lock")
+def api_unlock_project_handover(
+    project_id: int,
+    request: HandoverUnlockRequest | None = None,
+    current_user: dict = Depends(get_admin_user),
+    db: Session = Depends(get_db),
+):
+    """Mở khóa bàn giao (K1): bắt buộc lý do, ghi nhật ký audit."""
+    reason = request.reason if request else None
+    return {"status": "ok", "data": unlock_project(db, project_id=project_id, reason=reason, actor=current_user)}
 
 
 @router.get("/{project_id}/reconciliation")
@@ -443,6 +476,7 @@ def api_delete_project_asset(
     current_user: dict = Depends(get_admin_user),
     db: Session = Depends(get_db),
 ):
+    ensure_project_editable(db, project_id)
     return {
         "status": "ok",
         "data": hard_delete_project_pdf(

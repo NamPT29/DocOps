@@ -14,6 +14,7 @@ from server.services.project_upload_service import (
     get_upload_session,
     write_upload_chunk,
 )
+from server.services.handover_lock_service import ensure_project_editable
 from server.services.api_rate_limit_service import (
     enforce_heavy_api_rate_limit,
     enforce_project_upload_chunk_rate_limit,
@@ -145,6 +146,7 @@ def api_create_project_upload_session(
     db: Session = Depends(get_db),
 ):
     enforce_heavy_api_rate_limit("project-upload-session", current_user["id"], cost=5)
+    ensure_project_editable(db, project_id)
     return {
         "status": "ok",
         "session": create_or_resume_upload_session(

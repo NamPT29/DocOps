@@ -449,6 +449,9 @@ class DictionaryItem(Base):
     dictionary = relationship("Dictionary", back_populates="items")
 
 
+HANDOVER_LOCK_REVISION = {"revision": "0017_project_handover_lock"}
+
+
 class Project(Base):
     """A project pins one configured template and one folder hierarchy."""
 
@@ -473,6 +476,15 @@ class Project(Base):
     created_by_user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
     created_at = Column(DateTime, nullable=False, default=get_utc_now)
     updated_at = Column(DateTime, nullable=False, default=get_utc_now, onupdate=get_utc_now)
+    # Khóa sửa hồ sơ sau bàn giao (K1): có giá trị = dự án đã bàn giao, mọi thao tác sửa hồ sơ trả 423.
+    handover_locked_at = Column(DateTime, nullable=True, info=HANDOVER_LOCK_REVISION)
+    handover_locked_by_user_id = Column(
+        Integer,
+        ForeignKey("users.id", name="fk_projects_handover_locked_by_user_id"),
+        nullable=True,
+        info=HANDOVER_LOCK_REVISION,
+    )
+    handover_lock_note = Column(String(1000), nullable=True, info=HANDOVER_LOCK_REVISION)
 
     __table_args__ = (
         CheckConstraint("case_level >= 1", name="ck_projects_case_level"),

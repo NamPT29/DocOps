@@ -6,7 +6,7 @@ from server.main import app
 from server.database import get_db, SessionLocal
 from server.models import User, Project, ProjectCase, ProjectStage, ProjectStageMember, Template
 from server.models_paper import CasePaperHandoff
-from server.migration_runner import HEAD_REVISION, upgrade_database
+from server.migration_runner import upgrade_database
 from openpyxl import load_workbook
 import io
 import time
@@ -354,17 +354,15 @@ def test_9_pragma_foreign_keys(test_db):
     assert count == 0
 
 def test_10_migration_additive(engine_with_fks):
-    assert HEAD_REVISION == "0016_case_paper_handoffs"
-    
     from server.migration_runner import validate_existing_database
     from alembic.config import Config
     from alembic import command
     alembic_cfg = Config("alembic.ini")
-    
-    # Ensure starting at head (0016)
+
+    # Nâng đúng tới 0016 (head đã lên 0017 ở K1)
     with engine_with_fks.begin() as connection:
         alembic_cfg.attributes["connection"] = connection
-        command.upgrade(alembic_cfg, "head")
+        command.upgrade(alembic_cfg, "0016_case_paper_handoffs")
 
     Session = type(SessionLocal)(bind=engine_with_fks)
     db = Session()

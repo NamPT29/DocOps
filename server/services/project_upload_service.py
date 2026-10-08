@@ -515,6 +515,9 @@ def finalize_upload_session(db, *, session_id):
         return serialize_upload_session(db, session)
 
     project = repository.lock_project(session.project_id)
+    # K1: phiên mở trước khi khóa bàn giao cũng không được thêm PDF sau khi khóa.
+    from server.services.handover_lock_service import ensure_project_editable
+    ensure_project_editable(db, session.project_id)
     upload_files = repository.list_session_files(session.id)
     # A catalogue may have been imported after this session was opened.
     require_catalog_upload_structure(db, project, [item.relative_path for item in upload_files])

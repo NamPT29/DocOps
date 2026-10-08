@@ -91,10 +91,15 @@ class SubmissionService:
             
         # Lấy tất cả submission cùng template
         all_subs = SubmissionRepository(db).list_by_template_id(template_id)
-        
+        # K1: không đồng bộ bìa vào hồ sơ của dự án đã khóa bàn giao.
+        from server.services.handover_lock_service import locked_document_ids
+        locked = locked_document_ids(db, {sub.assigned_document_id for sub in all_subs if sub.assigned_document_id})
+
         updates_count = 0
         for sub in all_subs:
             if sub.id == submission.id:
+                continue
+            if sub.assigned_document_id in locked:
                 continue
             if not sub.folder_path or sub.folder_path == NO_FOLDER_SENTINEL:
                 continue
@@ -179,6 +184,9 @@ class SubmissionService:
         selected = submission_repository.list_by_ids(submission_ids)
         if len(selected) != len(submission_ids):
             raise HTTPException(status_code=404, detail="Có hồ sơ không tồn tại")
+        # K1: một hồ sơ thuộc dự án đã khóa bàn giao thì chặn cả lệnh, chưa ghi gì.
+        from server.services.handover_lock_service import ensure_submissions_editable
+        ensure_submissions_editable(db, selected)
         if current_user["role"] != "admin":
             active_input_user_ids = submission_repository.active_input_user_ids(selected)
             if any(

@@ -24,8 +24,15 @@ class StaticQuery:
     def order_by(self, *args):
         return self
 
+    def join(self, *args):
+        return self
+
     def first(self):
         return self.value
+
+    def all(self):
+        # Truy vấn danh sách (vd. văn bản thuộc dự án đã khóa bàn giao, K1) trả rỗng.
+        return []
 
 
 class StaticDb:

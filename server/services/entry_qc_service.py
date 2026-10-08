@@ -367,7 +367,9 @@ def _check_round2_item_access(db, project_id, case_id, submission_id, actor):
 
 def check_round2_item(db, project_id, case_id, submission_id, request_data: dict, actor):
     repo, item, submission = _check_round2_item_access(db, project_id, case_id, submission_id, actor)
-    
+    from server.services.handover_lock_service import ensure_submission_editable
+    ensure_submission_editable(db, submission)
+
     # Needs a separate lock for update
     item = repo.get_sample_item_for_update(case_id, 2, submission_id)
 

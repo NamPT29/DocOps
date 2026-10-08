@@ -360,8 +360,7 @@ file đã bị xóa); menu dự án "Tải biên bản bàn giao".
   tổng số trang kể cả bìa, dung lượng, SHA-256 của `SHA256SUMS.txt` = mã kiểm tra toàn gói, SHA-256
   của `Metadata_NN-SIP.xlsx`); số hồ sơ chưa đóng gói (chưa sẵn sàng + lỗi chép); danh sách hồ sơ
   (mã, tiêu đề mục lục, số văn bản, số trang); chỗ ký hai bên.
-- Chưa làm (sau 10/10): khóa dự án sau bàn giao. Cần chặn mọi đường sửa hồ sơ (lưu, sửa, kiểm tra,
-  đồng bộ bìa, xóa, thao tác hàng loạt) của văn bản đã đóng gói, nên không làm gấp trước chạy thật.
+- Khóa dự án sau bàn giao: xem mục "Khóa sửa hồ sơ sau bàn giao (K1)".
 
 ## Sổ giao nhận hồ sơ giấy (H1, FR-ARR-02, revision 0016)
 
@@ -407,6 +406,23 @@ Excel 5 sheet: "Tổng hợp" (mỗi mã: số dòng theo từng kết quả) v�
 | R2 | Gói S `done` mới nhất của hộp ↔ file nhập liệu của hộp (đường dẫn tính từ thư mục hộp, chỉ PDF, không phân biệt hoa thường, `\` như `/`) | Khớp / Thiếu ở nhập liệu / Thừa ở nhập liệu / Khác dung lượng / Hộp chưa có gói scan |
 | R3 | File nhập liệu (trừ bìa) ↔ hồ sơ nhập | Đạt (đúng 1 hồ sơ, Hoàn thành) / Chưa nhập / Chưa hoàn thành (trạng thái) / Nhiều hồ sơ (n) |
 | R4 | Số trang gói S `done` mới nhất (file PDF đọc được) ↔ tổng số tờ mục lục của hộp | Hợp lý (tờ ≤ trang ≤ 2 × tờ + số hồ sơ) / Ít trang hơn số tờ / Nhiều hơn 2 lần số tờ / Thiếu dữ liệu |
+
+## Khóa sửa hồ sơ sau bàn giao (K1, revision 0017_project_handover_lock)
+
+- Cột mới trong `projects`: `handover_locked_at`, `handover_locked_by_user_id`, `handover_lock_note`. SQLite thêm cột
+  bằng ALTER TABLE ADD COLUMN, không dựng lại bảng `projects` (dựng lại khi đang bật khóa ngoại sẽ xóa dây chuyền).
+- `POST /api/projects/{pid}/handover-lock {note}` (Admin): cần lần đóng gói bàn giao gần nhất ở trạng thái xong, không thì
+  409 `package_required`. `DELETE /api/projects/{pid}/handover-lock {reason}` (Admin): lý do bắt buộc (400
+  `reason_required`), ghi nhật ký audit `server.audit.handover_lock` kèm người và lý do. Danh sách dự án trả thêm
+  `handover_locked_at`.
+- Khi khóa, mọi thao tác sửa hồ sơ nhập của dự án trả 423 `project_handed_over` ("Dự án đã bàn giao, không sửa được hồ
+  sơ. Admin mở khóa nếu cần sửa."), không ghi gì: lưu hồ sơ mới cho văn bản (`POST /api/submit`), sửa, sửa khi kiểm tra,
+  duyệt, đánh dấu đã kiểm, mở lại duyệt, người nhập xác nhận sửa, đánh dấu lỗi, xóa, thao tác hàng loạt (một hồ sơ khóa
+  thì chặn cả lệnh), check phiếu mẫu vòng 2, thêm PDF vào dự án (tạo và hoàn tất phiên tải), xóa PDF dự án. Đồng bộ bìa
+  bỏ qua hồ sơ của dự án đã khóa. Nhân bản (`POST /api/submissions/{id}/copy`) vốn luôn trả 409, nhân bản thật đi qua
+  `POST /api/submit` nên đã bị chặn.
+- Không chặn: xem hồ sơ, giữ chỗ xem (`PUT/DELETE /api/submissions/{id}/view`), xuất Excel, kế hoạch chuẩn hóa, đối
+  soát. Hồ sơ không gắn file của dự án nào (luồng cũ) không bị khóa.
 
 ## Việc sau 10/10
 
