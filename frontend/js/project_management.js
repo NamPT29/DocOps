@@ -329,6 +329,12 @@ async function loadProjectList() {
                     trackExport: true,
                 },
                 {
+                    label: 'Đối soát R1–R4 (Excel)',
+                    icon: 'fa-scale-balanced',
+                    handler: () => downloadReconciliation(project),
+                    trackExport: true,
+                },
+                {
                     label: 'Đóng gói bàn giao',
                     icon: 'fa-box',
                     handler: () => startHandoverPackage(project),

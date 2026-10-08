@@ -395,6 +395,19 @@ file đã bị xóa); menu dự án "Tải biên bản bàn giao".
   sản lượng 14 ngày dạng thanh ngang (ngày lớn nhất 100%, không dùng thư viện biểu đồ), bảng người 7 ngày, nút Làm mới;
   lỗi hiện trong hộp thoại.
 
+## Đối soát R1–R4 (giả định reviewer, chờ đối chiếu BA) (R1)
+
+BA gốc có R1–R4 nhưng không có trong repo; đây là 4 phép đối soát hợp lý nhất từ dữ liệu đang có.
+`GET /api/projects/{pid}/reconciliation[?format=json]` (Admin, chỉ đọc); menu dự án "Đối soát R1–R4 (Excel)".
+Excel 5 sheet: "Tổng hợp" (mỗi mã: số dòng theo từng kết quả) và 4 sheet chi tiết; dòng lệch tô màu.
+
+| Mã | Đối soát | Kết quả mỗi dòng |
+|---|---|---|
+| R1 | Mục lục ↔ thư mục hồ sơ của file nhập liệu (hộp + số hồ sơ + hậu tố) | Khớp / Thiếu thư mục / Thừa thư mục (kể cả tên thư mục không đọc được số hồ sơ) |
+| R2 | Gói S `done` mới nhất của hộp ↔ file nhập liệu của hộp (đường dẫn tính từ thư mục hộp, chỉ PDF, không phân biệt hoa thường, `\` như `/`) | Khớp / Thiếu ở nhập liệu / Thừa ở nhập liệu / Khác dung lượng / Hộp chưa có gói scan |
+| R3 | File nhập liệu (trừ bìa) ↔ hồ sơ nhập | Đạt (đúng 1 hồ sơ, Hoàn thành) / Chưa nhập / Chưa hoàn thành (trạng thái) / Nhiều hồ sơ (n) |
+| R4 | Số trang gói S `done` mới nhất (file PDF đọc được) ↔ tổng số tờ mục lục của hộp | Hợp lý (tờ ≤ trang ≤ 2 × tờ + số hồ sơ) / Ít trang hơn số tờ / Nhiều hơn 2 lần số tờ / Thiếu dữ liệu |
+
 ## Việc sau 10/10
 
 - Luồng cũ (giao tài liệu lẻ, nhập thư mục máy chủ) vẫn chỉ nhận tài khoản thường làm người nhập;

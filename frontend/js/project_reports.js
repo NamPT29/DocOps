@@ -384,6 +384,28 @@ async function downloadNormalizationPlan(project) {
     }
 }
 
+// Đối soát R1–R4 (lát R1, chỉ đọc): Excel 5 sheet, dòng lệch tô màu.
+async function downloadReconciliation(project) {
+    if (!project || !Number(project.id)) return false;
+    setProjectExportStatus(`Đang đối soát “${project.name}”...`);
+    try {
+        const response = await authFetch(`/api/projects/${Number(project.id)}/reconciliation`);
+        if (!response) return false;
+        if (!response.ok) {
+            const errorData = await response.json().catch(() => ({}));
+            const detail = errorData.detail;
+            throw new Error((detail && detail.message) || formatApiErrorDetail(detail || errorData.message));
+        }
+        await downloadExportResponse(response, `Doi_soat_${Number(project.id)}.xlsx`);
+        setProjectExportStatus(`Đã tải đối soát R1–R4 của “${project.name}”. Xem sheet "Tổng hợp", dòng tô màu là chỗ lệch.`);
+        return true;
+    } catch (error) {
+        setProjectExportStatus(error.message, true);
+        alert(`Lỗi đối soát: ${error.message}`);
+        return false;
+    }
+}
+
 // Đóng gói bàn giao (G2): máy chủ chép file theo kế hoạch chuẩn hóa vào thư mục bàn giao, chạy nền.
 const HANDOVER_POLL_MS = 3000;
 

@@ -19,6 +19,7 @@ from server.services.project_admin_service import (
 from server.services.project_policy_service import get_project_policy, update_project_policy
 from server.services.normalization_plan_service import ascii_name, build_plan, plan_workbook
 from server.services.project_dashboard_service import build_dashboard
+from server.services.reconciliation_service import build_reconciliation, reconciliation_workbook
 from server.services.handover_package_service import read_job, report_path, start_package
 from server.services.project_workspace_service import get_project_workspace
 from server.services.export_job_service import (
@@ -206,6 +207,25 @@ def api_get_normalization_plan(
     filename = f"Ke_hoach_chuan_hoa_{ascii_name(plan['project']['name']) or project_id}.xlsx"
     return Response(
         content=plan_workbook(plan),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@router.get("/{project_id}/reconciliation")
+def api_get_reconciliation(
+    project_id: int,
+    format: Literal["xlsx", "json"] = "xlsx",
+    current_user: dict = Depends(get_admin_user),
+    db: Session = Depends(get_db),
+):
+    """Đối soát R1–R4 (chỉ đọc; giả định reviewer, chờ đối chiếu BA)."""
+    report = build_reconciliation(db, project_id=project_id)
+    if format == "json":
+        return {"status": "ok", "data": {"project": report["project"], "summary": report["summary"]}}
+    filename = f"Doi_soat_{ascii_name(report['project']['name']) or project_id}.xlsx"
+    return Response(
+        content=reconciliation_workbook(report),
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )

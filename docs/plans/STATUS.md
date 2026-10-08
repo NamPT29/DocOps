@@ -75,7 +75,7 @@ Làm lần lượt; lát trước được reviewer duyệt mới làm lát sau.
 - [x] H1b (reviewer) Sổ giao nhận hồ sơ giấy: giao diện (modal #paperHandoffModal, chỉ mốc kế tiếp có nút Ghi, Xóa mốc cuối, giờ VN, lỗi trong modal, Tải Excel); paper_handoff.js v1.00, project_management.js v2.20, admin-page.js v7
 - [x] D1 (reviewer) Bảng tiến độ dự án: API GET /api/projects/{pid}/dashboard (hộp theo bước, khối lượng, văn bản, 14 ngày giờ VN, dự kiến xong, người 7 ngày, định mức QC-10)
 - [x] D2 (reviewer) Bảng tiến độ dự án: giao diện (3 ô số, bảng hạng mục, thanh 14 ngày, bảng người, Làm mới); project_dashboard.js v1.00, project_management.js v2.21, admin-page.js v8
-- [ ] R1 Đối soát R1–R4 (Excel, giả định reviewer)
+- [x] R1 (reviewer) Đối soát R1–R4 (Excel, giả định reviewer, chờ BA): GET /api/projects/{pid}/reconciliation; menu "Đối soát R1–R4 (Excel)"; project_reports.js v1.04, project_management.js v2.22
 - [ ] K1a Khóa sửa hồ sơ sau bàn giao (thay G4): CSDL + API + chặn, revision 0017_project_handover_lock
 - [ ] K1b Khóa sửa hồ sơ sau bàn giao: giao diện
 - [ ] P1a Chi trả theo sản lượng: đơn giá + bảng tạm tính (API, Excel), revision 0018_project_work_rates
