@@ -377,7 +377,7 @@ file đã bị xóa); menu dự án "Tải biên bản bàn giao".
 - Hộp sắp theo số hộp (thành phần cuối của case_key, quy tắc B0) rồi tên hộp theo thứ tự tự nhiên (QC-12).
 - Giao diện (H1b): admin.html, menu dự án "Sổ giao nhận hồ sơ giấy"; mỗi hộp một dòng, chỉ mốc kế tiếp có nút Ghi, Xóa chỉ ở mốc cuối cùng; giờ hiện theo giờ Việt Nam; lỗi hiện trong hộp thoại; nút Tải Excel. Nhân viên Chỉnh lý/Scan có quyền API nhưng chưa có giao diện ở index.html (làm sau 10/10).
 
-## Bảng tiến độ dự án (D1)
+## Bảng tiến độ dự án (D1, D2)
 
 `GET /api/projects/{pid}/dashboard` (Admin, chỉ đọc), theo sổ BM-TKDA (tài liệu phân tích mẫu, mục 6):
 - `stages`: mỗi bước đang bật, theo thứ tự quy trình: số hộp xong / đang làm / trả lại / chờ, % hộp xong, khối lượng
@@ -391,6 +391,9 @@ file đã bị xóa); menu dự án "Tải biên bản bàn giao".
   không có lượt duyệt nào thì để trống.
 - `people`: 7 ngày gần nhất, mỗi người có số liệu: nhập, duyệt, trang scan (người scan đã chọn khi Nộp S).
 - `norms`: định mức QC-10 để so năng suất (giả định trừ SC-A4-1 lấy từ sổ mẫu).
+- Giao diện (D2): menu dự án "Bảng tiến độ": 3 ô số (văn bản hoàn thành, còn lại, dự kiến xong), bảng hạng mục,
+  sản lượng 14 ngày dạng thanh ngang (ngày lớn nhất 100%, không dùng thư viện biểu đồ), bảng người 7 ngày, nút Làm mới;
+  lỗi hiện trong hộp thoại.
 
 ## Việc sau 10/10
 

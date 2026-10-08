@@ -254,6 +254,11 @@ async function loadProjectList() {
                     handler: () => openProjectWorkflow(project.id),
                 },
                 {
+                    label: 'Bảng tiến độ',
+                    icon: 'fa-gauge-high',
+                    handler: () => openProjectDashboard(project),
+                },
+                {
                     label: 'Chính sách dự án',
                     icon: 'fa-sliders',
                     handler: () => openProjectPolicy(project.id),
