@@ -16,7 +16,7 @@ import os
 import re
 import threading
 import unicodedata
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from fastapi import HTTPException
@@ -24,6 +24,7 @@ from openpyxl import Workbook
 from openpyxl.styles import Font
 
 from server.repositories.normalization_repository import NormalizationRepository
+from server.services.docx_writer import build_docx, paragraph, table
 from server.services.normalization_plan_service import build_plan
 
 logger = logging.getLogger("server.handover")
@@ -57,6 +58,8 @@ VB_LABEL_ALIASES = {
 }
 UPPERCASE_FIELDS = {"typeName", "organName"}  # QC-01: IN HOA
 ACTIVE_STATES = {"queued", "running"}
+REPORT_FILENAME = "Bien_ban_ban_giao.docx"
+VIETNAM = timezone(timedelta(hours=7))
 STATUS_EVERY_FILES = 20
 _CHUNK = 1024 * 1024
 
@@ -246,6 +249,7 @@ def collect_package(db, project_id: int) -> dict:
             entries[document_id] = {}
     return {
         "project": plan["project"],
+        "organ_code": plan["organ_code"],
         "root": plan["root"],
         "columns": columns,
         "ready": [
@@ -361,6 +365,65 @@ def _write_outputs(root_dir: Path, context: dict, packaged: list, pages: dict, r
         [row["relative_path"], row["target_path"], row["error"]] for row in results if row["result"] == "Lỗi"
     ])
     log.save(root_dir / "Nhat_ky_dong_goi.xlsx")
+    (root_dir / REPORT_FILENAME).write_bytes(handover_report(root_dir, context, packaged, pages, failed))
+
+
+def _size_text(size: int) -> str:
+    for unit, factor in (("GB", 1024 ** 3), ("MB", 1024 ** 2), ("KB", 1024)):
+        if size >= factor:
+            return f"{size / factor:.2f} {unit}".replace(".", ",")
+    return f"{size} byte"
+
+
+def handover_report(root_dir: Path, context: dict, packaged: list, pages: dict, failed: list) -> bytes:
+    """Biên bản bàn giao (G3): số liệu gói, danh sách hồ sơ, mã kiểm tra SHA-256, chỗ ký hai bên."""
+    now = datetime.now(VIETNAM)
+    documents = sum(1 for items in packaged for item in items if item["kind"] != "Bìa")
+    page_values = [pages.get(item["target_path"]) for items in packaged for item in items]
+    total_pages = sum(value for value in page_values if value is not None)
+    total_bytes = sum(item["size"] for items in packaged for item in items)
+    sums_hash = _sha256(root_dir / "SHA256SUMS.txt")
+    metadata_hash = _sha256(root_dir / "Metadata_NN-SIP.xlsx")
+    rows = []
+    for index, items in enumerate(packaged, start=1):
+        dossier_pages = [pages.get(item["target_path"]) for item in items]
+        rows.append([
+            index, items[0]["dossier_code"], clean_text(items[0]["dossier"]["title"]),
+            sum(1 for item in items if item["kind"] != "Bìa"),
+            sum(value for value in dossier_pages if value is not None),
+        ])
+    not_packaged = len(context["skipped"]) + len(failed)
+    blocks = [
+        table([], [["", "CỘNG HÒA XÃ HỘI CHỦ NGHĨA VIỆT NAM\nĐộc lập - Tự do - Hạnh phúc"]], [3600, 6000], borders=False, size=13),
+        paragraph(f"……………, ngày {now:%d} tháng {now:%m} năm {now:%Y}", italic=True, align="right"),
+        paragraph("BIÊN BẢN BÀN GIAO TÀI LIỆU SỐ HÓA", bold=True, size=14, align="center", space_after=12),
+        paragraph(f"Dự án: {context['project']['name']}"),
+        paragraph(f"Mã cơ quan: {context['organ_code']}"),
+        paragraph("Bên giao: ……………………………………………………………………"),
+        paragraph("Bên nhận: ……………………………………………………………………"),
+        paragraph("Hai bên thống nhất bàn giao gói tài liệu số hóa như sau:", space_after=6),
+        table([], [
+            ["Thư mục gói", context["root"]],
+            ["Số hồ sơ", len(packaged)],
+            ["Số văn bản", documents],
+            ["Tổng số trang (kể cả bìa)", total_pages],
+            ["Tổng dung lượng", _size_text(total_bytes)],
+            ["Metadata", "Metadata_NN-SIP.xlsx (Metadata_HS, MetadataVB)"],
+            ["Mã kiểm tra toàn gói (SHA-256 của SHA256SUMS.txt)", sums_hash],
+            ["SHA-256 của Metadata_NN-SIP.xlsx", metadata_hash],
+        ], [3600, 6000]),
+        paragraph(
+            "Mỗi file trong gói có mã SHA-256 ghi ở SHA256SUMS.txt; bên nhận kiểm bằng lệnh "
+            "\"sha256sum -c SHA256SUMS.txt\" trong thư mục gói."
+            + (f" Còn {not_packaged} hồ sơ chưa đóng gói (xem Nhat_ky_dong_goi.xlsx)." if not_packaged else ""),
+            italic=True, size=12, space_after=10,
+        ),
+        paragraph("Danh sách hồ sơ bàn giao", bold=True),
+        table(["STT", "Mã hồ sơ", "Tiêu đề hồ sơ", "Số văn bản", "Số trang"], rows, [700, 2600, 4300, 1000, 1000]),
+        paragraph("", space_after=12),
+        table([], [["ĐẠI DIỆN BÊN GIAO\n(Ký, ghi rõ họ tên)", "ĐẠI DIỆN BÊN NHẬN\n(Ký, ghi rõ họ tên)"]], [4800, 4800], borders=False),
+    ]
+    return build_docx(blocks)
 
 
 def run_package(project_id: int, session_factory, *, requested_by: int | None = None) -> dict:
@@ -409,6 +472,7 @@ def run_package(project_id: int, session_factory, *, requested_by: int | None = 
             for items in context["ready"] if items[0]["dossier_code"] in failed_codes
         ]
         _write_outputs(root_dir, context, packaged, pages, results, failed)
+        job["report_file"] = REPORT_FILENAME
         job.update({
             "state": "done", "finished_at": _now(), "dossiers_packaged": len(packaged),
             "error_count": len(errors), "errors": errors[:50],
@@ -485,3 +549,14 @@ def fail_stale_package_jobs() -> int:
             _release_lock(project_id)
             failed += 1
     return failed
+
+
+def report_path(project_id: int) -> Path:
+    """Biên bản của lần đóng gói xong gần nhất; 404 nếu chưa có."""
+    job = read_job(project_id) or {}
+    if job.get("state") != "done" or not job.get("root"):
+        raise HTTPException(status_code=404, detail="Chưa có lần đóng gói nào xong cho dự án này")
+    path = handover_dir() / job["root"] / REPORT_FILENAME
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail="Không tìm thấy biên bản bàn giao; hãy đóng gói lại")
+    return path

@@ -2,7 +2,7 @@ from datetime import datetime
 from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
-from fastapi.responses import Response
+from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.orm import Session
 
@@ -18,7 +18,7 @@ from server.services.project_admin_service import (
 )
 from server.services.project_policy_service import get_project_policy, update_project_policy
 from server.services.normalization_plan_service import ascii_name, build_plan, plan_workbook
-from server.services.handover_package_service import read_job, start_package
+from server.services.handover_package_service import read_job, report_path, start_package
 from server.services.project_workspace_service import get_project_workspace
 from server.services.export_job_service import (
     ExportJobBusyError,
@@ -229,6 +229,19 @@ def api_get_handover_package(
     current_user: dict = Depends(get_admin_user),
 ):
     return {"status": "ok", "data": read_job(project_id) or {"project_id": project_id, "state": "none"}}
+
+
+@router.get("/{project_id}/handover-package/report")
+def api_download_handover_report(
+    project_id: int,
+    current_user: dict = Depends(get_admin_user),
+):
+    """Biên bản bàn giao (G3) của lần đóng gói xong gần nhất."""
+    return FileResponse(
+        report_path(project_id),
+        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        filename=f"Bien_ban_ban_giao_du_an_{project_id}.docx",
+    )
 
 
 @router.get("/{project_id}/submission-folders")

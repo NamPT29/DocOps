@@ -313,8 +313,7 @@ Code: `server/services/normalization_plan_service.py`, `server/repositories/norm
   đề) và "Kế hoạch đổi tên" (mỗi file một dòng; cột Vấn đề tô màu). Vấn đề: chưa có Mã cơ quan;
   file không nằm đúng `<Hộp>/<Hồ sơ>/`; tên thư mục không đọc được số; hồ sơ không có trong mục lục;
   THBQ ngoài QC-13; văn bản chưa "Hoàn thành" nhập liệu (trạng thái của lần lưu mới nhất).
-- Lát tiếp theo: G3 biên bản bàn giao tự sinh + khóa dự án. PDF/A và ký số làm ngoài hệ thống (BA);
-  file đã ký thêm hậu tố `_signed` (QC-04) do công cụ ký tạo.
+- PDF/A và ký số làm ngoài hệ thống (BA); file đã ký thêm hậu tố `_signed` (QC-04) do công cụ ký tạo.
 
 ## Đóng gói bàn giao (08/10, G2)
 
@@ -349,6 +348,21 @@ hỏi tiến độ mỗi 3 giây). Biến `HANDOVER_DIR` (mặc định thư m�
     đóng gói (lý do), Lỗi chép file.
 - Hồ sơ xuất DANG-HD40 chưa hỗ trợ: gói luôn theo NN-SIP.
 
+## Biên bản bàn giao (08/10, G3)
+
+Code: `handover_report` trong `server/services/handover_package_service.py`, bộ ghi Word tối giản
+`server/services/docx_writer.py` (không thêm thư viện; .docx = zip các tệp XML, A4, Times New Roman);
+`GET /api/projects/{pid}/handover-package/report` (chỉ Admin; 404 khi chưa có lần đóng gói xong hoặc
+file đã bị xóa); menu dự án "Tải biên bản bàn giao".
+
+- Mỗi lần đóng gói xong ghi `Bien_ban_ban_giao.docx` vào thư mục gói: quốc hiệu, ngày (giờ Việt Nam),
+  dự án, mã cơ quan, dòng trống Bên giao/Bên nhận; bảng số liệu (thư mục gói, số hồ sơ, số văn bản,
+  tổng số trang kể cả bìa, dung lượng, SHA-256 của `SHA256SUMS.txt` = mã kiểm tra toàn gói, SHA-256
+  của `Metadata_NN-SIP.xlsx`); số hồ sơ chưa đóng gói (chưa sẵn sàng + lỗi chép); danh sách hồ sơ
+  (mã, tiêu đề mục lục, số văn bản, số trang); chỗ ký hai bên.
+- Chưa làm (sau 10/10): khóa dự án sau bàn giao. Cần chặn mọi đường sửa hồ sơ (lưu, sửa, kiểm tra,
+  đồng bộ bìa, xóa, thao tác hàng loạt) của văn bản đã đóng gói, nên không làm gấp trước chạy thật.
+
 ## Việc sau 10/10
 
 - Luồng cũ (giao tài liệu lẻ, nhập thư mục máy chủ) vẫn chỉ nhận tài khoản thường làm người nhập;
@@ -358,6 +372,7 @@ hỏi tiến độ mỗi 3 giây). Biến `HANDOVER_DIR` (mặc định thư m�
 - Chấm công KPI scan theo chuỗi tên người scan (`scanned_by_name`).
 - Nộp S: mở lại hộp thoại khi gói của hộp đang `processing` thì chưa tự hỏi tiến độ lại
   (chỉ hiện trong danh sách các lần nộp).
+- Khóa dự án/hồ sơ sau khi ký biên bản bàn giao (G3 mới có biên bản, chưa khóa sửa).
 - Bìa (như hệ thống mẫu): khung bìa riêng có nút "Lưu" bìa; Số tờ để trống thì tự cộng số tờ các
   văn bản đã lưu (cần biểu mẫu có cột số tờ của văn bản).
 

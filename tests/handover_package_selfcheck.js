@@ -17,6 +17,7 @@ let requests = [];
 let replies = [];
 let alerts = [];
 let confirmAnswer = true;
+const downloads = [];
 const reply = (status, body) => ({ ok: status >= 200 && status < 300, status, json: async () => body });
 
 const sandbox = {
@@ -27,6 +28,7 @@ const sandbox = {
         return replies.shift();
     },
     formatApiErrorDetail: detail => String(detail),
+    async downloadExportResponse(response, fallback) { downloads.push({ response, fallback }); },
     alert: message => alerts.push(message),
     confirm: () => confirmAnswer,
 };
@@ -90,9 +92,23 @@ const start = () => withTimeout(sandbox.startHandoverPackage(project, { pollMs: 
     assert.equal(await start(), null);
     assert.match(alerts[0], /vẫn đang chạy trên máy chủ/);
 
+    // Tải biên bản (G3): gọi đúng API, đưa phản hồi cho hàm tải file; chưa đóng gói thì báo lỗi
+    requests = []; alerts = [];
+    const report = reply(200, {});
+    replies = [report];
+    assert.equal(await withTimeout(sandbox.downloadHandoverReport(project), 'tải biên bản'), true);
+    assert.deepEqual(requests.map(r => `${r.method} ${r.url}`), ['GET /api/projects/7/handover-package/report']);
+    assert.deepEqual(downloads, [{ response: report, fallback: 'Bien_ban_ban_giao_du_an_7.docx' }]);
+    assert.equal(status.textContent, 'Đã tải biên bản bàn giao của “Bộ Y tế”.');
+    replies = [reply(404, { detail: 'Chưa có lần đóng gói nào xong cho dự án này' })];
+    assert.equal(await withTimeout(sandbox.downloadHandoverReport(project), 'biên bản 404'), false);
+    assert.equal(downloads.length, 1);
+    assert.deepEqual(alerts, ['Lỗi tải biên bản: Chưa có lần đóng gói nào xong cho dự án này']);
+
     const menu = fs.readFileSync('frontend/js/project_management.js', 'utf8');
+    assert.match(menu, /label: 'Tải biên bản bàn giao',\s*icon: 'fa-file-signature',\s*handler: \(\) => downloadHandoverReport\(project\)/);
     assert.match(menu, /label: 'Đóng gói bàn giao',\s*icon: 'fa-box',\s*handler: \(\) => startHandoverPackage\(project\)/);
-    assert(fs.readFileSync('frontend/admin.html', 'utf8').includes('js/project_reports.js?v=1.02'));
+    assert(fs.readFileSync('frontend/admin.html', 'utf8').includes('js/project_reports.js?v=1.03'));
     console.log('Handover package self-check: OK');
 })().catch(error => {
     console.error(error);

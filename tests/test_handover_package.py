@@ -349,3 +349,83 @@ def test_endpoints_are_admin_only_and_report_status(world, monkeypatch):
     response = projects.api_start_handover_package(project_id, current_user=ADMIN, db=world["db"])
     assert response["data"]["state"] == "queued" and started == [f"handover-{project_id}"]
     assert projects.api_get_handover_package(project_id, current_user=ADMIN)["data"]["state"] == "queued"
+
+
+def report_text(path):
+    import re
+    import zipfile
+    from xml.etree import ElementTree
+
+    with zipfile.ZipFile(path) as archive:
+        assert {"[Content_Types].xml", "_rels/.rels", "word/document.xml"} <= set(archive.namelist())
+        root = ElementTree.fromstring(archive.read("word/document.xml"))
+    namespace = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
+    paragraphs = []
+    for node in root.iter(f"{namespace}p"):
+        paragraphs.append("".join(item.text or "" for item in node.iter(f"{namespace}t")))
+    return "\n".join(paragraphs)
+
+
+def test_handover_report_is_written_with_package_figures(world):
+    run(world)
+    job = package.read_job(world["project"].id)
+    path = world["handover"] / ROOT / package.REPORT_FILENAME
+
+    assert job["report_file"] == package.REPORT_FILENAME and path.is_file()
+    text = report_text(path)
+    sums = world["handover"] / ROOT / "SHA256SUMS.txt"
+    for expected in (
+        "BIÊN BẢN BÀN GIAO TÀI LIỆU SỐ HÓA", "CỘNG HÒA XÃ HỘI CHỦ NGHĨA VIỆT NAM", "Dự án: Bộ Y tế 2026",
+        "Mã cơ quan: H05.02.02", ROOT, hashlib.sha256(sums.read_bytes()).hexdigest(),
+        hashlib.sha256((world["handover"] / ROOT / "Metadata_NN-SIP.xlsx").read_bytes()).hexdigest(),
+        "H05.02.02.2006.12", "Tập quyết định 12", "H05.02.02.2006.13a.HC", "ĐẠI DIỆN BÊN GIAO", "ĐẠI DIỆN BÊN NHẬN",
+    ):
+        assert expected in text, expected
+    lines = text.split("\n")  # bảng 2 cột: giá trị ở đoạn ngay sau nhãn
+    value_after = lambda label: lines[lines.index(label) + 1]
+    assert (value_after("Số hồ sơ"), value_after("Số văn bản"), value_after("Tổng số trang (kể cả bìa)")) == ("2", "3", "10")
+    assert "Còn 1 hồ sơ chưa đóng gói" in text
+
+
+def test_report_counts_failed_dossiers_as_not_packaged(world):
+    world["files"]["0001/013a/1.pdf"]["storage"].unlink()
+    run(world)
+    text = report_text(world["handover"] / ROOT / package.REPORT_FILENAME)
+    lines = text.split("\n")
+
+    assert lines[lines.index("Số hồ sơ") + 1] == "1"
+    assert "Còn 2 hồ sơ chưa đóng gói" in text
+    assert "H05.02.02.2006.13a.HC" not in text
+
+
+def test_report_download_endpoint(world):
+    project_id = world["project"].id
+    route = next(r for r in projects.router.routes if r.path.endswith("/handover-package/report"))
+    assert projects.get_admin_user in {d.call for d in route.dependant.dependencies}
+    with pytest.raises(HTTPException) as error:
+        projects.api_download_handover_report(project_id, current_user=ADMIN)
+    assert error.value.status_code == 404
+
+    run(world)
+    response = projects.api_download_handover_report(project_id, current_user=ADMIN)
+    assert Path(response.path) == world["handover"] / ROOT / package.REPORT_FILENAME
+    assert response.media_type.endswith("wordprocessingml.document")
+    assert f"Bien_ban_ban_giao_du_an_{project_id}.docx" in response.headers["content-disposition"]
+
+    (world["handover"] / ROOT / package.REPORT_FILENAME).unlink()
+    with pytest.raises(HTTPException) as error:
+        projects.api_download_handover_report(project_id, current_user=ADMIN)
+    assert error.value.status_code == 404 and "đóng gói lại" in error.value.detail
+
+
+def test_docx_writer_escapes_text_and_keeps_line_breaks():
+    from server.services.docx_writer import build_docx, paragraph, table
+
+    content = build_docx([paragraph("A <b> & \"c\"\nhai"), table(["x"], [["<y>"]], [1000])])
+    import zipfile
+    from xml.etree import ElementTree
+
+    with zipfile.ZipFile(BytesIO(content)) as archive:
+        xml = archive.read("word/document.xml").decode("utf-8")
+    ElementTree.fromstring(xml)
+    assert "A &lt;b&gt; &amp; \"c\"" in xml and "<w:br/>" in xml and "&lt;y&gt;" in xml

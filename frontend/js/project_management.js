@@ -324,6 +324,12 @@ async function loadProjectList() {
                     handler: () => startHandoverPackage(project),
                     trackExport: true,
                 },
+                {
+                    label: 'Tải biên bản bàn giao',
+                    icon: 'fa-file-signature',
+                    handler: () => downloadHandoverReport(project),
+                    trackExport: true,
+                },
             ],
         );
         actionCell.append(projectActions);

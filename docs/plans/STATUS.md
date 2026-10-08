@@ -66,4 +66,5 @@ Cổng: python scripts/gate.py  (dùng --static để kiểm nhanh)
 ## Chuẩn hóa và Bàn giao (nhánh claude/nice-hamilton-7pg8bk)
 - [x] G1 Kế hoạch chuẩn hóa (chỉ đọc): GET /api/projects/{pid}/normalization-plan, Excel mã hồ sơ/mã văn bản/đường dẫn bàn giao QC-03/QC-04 + vấn đề từng file; menu dự án "Kế hoạch chuẩn hóa (Excel)"; project_reports.js v1.01, project_management.js v2.17
 - [x] G2 Đóng gói bàn giao: POST/GET /api/projects/{pid}/handover-package, chép file theo kế hoạch G1 vào HANDOVER_DIR (kiểm SHA-256, chạy lại bỏ qua file đúng), Metadata_NN-SIP.xlsx + SHA256SUMS.txt + Nhat_ky_dong_goi.xlsx; khóa theo dự án; menu "Đóng gói bàn giao"; project_reports.js v1.02, project_management.js v2.18
-- [ ] G3 Biên bản bàn giao tự sinh + khóa dự án
+- [x] G3 Biên bản bàn giao Bien_ban_ban_giao.docx tự sinh mỗi lần đóng gói (docx_writer.py, không thêm thư viện); GET /api/projects/{pid}/handover-package/report; menu "Tải biên bản bàn giao"; project_reports.js v1.03, project_management.js v2.19
+- [ ] G4 (sau 10/10) Khóa sửa hồ sơ đã bàn giao

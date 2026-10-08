@@ -430,6 +430,26 @@ async function startHandoverPackage(project, { pollMs = HANDOVER_POLL_MS, maxPol
     }
 }
 
+// Biên bản bàn giao (G3) của lần đóng gói xong gần nhất.
+async function downloadHandoverReport(project) {
+    if (!project || !Number(project.id)) return false;
+    try {
+        const response = await authFetch(`/api/projects/${Number(project.id)}/handover-package/report`);
+        if (!response) return false;
+        if (!response.ok) {
+            const errorData = await response.json().catch(() => ({}));
+            throw new Error(formatApiErrorDetail(errorData.detail || errorData.message));
+        }
+        await downloadExportResponse(response, `Bien_ban_ban_giao_du_an_${Number(project.id)}.docx`);
+        setProjectExportStatus(`Đã tải biên bản bàn giao của “${project.name}”.`);
+        return true;
+    } catch (error) {
+        setProjectExportStatus(error.message, true);
+        alert(`Lỗi tải biên bản: ${error.message}`);
+        return false;
+    }
+}
+
 async function restoreProjectManagementNavigation() {
     if (window.location.hash !== '#projects') return false;
     const params = new URLSearchParams(window.location.search);
