@@ -363,11 +363,16 @@ file đã bị xóa); menu dự án "Tải biên bản bàn giao".
 - Chưa làm (sau 10/10): khóa dự án sau bàn giao. Cần chặn mọi đường sửa hồ sơ (lưu, sửa, kiểm tra,
   đồng bộ bìa, xóa, thao tác hàng loạt) của văn bản đã đóng gói, nên không làm gấp trước chạy thật.
 
+## Sổ giao nhận hồ sơ giấy (H1, FR-ARR-02, revision 0016)
+
+Theo dõi 5 mốc giao nhận hồ sơ giấy của hộp (nhận từ khách, giao chỉnh lý, giao scan, trả kho, trả khách).
+Người dùng là admin hoặc nhân viên thuộc tổ chỉnh lý, scan. Mỗi mốc ghi nhận thời gian, người giao, người nhận, ghi chú.
+Dữ liệu lưu ở bảng `case_paper_handoffs` (revision 0016_case_paper_handoffs). Có thể xuất báo cáo Excel cho toàn dự án.
+
 ## Việc sau 10/10
 
 - Luồng cũ (giao tài liệu lẻ, nhập thư mục máy chủ) vẫn chỉ nhận tài khoản thường làm người nhập;
   cân nhắc mở cho Admin theo BA 3.3 (đã chốt giữ nguyên trước khi chạy thật).
-- FR-ARR-02: Theo dõi 5 mốc giao nhận hồ sơ giấy (nhận từ khách, giao chỉnh lý, giao scan, trả kho, trả khách).
 - Check scan phương án (b): hiển thị và mở từng file PDF trên web.
 - Chấm công KPI scan theo chuỗi tên người scan (`scanned_by_name`).
 - Nộp S: mở lại hộp thoại khi gói của hộp đang `processing` thì chưa tự hỏi tiến độ lại

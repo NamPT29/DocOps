@@ -160,6 +160,8 @@ app.include_router(project_uploads.router)
 app.include_router(workflow.catalog_router)
 app.include_router(workflow.router)
 app.include_router(arrangement.router)
+from server.routers import paper_handoffs
+app.include_router(paper_handoffs.router)
 configure_openapi(app)
 
 PDF_STORAGE_PATH = str(settings.pdf_storage_path)

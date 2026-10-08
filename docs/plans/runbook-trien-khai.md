@@ -73,7 +73,7 @@ Chỉ đọc, không sửa gì, không in mật khẩu. Dòng cuối phải là 
 Hai cách, chọn một:
 
 - **Tự động:** khởi động ở bước 5; cửa sổ host in dòng
-  `Database migration: <cũ> -> 0015_entry_qc_round2` (hoặc revision mới nhất của bản bàn giao).
+  `Database migration: <cũ> -> 0016_case_paper_handoffs` (hoặc revision mới nhất của bản bàn giao).
 - **Chạy riêng để xem kết quả trước:** `python scripts/migrate_database.py`. In ra
   `Database upgraded: <cũ> -> <mới>`.
 

@@ -933,3 +933,7 @@ from server.models_scan import (  # noqa: E402,F401
 from server.models_entry_qc import (  # noqa: E402,F401
     CaseEntryQcResult,
 )
+
+from server.models_paper import (  # noqa: E402,F401
+    CasePaperHandoff,
+)
