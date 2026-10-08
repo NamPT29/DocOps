@@ -379,6 +379,36 @@ async function runTimers() {
     find(rows[0], node => node.textContent === 'Nộp S')[0].listeners.click();
     assert.deepEqual(page.opened, [1, 'Hộp 1']);
 
+    // a) Test hộp thoại hiện RA TRƯỚC KHI theo dõi xong (mô phỏng setTimeout chưa chạy mà DOM đã có .show).
+    let modalShownBeforePolling = false;
+    sandbox.bootstrap.Modal = class { show() { modalShownBeforePolling = true; } };
+    let pollerPromiseResolver;
+    const holdPolling = new Promise(resolve => { pollerPromiseResolver = resolve; });
+    sandbox.scanSubmitStartPolling = () => { return { done: holdPolling, stop: () => {} }; };
+    
+    routes = {
+        '/api/documents/server-folders': { handler: () => respond(200, { current_relative_path: '', directories: [] }) },
+        ['/api/projects/7/cases/4/scan-packages']: { handler: () => respond(200, { status: 'ok', data: [{ id: 99, status: 'processing' }] }) }
+    };
+    
+    await sandbox.openScanSubmit(4, 'Hộp Test');
+    // openScanSubmit should finish without waiting for holdPolling to resolve
+    assert.equal(modalShownBeforePolling, true, 'Dialog shown before polling completes');
+    pollerPromiseResolver(null); // release memory
+
+    // b) Test bỏ qua không theo dõi nếu history trả về 'done' sẵn.
+    let pollingStarted = false;
+    sandbox.scanSubmitStartPolling = () => { pollingStarted = true; return { done: Promise.resolve(null), stop: () => {} }; };
+    routes['/api/projects/7/cases/4/scan-packages'].handler = () => respond(200, { status: 'ok', data: [{ id: 99, status: 'done' }] });
+    await sandbox.openScanSubmit(4, 'Hộp Test 2');
+    assert.equal(pollingStarted, false, 'Does not follow already done package');
+
+    // c) Test dọn dẹp: gọi stopScanSubmitPolling khi onScanSubmitHidden.
+    let pollerStopped = false;
+    sandbox.scanSubmitState.poller = { stop: () => { pollerStopped = true; } };
+    sandbox.onScanSubmitHidden();
+    assert.equal(pollerStopped, true, 'onScanSubmitHidden cleans up poller');
+
     console.log('Project scan submit self-check: OK');
 })().catch(error => {
     console.error(error);

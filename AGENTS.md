@@ -39,6 +39,7 @@ check nhập liệu → chuẩn hóa → bàn giao.
 8. Làm ĐỦ mọi mục của prompt, kể cả "BƯỚC 0", sửa tài liệu, gộp nhánh. Đoạn tài liệu reviewer đưa thì chép nguyên văn,
    không tự viết nội dung nghiệp vụ.
 9. Không viết "các bước kiểm tra trên web" cho phần chưa có giao diện; không nói đã kiểm trình duyệt nếu chưa chạy.
+10. Khai báo cáo đã sửa/thêm test hoặc tài liệu nhưng commit thiếu file sẽ bị trả lại toàn bộ lát.
 
 ## Mẫu báo cáo cuối lát (bắt buộc, thiếu mục nào là trả lại)
 ```

@@ -37,9 +37,12 @@ def test_admin_can_send_notification_to_selected_users(tmp_path):
         first_notifications = api_get_notifications({"id": first.id}, db)
         assert first_notifications["unread_count"] == 1
         assert first_notifications["data"][0]["title"] == "Lịch làm việc"
+        assert first_notifications["data"][0]["created_at"].endswith("+00:00")
 
         api_mark_notification_read(1, {"id": first.id}, db)
-        assert api_get_notifications({"id": first.id}, db)["unread_count"] == 0
+        read_notifications = api_get_notifications({"id": first.id}, db)
+        assert read_notifications["unread_count"] == 0
+        assert read_notifications["data"][0]["read_at"].endswith("+00:00")
         assert api_get_notifications({"id": second.id}, db)["unread_count"] == 1
 
         api_mark_all_notifications_read({"id": second.id}, db)

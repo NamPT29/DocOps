@@ -1,3 +1,4 @@
+from datetime import timezone
 from fastapi import HTTPException
 
 from server.database import get_utc_now
@@ -395,7 +396,7 @@ def list_case_events(db, *, project_id, case_id):
             "to_status": event.to_status,
             "actor_user_id": event.actor_user_id,
             "reason": event.reason,
-            "created_at": event.created_at.isoformat() if event.created_at else None,
+            "created_at": event.created_at.replace(tzinfo=timezone.utc).isoformat() if event.created_at else None,
         }
         for event in repository.events_for_case(case_id)
     ]

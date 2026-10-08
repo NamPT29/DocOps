@@ -228,6 +228,7 @@ def test_full_cycle_with_reject_rework_and_audit(world):
     ).json()["data"]
     assert [e["action"] for e in reversed(events)][:3] == ["start", "complete", "start"]
     assert any(e["action"] == "returned" and e["to_status"] == "rejected" for e in events)
+    assert events[0]["created_at"].endswith("+00:00")
 
     # only admins can reopen, and a reason is required
     assert _transition(world, scanner, c1, "scan", "reopen", "x").status_code == 403
