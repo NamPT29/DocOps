@@ -56,7 +56,7 @@ vm.runInContext(fs.readFileSync('frontend/js/project_reports.js', 'utf8'), sandb
     assert.match(menu, /label: 'Kế hoạch chuẩn hóa \(Excel\)',\s*icon: 'fa-list-check',\s*handler: \(\) => downloadNormalizationPlan\(project\)/);
     const html = fs.readFileSync('frontend/admin.html', 'utf8');
     assert(html.includes('js/project_reports.js?v=1.05'), 'admin.html phải nạp project_reports.js?v=1.05');
-    assert(html.includes('js/project_management.js?v=2.23'), 'admin.html phải nạp project_management.js?v=2.23');
+    assert(html.includes('js/project_management.js?v=2.24'), 'admin.html phải nạp project_management.js?v=2.24');
     console.log('Normalization plan self-check: OK');
 })().catch(error => {
     console.error(error);

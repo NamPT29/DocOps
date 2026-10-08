@@ -442,6 +442,9 @@ Theo QC-07, QC-10; phần còn lại là giả định reviewer, chờ BA.
   đơn vị, sản lượng, đơn giá, hệ số, thành tiền làm tròn đồng), tổng theo người, cảnh báo "Chưa có đơn giá <mã>"
   (thành tiền trống, không lỗi). Excel 2 sheet "Tổng theo người", "Chi tiết". Từ ngày sau đến ngày hoặc kỳ quá 92 ngày:
   400. Bảng tạm tính KHÔNG lưu (P2 chốt kỳ).
+- Giao diện (P1b): menu dự án "Chi trả sản lượng": ô đơn giá 3 mã (Lưu đơn giá), chọn từ ngày – đến ngày (mặc định từ
+  ngày 1 tháng này tới hôm nay, giờ Việt Nam), "Xem tạm tính" (bảng theo người + chi tiết, tiền dạng 1.234.567, cảnh
+  báo thiếu đơn giá), "Tải Excel". Lỗi hiện trong hộp thoại.
 
 ## Việc sau 10/10
 

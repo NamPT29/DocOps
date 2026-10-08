@@ -129,7 +129,7 @@ const menuButton = (row, label) => walk(row).find(node => node.tagName === 'BUTT
     }
 
     assert(fs.readFileSync('frontend/admin.html', 'utf8').includes('js/project_reports.js?v=1.05'));
-    assert(fs.readFileSync('frontend/admin.html', 'utf8').includes('js/project_management.js?v=2.23'));
+    assert(fs.readFileSync('frontend/admin.html', 'utf8').includes('js/project_management.js?v=2.24'));
     console.log('Handover lock self-check: OK');
 })().catch(error => {
     console.error(error);

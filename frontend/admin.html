@@ -760,6 +760,61 @@
       </div>
     </div>
 
+    <!-- CHI TRẢ THEO SẢN LƯỢNG (P1b) -->
+    <div class="modal fade" id="payrollModal" tabindex="-1" aria-hidden="true">
+      <div class="modal-dialog modal-xl modal-dialog-scrollable">
+        <div class="modal-content">
+          <div class="modal-header bg-primary text-white">
+            <h5 class="modal-title"><i class="fas fa-money-bill-wave"></i> Chi trả sản lượng – <span id="payrollTitle"></span></h5>
+            <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Đóng"></button>
+          </div>
+          <div class="modal-body">
+            <div id="payrollError" class="alert alert-danger small d-none" role="alert"></div>
+            <h6 class="text-primary">Đơn giá loại 1 (VNĐ / đơn vị)</h6>
+            <div class="row g-2 align-items-end mb-1">
+              <div class="col-md-3">
+                <label class="form-label small fw-semibold" for="payrollRate-NL-1">Nhập liệu NL-1 (văn bản)</label>
+                <input type="number" min="0" step="0.01" class="form-control form-control-sm" id="payrollRate-NL-1">
+              </div>
+              <div class="col-md-3">
+                <label class="form-label small fw-semibold" for="payrollRate-CN-1">Check nhập liệu CN-1 (văn bản)</label>
+                <input type="number" min="0" step="0.01" class="form-control form-control-sm" id="payrollRate-CN-1">
+              </div>
+              <div class="col-md-3">
+                <label class="form-label small fw-semibold" for="payrollRate-SC-A4-1">Scan SC-A4-1 (trang A4)</label>
+                <input type="number" min="0" step="0.01" class="form-control form-control-sm" id="payrollRate-SC-A4-1">
+              </div>
+              <div class="col-md-3">
+                <button type="button" class="btn btn-sm btn-primary w-100" data-admin-action="save-payroll-rates"><i class="fas fa-save"></i> Lưu đơn giá</button>
+              </div>
+            </div>
+            <div id="payrollFactorNote" class="small text-muted mb-3"></div>
+            <h6 class="text-primary">Bảng tạm tính (giờ Việt Nam, gồm cả hai ngày)</h6>
+            <div class="row g-2 align-items-end mb-3">
+              <div class="col-md-3">
+                <label class="form-label small fw-semibold" for="payrollFrom">Từ ngày</label>
+                <input type="date" class="form-control form-control-sm" id="payrollFrom">
+              </div>
+              <div class="col-md-3">
+                <label class="form-label small fw-semibold" for="payrollTo">Đến ngày</label>
+                <input type="date" class="form-control form-control-sm" id="payrollTo">
+              </div>
+              <div class="col-md-3">
+                <button type="button" class="btn btn-sm btn-outline-primary w-100" data-admin-action="preview-payroll"><i class="fas fa-calculator"></i> Xem tạm tính</button>
+              </div>
+              <div class="col-md-3">
+                <button type="button" class="btn btn-sm btn-outline-success w-100" data-admin-action="download-payroll"><i class="fas fa-file-excel"></i> Tải Excel</button>
+              </div>
+            </div>
+            <div id="payrollWarnings" class="alert alert-warning small d-none"></div>
+            <div class="table-responsive mb-3"><table class="table table-sm table-bordered align-middle mb-0" id="payrollPeopleTable"></table></div>
+            <div class="table-responsive"><table class="table table-sm table-bordered align-middle mb-0" id="payrollLinesTable"></table></div>
+          </div>
+          <div class="modal-footer"><button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Đóng</button></div>
+        </div>
+      </div>
+    </div>
+
     <!-- BẢNG TIẾN ĐỘ DỰ ÁN (D2) -->
     <div class="modal fade" id="projectDashboardModal" tabindex="-1" aria-hidden="true">
       <div class="modal-dialog modal-xl modal-dialog-scrollable">
@@ -1273,7 +1328,8 @@
     <script src="js/project_reports.js?v=1.05"></script>
     <script src="js/paper_handoff.js?v=1.00"></script>
     <script src="js/project_dashboard.js?v=1.00"></script>
-    <script src="js/project_management.js?v=2.23"></script>
+    <script src="js/payroll.js?v=1.00"></script>
+    <script src="js/project_management.js?v=2.24"></script>
     <script src="js/project_scan_submit.js?v=1.05"></script>
     <script src="js/project_workflow.js?v=1.09"></script>
     <script src="js/project_entry_qc.js?v=1.06"></script>
@@ -1282,6 +1338,6 @@
     <script src="js/ocr_image.js?v=2"></script>
     <script src="js/ocr_config.js?v=4"></script>
     <script src="js/template_config.js?v=101.01"></script>
-    <script src="admin-page.js?v=8"></script>
+    <script src="admin-page.js?v=9"></script>
 </body>
 </html>

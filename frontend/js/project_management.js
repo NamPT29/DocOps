@@ -273,6 +273,11 @@ async function loadProjectList() {
                     handler: () => openProjectPolicy(project.id),
                 },
                 {
+                    label: 'Chi trả sản lượng',
+                    icon: 'fa-money-bill-wave',
+                    handler: () => openPayroll(project),
+                },
+                {
                     label: 'Hộp cần xử lý',
                     icon: 'fa-triangle-exclamation',
                     handler: () => openActionNeededCases(project.id),

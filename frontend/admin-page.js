@@ -42,6 +42,9 @@ const ADMIN_PAGE_ACTIONS = Object.freeze({
     'cancel-paper-handoff': () => hidePaperHandoffForm(),
     'download-paper-handoffs': () => downloadPaperHandoffs(),
     'reload-project-dashboard': () => loadProjectDashboard(),
+    'save-payroll-rates': () => savePayrollRates(),
+    'preview-payroll': () => previewPayroll(),
+    'download-payroll': () => downloadPayroll(),
 });
 
 function runAdminPageAction(actionName) {

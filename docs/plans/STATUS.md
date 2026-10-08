@@ -79,5 +79,5 @@ Làm lần lượt; lát trước được reviewer duyệt mới làm lát sau.
 - [x] K1a (reviewer) Khóa sửa hồ sơ sau bàn giao (thay G4): revision 0017_project_handover_lock, POST/DELETE /api/projects/{pid}/handover-lock, 423 project_handed_over ở mọi đường sửa hồ sơ, danh sách dự án có handover_locked_at
 - [x] K1b (reviewer) Khóa sửa hồ sơ sau bàn giao: giao diện (menu Khóa/Mở khóa bàn giao, nhãn "Đã bàn giao", mở khóa bắt buộc lý do); project_reports.js v1.05, project_management.js v2.23; auth.js v102.06 (lỗi {code, message} hiện message)
 - [x] P1a (reviewer) Chi trả theo sản lượng: đơn giá + bảng tạm tính (API, Excel), revision 0018_project_work_rates; GET/PUT /api/projects/{pid}/work-rates, GET /api/projects/{pid}/payroll-preview
-- [ ] P1b Chi trả theo sản lượng: giao diện
+- [x] P1b (reviewer) Chi trả theo sản lượng: giao diện (đơn giá, kỳ, xem tạm tính, Tải Excel); payroll.js v1.00, project_management.js v2.24, admin-page.js v9
 - [ ] P2 Chi trả: chốt kỳ, lưu kèm tham số, revision 0019_payroll_periods
