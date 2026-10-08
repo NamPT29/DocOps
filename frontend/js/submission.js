@@ -151,8 +151,17 @@ async function submitData(targetStatus = 'draft') {
             const initialCover = window.initialCoverData || {};
             let isChanged = false;
             if (!isEditing) {
-                // For new form, it's changed if any cover field is non-empty
-                isChanged = Object.values(currentCoverData).some(v => v.trim() !== '');
+                // Hồ sơ mới: chỉ hỏi khi bìa khác bìa đã lưu của thư mục; thư mục chưa có hồ sơ nào thì không hỏi.
+                const hasCover = Object.values(currentCoverData).some(v => v.trim() !== '');
+                const scope = linkedQueueIndex >= 0 && typeof getCoverScope === 'function'
+                    ? getCoverScope(uploadedFilesQueue[linkedQueueIndex])
+                    : null;
+                const knownScope = window.initialCoverScope !== undefined && window.initialCoverScope === scope;
+                const knownCover = window.initialCoverData || {};
+                const sameAsSaved = knownScope && Object.keys(currentCoverData)
+                    .every(key => (currentCoverData[key] || '') === (knownCover[key] || ''));
+                const nothingToSync = knownScope && window.initialCoverFolderEmpty === true;
+                isChanged = hasCover && !sameAsSaved && !nothingToSync;
             } else {
                 // For edit form, it's changed if different from initial
                 isChanged = JSON.stringify(currentCoverData) !== JSON.stringify(initialCover);
@@ -264,6 +273,10 @@ async function submitData(targetStatus = 'draft') {
                         window.initialCoverData[input.name] = input.value;
                     }
                 });
+                window.initialCoverScope = linkedQueueIndex >= 0 && typeof getCoverScope === 'function'
+                    ? getCoverScope(uploadedFilesQueue[linkedQueueIndex])
+                    : null;
+                window.initialCoverFolderEmpty = false;
                 
                 fetchSubmissions();
             }
@@ -294,6 +307,9 @@ async function submitData(targetStatus = 'draft') {
 function cancelEdit() {
     if (typeof stopSubmissionView === 'function') stopSubmissionView();
     currentEditingId = null;
+    // Form bị xóa trắng: file kế tiếp phải nạp lại bìa của thư mục.
+    window.coverFormScope = undefined;
+    window.initialCoverScope = undefined;
     isEditingFromList = false;
     window.isCopiedSubmissionEdit = false;
     window.originalEditingData = null;

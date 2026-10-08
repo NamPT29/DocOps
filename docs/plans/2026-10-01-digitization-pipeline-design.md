@@ -271,6 +271,27 @@ Code: `server/services/timesheet_service.py`, `server/repositories/timesheet_rep
 - Chuyển bước và BR-04 dùng luật cũ (_require_stage_worker). Duyệt Check scan khi lệch mục lục và duyệt hộp vượt ngưỡng Check nhập vẫn chỉ Admin.
 - Giao diện: tab "Việc của tôi" ở index.html (js/my_work.js). Người không có quyền nhập/kiểm tra: auth.js configureCapabilityUI gọi applyMyWorkVisibility() để hiện lại thanh tab và mở tab này.
 
+## Bìa hồ sơ dùng chung theo thư mục (08/10, F1)
+
+Biểu mẫu mẫu: `docs/standards/Mau_Ho_So_Van_Ban.xlsx` (nhóm "Thông tin hồ sơ (Bìa)": Tiêu đề hồ sơ,
+Thời gian bắt đầu, Thời gian kết thúc, Số tờ; nhóm "Thông tin văn bản": Tên cơ quan, tổ chức ban hành
+văn bản, Số, Ký hiệu, Ngày ký, Thể loại văn bản, Trích yếu nội dung, Người ký). Danh mục thể loại
+QC-14 để dán vào "Kho Từ điển > Thêm hàng loạt": `docs/standards/Tu_dien_The_loai_van_ban.txt`.
+
+- Cấu hình biểu mẫu: tick "Bìa" cho các cột bìa, "Cấp thư mục đồng bộ Bìa" = 1 (thư mục chứa PDF là
+  một hồ sơ); cột Thể loại gán từ điển, chế độ "Mã (Bên phải)" để lưu tên đầy đủ ("Quyết định").
+- Thư mục dùng chung bìa: `cover_scope_folder(folder_path, cover_folder_level)` ở
+  `server/services/submission_service.py`, `getCoverScope` ở `frontend/js/form_renderer.js` (cùng quy tắc:
+  cấp 1 là thư mục chứa PDF, cấp 2 là thư mục cha).
+- Khi mở PDF: cùng thư mục với file trước thì giữ bìa; sang thư mục khác thì xóa bìa cũ và gọi
+  `GET /api/cover-data?template_id=&folder_path=` (chỉ đọc; người nhập chỉ đọc hồ sơ của mình, Admin đọc
+  tất cả) để điền bìa đã lưu gần nhất của thư mục. Chỉ điền ô còn trống; câu trả lời đến muộn sau khi
+  đã chuyển thư mục thì bỏ. Lỗi mạng thì im lặng, người nhập gõ tay.
+- Lưu hồ sơ mới: chỉ hỏi "cập nhật bìa cho các báo cáo cùng thư mục" khi bìa khác bìa đã lưu của
+  thư mục; thư mục chưa có hồ sơ nào thì không hỏi. Đồng ý thì `sync_cover_data` ghi bìa mới vào mọi
+  hồ sơ của biểu mẫu trong cùng thư mục (kể cả thư mục con).
+- Biểu mẫu từ 30 trường trở xuống mở sẵn mọi nhóm; biểu mẫu lớn hơn chỉ mở nhóm đầu như cũ.
+
 ## Việc sau 10/10
 
 - Luồng cũ (giao tài liệu lẻ, nhập thư mục máy chủ) vẫn chỉ nhận tài khoản thường làm người nhập;
@@ -280,6 +301,8 @@ Code: `server/services/timesheet_service.py`, `server/repositories/timesheet_rep
 - Chấm công KPI scan theo chuỗi tên người scan (`scanned_by_name`).
 - Nộp S: mở lại hộp thoại khi gói của hộp đang `processing` thì chưa tự hỏi tiến độ lại
   (chỉ hiện trong danh sách các lần nộp).
+- Bìa (như hệ thống mẫu): khung bìa riêng có nút "Lưu" bìa; Số tờ để trống thì tự cộng số tờ các
+  văn bản đã lưu (cần biểu mẫu có cột số tờ của văn bản).
 
 ## Lộ trình (BA mục 12.2)
 

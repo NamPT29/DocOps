@@ -60,3 +60,5 @@ Cổng: python scripts/gate.py  (dùng --static để kiểm nhanh)
 - [x] E3-3 (reviewer: code E3-2 đạt, thử trình duyệt bản cũ không mở được hộp thoại, bản mới mở sau 0,2 giây; viết lại test để 7/7 mutation bị bắt, điều 10 AGENTS nguyên văn, sửa dòng tài liệu sai)
 - [x] E2 (reviewer làm thay: test đặt LOG_DIR sang thư mục tạm trong tests/conftest.py, hết ghi logs/ của repo; uploads/ đã sạch; tests/test_test_isolation.py bảo vệ)
 - [x] E5 (người nhập: lưu hồ sơ mới cho file đã có hồ sơ báo 409 rõ ràng thay vì "không thuộc người dùng"; lời nhắn sau khi lưu nháp chỉ tab Hồ sơ đã nhập; dòng giải thích chữ gạch ngang/Đã nhập; submission.js v100.06)
+## Bìa hồ sơ (nhánh claude/nice-hamilton-7pg8bk)
+- [x] F1 Bìa dùng chung theo thư mục: GET /api/cover-data, bìa chỉ mang sang file cùng thư mục, sang thư mục khác nạp bìa đã lưu; chỉ hỏi đồng bộ khi bìa đổi; biểu mẫu ≤ 30 trường mở mọi nhóm; mẫu docs/standards/Mau_Ho_So_Van_Ban.xlsx + danh mục QC-14; form_renderer.js v101.02, submission.js v100.07

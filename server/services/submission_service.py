@@ -47,6 +47,18 @@ ENTERED_DOCUMENT_MESSAGE = (
 
 _CONTEXT_UNSET = object()
 
+
+def cover_scope_folder(folder_path: str, cover_folder_level: int) -> str:
+    """Thư mục dùng chung bìa: cấp 1 là chính thư mục chứa PDF, cấp 2 là thư mục cha...
+
+    Ví dụ "A/B/C/D": cấp 1 -> "A/B/C/D", cấp 2 -> "A/B/C". Thiếu cấp thì lấy cả đường dẫn.
+    """
+    parts = folder_path.split("/")
+    level = max(int(cover_folder_level or 0), 1)
+    if len(parts) >= level:
+        parts = parts[:len(parts) - level + 1]
+    return "/".join(parts)
+
 class SubmissionService:
 
     @staticmethod
@@ -75,14 +87,7 @@ class SubmissionService:
         if not folder_path or folder_path == NO_FOLDER_SENTINEL:
             return
             
-        # Tính toán target_folder_path dựa trên cover_folder_level
-        # Ví dụ: folder_path = "A/B/C/D", cover_folder_level = 1 -> target = "A/B/C/D"
-        # cover_folder_level = 2 -> target = "A/B/C"
-        parts = folder_path.split("/")
-        if len(parts) >= cover_folder_level:
-            target_parts = parts[:len(parts) - cover_folder_level + 1]
-        else:
-            target_parts = parts
+        target_parts = cover_scope_folder(folder_path, cover_folder_level).split("/")
             
         # Lấy tất cả submission cùng template
         all_subs = SubmissionRepository(db).list_by_template_id(template_id)
@@ -107,6 +112,38 @@ class SubmissionService:
                     sub.data_json = json.dumps(sub_data, ensure_ascii=False)
                     updates_count += 1
 
+
+    @staticmethod
+    def get_folder_cover_data(
+        db: Session,
+        *,
+        template_id: int,
+        folder_path: str,
+        current_user: dict,
+    ) -> dict:
+        """Các ô bìa đã lưu gần nhất của thư mục hồ sơ, để file mới trong thư mục tự điền bìa."""
+        empty = {"status": "ok", "found": False, "data": {}}
+        template = TemplateRepository(db).get(template_id)
+        config = json.loads(template.config_json) if template and template.config_json else {}
+        cover_cols = [int(col) for col in config.get("cover_cols", []) if str(col).isdigit() and int(col) > 0]
+        folder = normalize_folder_path(folder_path)
+        if not cover_cols or not folder or folder == NO_FOLDER_SENTINEL:
+            return empty
+        scope = cover_scope_folder(folder, config.get("cover_folder_level", 0))
+        owner_id = None if current_user.get("role") == "admin" else current_user["id"]
+        latest = SubmissionRepository(db).latest_in_folder_scope(
+            template_id=template_id,
+            scope=scope,
+            created_by_user_id=owner_id,
+        )
+        if latest is None:
+            return empty
+        data = json.loads(latest.data_json) if latest.data_json else {}
+        return {
+            "status": "ok",
+            "found": True,
+            "data": {f"col_{col - 1}": data.get(f"col_{col - 1}", "") for col in cover_cols},
+        }
 
     @staticmethod
     def sync_submission_metadata(

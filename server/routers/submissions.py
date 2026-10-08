@@ -208,6 +208,22 @@ def api_get_submissions(
         raise
 
 
+@router.get("/cover-data")
+def api_get_cover_data(
+    template_id: int,
+    folder_path: str,
+    current_user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Bìa đã lưu của thư mục hồ sơ (chỉ đọc), để file mới trong thư mục tự điền bìa."""
+    return SubmissionService.get_folder_cover_data(
+        db,
+        template_id=template_id,
+        folder_path=folder_path,
+        current_user=current_user,
+    )
+
+
 @router.get("/completed-folders")
 def api_get_completed_folders(
     template_id: int = None,

@@ -1,0 +1,33 @@
+NQ - Nghị quyết
+QĐ - Quyết định
+TT - Thông tri
+CT - Chỉ thị
+QC - Quy chế
+QyĐ - Quy định
+TC - Thông cáo
+TB - Thông báo
+HD - Hướng dẫn
+Ctr - Chương trình
+KH - Kế hoạch
+PA - Phương án
+ĐA - Đề án
+DA - Dự án
+BC - Báo cáo
+BB - Biên bản
+TTr - Tờ trình
+HĐ - Hợp đồng
+CĐ - Công điện
+BGN - Bản ghi nhớ
+BTT - Bản thỏa thuận
+GUQ - Giấy ủy quyền
+GM - Giấy mời
+GGT - Giấy giới thiệu
+GNP - Giấy nghỉ phép
+PG - Phiếu gửi
+PC - Phiếu chuyển
+PB - Phiếu báo
+CV - Công văn
+SY - Bản sao y
+TrS - Bản trích sao
+SL - Bản sao lục
+TLK - Tài liệu khác

@@ -66,6 +66,58 @@ function getCoverColumnNumbers() {
     );
 }
 
+// Bìa hồ sơ (lát F1): thư mục dùng chung bìa, cùng quy tắc với cover_scope_folder ở máy chủ.
+// null = không biết thư mục (giữ cách cũ: bìa mang sang mọi file).
+function getCoverScope(file = getActiveDraftFile(), config = window.activeTemplateConfig || {}) {
+    const folder = String(file?.folder_group || '').replace(/\\/g, '/').replace(/^\/+|\/+$/g, '');
+    if (!folder || folder === '__ROOT__') return null;
+    const parts = folder.split('/');
+    const level = Math.max(Number(config.cover_folder_level) || 0, 1);
+    return (parts.length >= level ? parts.slice(0, parts.length - level + 1) : parts).join('/');
+}
+
+function rememberCoverScope(scope, data, folderEmpty) {
+    window.initialCoverScope = scope;
+    window.initialCoverData = data;
+    window.initialCoverFolderEmpty = folderEmpty;
+}
+
+// Nạp bìa đã lưu của thư mục: chỉ điền ô bìa còn trống, bỏ qua nếu người dùng đã chuyển thư mục.
+function isEditingSavedRecord() {
+    return typeof currentEditingId !== 'undefined' && currentEditingId !== null;
+}
+
+async function loadCoverForScope(scope, file) {
+    if (isEditingSavedRecord()) return false;
+    const templateId = file?.template_id || window.activeTemplateId;
+    if (!templateId || !file?.folder_group || typeof authFetch !== 'function') return false;
+    let result = null;
+    try {
+        const params = new URLSearchParams({ template_id: String(templateId), folder_path: file.folder_group });
+        const response = await authFetch(`/api/cover-data?${params.toString()}`);
+        if (!response || !response.ok) return false;
+        result = await response.json();
+    } catch (error) {
+        return false;
+    }
+    if (window.coverFormScope !== scope || isEditingSavedRecord() || !result || result.status !== 'ok') return false;
+    rememberCoverScope(scope, result.found ? { ...result.data } : {}, !result.found);
+    if (!result.found) return false;
+    let filled = false;
+    Object.entries(result.data).forEach(([name, value]) => {
+        const input = document.getElementById(name);
+        if (input && !input.value && value) {
+            input.value = value;
+            filled = true;
+        }
+    });
+    if (filled) {
+        if (typeof resizeDynamicFormInputs === 'function') resizeDynamicFormInputs(document.getElementById('dataForm'));
+        if (typeof saveFormDraft === 'function') saveFormDraft();
+    }
+    return filled;
+}
+
 function applyDraftForActivePdf() {
     if (typeof currentEditingId !== 'undefined' && currentEditingId !== null) return false;
     const identity = window.activePdfDraftIdentity || getPdfDraftIdentity();
@@ -77,8 +129,13 @@ function applyDraftForActivePdf() {
     const draftData = readFormDraft();
     const hasDraft = Object.keys(draftData).length > 0;
     const coverCols = getCoverColumnNumbers();
+    const activeFile = getActiveDraftFile();
+    const coverScope = getCoverScope(activeFile);
+    const previousCoverScope = window.coverFormScope;
+    // Bìa chỉ mang sang file khác trong cùng thư mục hồ sơ.
+    const keepCover = !coverScope || previousCoverScope === coverScope;
     const preservedCover = {};
-    if (!hasDraft) {
+    if (!hasDraft && keepCover) {
         inputs.forEach(input => {
             const match = input.name ? input.name.match(/^col_(\d+)$/) : null;
             const colIndex = match ? Number(match[1]) + 1 : -1;
@@ -88,7 +145,7 @@ function applyDraftForActivePdf() {
     inputs.forEach(input => {
         if (hasDraft && Object.prototype.hasOwnProperty.call(draftData, input.name)) {
             input.value = draftData[input.name];
-        } else if (hasDraft || !coverCols.has(Number(input.name?.match(/^col_(\d+)$/)?.[1]) + 1)) {
+        } else if (hasDraft || !keepCover || !coverCols.has(Number(input.name?.match(/^col_(\d+)$/)?.[1]) + 1)) {
             input.value = '';
         }
     });
@@ -100,8 +157,24 @@ function applyDraftForActivePdf() {
         });
     }
     window.lastAppliedPdfDraftIdentity = identity;
+    window.coverFormScope = coverScope;
     if (typeof resizeDynamicFormInputs === 'function') resizeDynamicFormInputs(dataForm);
     if (typeof saveFormDraft === 'function') saveFormDraft();
+    if (coverScope && coverScope !== previousCoverScope && coverCols.size > 0) {
+        rememberCoverScope(coverScope, {}, null);
+        loadCoverForScope(coverScope, activeFile);
+    }
+    return true;
+}
+
+// Form vừa dựng lại cho file đang mở (chọn dự án, tải lại trang): ghi nhận thư mục của bìa và nạp bìa.
+function initCoverStateForActiveFile() {
+    const file = getActiveDraftFile();
+    const scope = getCoverScope(file);
+    window.coverFormScope = scope;
+    if (!scope || getCoverColumnNumbers().size === 0) return false;
+    rememberCoverScope(scope, {}, null);
+    loadCoverForScope(scope, file);
     return true;
 }
 
@@ -302,8 +375,11 @@ function renderForm(schema, config = {}) {
     const appTabs = document.getElementById('appTabs');
     if (appTabs) appTabs.style.display = 'flex';
     if (dataForm) dataForm.style.display = 'block';
+    initCoverStateForActiveFile();
     if (window.EmployeeOcr) window.EmployeeOcr.formReady();
 }
+
+const SMALL_FORM_FIELD_LIMIT = 30;
 
 function _buildCategorySection(category, index, schema, config, draftData) {
     const section = document.createElement('div');
@@ -336,8 +412,9 @@ function _buildCategorySection(category, index, schema, config, draftData) {
     const categoryContent = document.createElement('div');
     categoryContent.className = 'category-content mt-3';
 
-    // Collapse all categories by default except the first one (index 0)
-    if (index !== 0) {
+    // Biểu mẫu lớn: chỉ mở nhóm đầu. Biểu mẫu nhỏ (như Bìa + Văn bản): mở hết để khỏi bấm mở mỗi file.
+    const totalFields = schema.reduce((sum, item) => sum + (Array.isArray(item.fields) ? item.fields.length : 0), 0);
+    if (index !== 0 && totalFields > SMALL_FORM_FIELD_LIMIT) {
         categoryContent.classList.add('d-none');
         titleLeft.querySelector('i').classList.replace('fa-chevron-down', 'fa-chevron-right');
         titleContainer.classList.remove('mb-3', 'border-bottom', 'border-2', 'border-primary', 'pb-2');

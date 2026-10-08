@@ -200,6 +200,25 @@ class SubmissionRepository(BaseRepository[Submission]):
             Submission.status == "draft",
         ).all()
 
+    def latest_in_folder_scope(
+        self,
+        *,
+        template_id: int,
+        scope: str,
+        created_by_user_id: int | None = None,
+    ) -> Submission | None:
+        """Hồ sơ mới nhất của biểu mẫu nằm trong thư mục `scope` (kể cả thư mục con)."""
+        query = self.session.query(Submission).filter(
+            Submission.template_id == template_id,
+            or_(
+                Submission.folder_path == scope,
+                Submission.folder_path.startswith(f"{scope}/", autoescape=True),
+            ),
+        )
+        if created_by_user_id is not None:
+            query = query.filter(Submission.created_by_user_id == created_by_user_id)
+        return query.order_by(Submission.id.desc()).first()
+
     def list_by_template_id(self, template_id: int) -> list[Submission]:
         return self.session.query(Submission).filter(
             Submission.template_id == template_id
