@@ -6,7 +6,7 @@ from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.orm import Session
 
-from server.database import get_db
+from server.database import get_db, get_utc_now
 from server.routers.auth import get_admin_user, get_current_user
 from server.routers.project_access import get_project_input_member
 from server.services.project_service import create_project, list_projects, update_project_status
@@ -18,6 +18,7 @@ from server.services.project_admin_service import (
 )
 from server.services.project_policy_service import get_project_policy, update_project_policy
 from server.services.normalization_plan_service import ascii_name, build_plan, plan_workbook
+from server.services.project_dashboard_service import build_dashboard
 from server.services.handover_package_service import read_job, report_path, start_package
 from server.services.project_workspace_service import get_project_workspace
 from server.services.export_job_service import (
@@ -208,6 +209,16 @@ def api_get_normalization_plan(
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
+
+
+@router.get("/{project_id}/dashboard")
+def api_get_project_dashboard(
+    project_id: int,
+    current_user: dict = Depends(get_admin_user),
+    db: Session = Depends(get_db),
+):
+    """Bảng tiến độ dự án (D1, chỉ đọc): hộp theo bước, văn bản, sản lượng 14 ngày, dự kiến xong."""
+    return {"status": "ok", "data": build_dashboard(db, project_id, get_utc_now())}
 
 
 @router.post("/{project_id}/handover-package")

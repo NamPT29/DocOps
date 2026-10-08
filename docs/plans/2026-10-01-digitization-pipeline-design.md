@@ -377,6 +377,21 @@ file đã bị xóa); menu dự án "Tải biên bản bàn giao".
 - Hộp sắp theo số hộp (thành phần cuối của case_key, quy tắc B0) rồi tên hộp theo thứ tự tự nhiên (QC-12).
 - Giao diện (H1b): admin.html, menu dự án "Sổ giao nhận hồ sơ giấy"; mỗi hộp một dòng, chỉ mốc kế tiếp có nút Ghi, Xóa chỉ ở mốc cuối cùng; giờ hiện theo giờ Việt Nam; lỗi hiện trong hộp thoại; nút Tải Excel. Nhân viên Chỉnh lý/Scan có quyền API nhưng chưa có giao diện ở index.html (làm sau 10/10).
 
+## Bảng tiến độ dự án (D1)
+
+`GET /api/projects/{pid}/dashboard` (Admin, chỉ đọc), theo sổ BM-TKDA (tài liệu phân tích mẫu, mục 6):
+- `stages`: mỗi bước đang bật, theo thứ tự quy trình: số hộp xong / đang làm / trả lại / chờ, % hộp xong, khối lượng
+  xong. Chỉnh lý, Chuẩn hóa, Bàn giao tính hồ sơ mục lục đang dùng của hộp xong; Scan, Check scan tính trang A4 quy đổi
+  của gói S `done` mới nhất của hộp xong; Nhập liệu tính văn bản đã nộp (lần lưu mới nhất khác nháp); Check nhập liệu
+  tính văn bản Hoàn thành.
+- `documents`: văn bản = file nhập liệu đang dùng, trừ bìa; đã nhập, hoàn thành, còn lại.
+- `daily`: 14 ngày gần nhất theo giờ Việt Nam, đủ 14 dòng kể cả ngày 0: văn bản nộp kiểm tra lần đầu (cách đếm như
+  sheet Chấm công), văn bản duyệt lần đầu, trang scan của gói S `done` xong trong ngày.
+- `forecast`: trung bình nhập/duyệt 7 ngày gần nhất; ngày dự kiến xong = hôm nay + ceil(còn lại / duyệt trung bình),
+  không có lượt duyệt nào thì để trống.
+- `people`: 7 ngày gần nhất, mỗi người có số liệu: nhập, duyệt, trang scan (người scan đã chọn khi Nộp S).
+- `norms`: định mức QC-10 để so năng suất (giả định trừ SC-A4-1 lấy từ sổ mẫu).
+
 ## Việc sau 10/10
 
 - Luồng cũ (giao tài liệu lẻ, nhập thư mục máy chủ) vẫn chỉ nhận tài khoản thường làm người nhập;

@@ -73,7 +73,7 @@ Làm lần lượt; lát trước được reviewer duyệt mới làm lát sau.
 - [x] H1a-2 Sửa H1a theo review 15ab685: lỗi {code,message}, thời gian bắt buộc múi giờ, schema 422, quyền trước 404, số hộp theo case_key, test đủ ca
 - [x] H1a-3 (reviewer) Excel sổ giao nhận đủ 18 cột: "Hộp" là số hộp theo case_key, có lại "Tên hộp" (prompt H1a-2 đếm nhầm 17); mục tài liệu H1 chép đúng; dọn STATUS
 - [x] H1b (reviewer) Sổ giao nhận hồ sơ giấy: giao diện (modal #paperHandoffModal, chỉ mốc kế tiếp có nút Ghi, Xóa mốc cuối, giờ VN, lỗi trong modal, Tải Excel); paper_handoff.js v1.00, project_management.js v2.20, admin-page.js v7
-- [ ] D1 Bảng tiến độ dự án: API GET /api/projects/{pid}/dashboard
+- [x] D1 (reviewer) Bảng tiến độ dự án: API GET /api/projects/{pid}/dashboard (hộp theo bước, khối lượng, văn bản, 14 ngày giờ VN, dự kiến xong, người 7 ngày, định mức QC-10)
 - [ ] D2 Bảng tiến độ dự án: giao diện
 - [ ] R1 Đối soát R1–R4 (Excel, giả định reviewer)
 - [ ] K1a Khóa sửa hồ sơ sau bàn giao (thay G4): CSDL + API + chặn, revision 0017_project_handover_lock

@@ -275,6 +275,14 @@ def _status_matrix(repository, project_id, enabled, cases):
     return matrix
 
 
+def case_status_matrix(db, *, project_id):
+    """(bước đang bật theo thứ tự, danh sách hộp, ma trận trạng thái); dùng cho bảng tiến độ (D1)."""
+    repository = WorkflowRepository(db)
+    enabled = engine.ordered_enabled(_enabled_keys(repository, project_id))
+    cases = repository.list_cases(project_id)
+    return enabled, cases, _status_matrix(repository, project_id, enabled, cases)
+
+
 def get_overview(db, *, project_id):
     repository = WorkflowRepository(db)
     _project_or_404(repository, project_id)
