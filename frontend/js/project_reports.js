@@ -363,6 +363,27 @@ async function exportProjectReports(projectId, includePendingReview) {
     }
 }
 
+// Kế hoạch chuẩn hóa (G1): Excel mã hồ sơ, mã văn bản, đường dẫn bàn giao QC-03/QC-04. Chỉ đọc.
+async function downloadNormalizationPlan(project) {
+    if (!project || !Number(project.id)) return false;
+    setProjectExportStatus(`Đang lập kế hoạch chuẩn hóa của “${project.name}”...`);
+    try {
+        const response = await authFetch(`/api/projects/${Number(project.id)}/normalization-plan`);
+        if (!response) return false;
+        if (!response.ok) {
+            const errorData = await response.json().catch(() => ({}));
+            throw new Error(formatApiErrorDetail(errorData.detail || errorData.message));
+        }
+        await downloadExportResponse(response, `Ke_hoach_chuan_hoa_${Number(project.id)}.xlsx`);
+        setProjectExportStatus(`Đã tải kế hoạch chuẩn hóa của “${project.name}”. Xem cột "Vấn đề" để sửa trước khi đóng gói.`);
+        return true;
+    } catch (error) {
+        setProjectExportStatus(error.message, true);
+        alert(`Lỗi lập kế hoạch chuẩn hóa: ${error.message}`);
+        return false;
+    }
+}
+
 async function restoreProjectManagementNavigation() {
     if (window.location.hash !== '#projects') return false;
     const params = new URLSearchParams(window.location.search);

@@ -292,6 +292,32 @@ QC-14 để dán vào "Kho Từ điển > Thêm hàng loạt": `docs/standards/T
   hồ sơ của biểu mẫu trong cùng thư mục (kể cả thư mục con).
 - Biểu mẫu từ 30 trường trở xuống mở sẵn mọi nhóm; biểu mẫu lớn hơn chỉ mở nhóm đầu như cũ.
 
+## Chuẩn hóa: kế hoạch đổi tên (08/10, G1)
+
+Code: `server/services/normalization_plan_service.py`, `server/repositories/normalization_repository.py`,
+`GET /api/projects/{pid}/normalization-plan[?format=json]` (chỉ Admin, chỉ đọc), menu dự án
+"Kế hoạch chuẩn hóa (Excel)" (`downloadNormalizationPlan` trong `frontend/js/project_reports.js`).
+
+- Nguồn: file nhập liệu đang dùng (`project_document_assets.status = active`), mục lục (dòng chưa bị
+  đánh `missing_from_import_id`), Chính sách dự án (Mã cơ quan, Ký hiệu hồ sơ).
+- Cấu trúc bắt buộc: `<Hộp>/<Hồ sơ>/file.pdf` tính từ cấp hộp. Thư mục hồ sơ đọc số bằng
+  `parse_dossier_number` (như so khớp BR-01), tra mục lục theo hộp + số hồ sơ + hậu tố.
+- Mã hồ sơ (QC-03): `{Mã cơ quan}.{Năm bắt đầu}.{Số HS 2 chữ số}{hậu tố}[.{Ký hiệu}]`; ký hiệu lấy
+  ở mục lục, không có thì lấy Chính sách dự án. Mã văn bản = mã hồ sơ + `.{STT 7 chữ số}`, STT theo
+  thứ tự tự nhiên tên file (QC-12), bỏ qua file bìa.
+- Đường dẫn bàn giao (QC-04): `CSDL_SOHOA_<tên dự án không dấu>/<Mã cơ quan>/<Năm>/<VV|LD>/<Mã phông
+  không dấu>/<Mã hồ sơ>/<Mã văn bản>.pdf`; file bìa `<Mã hồ sơ>_BIA.pdf` trong thư mục hồ sơ.
+- Giả định của reviewer (QC-01 chưa nói, sửa được): gốc lấy theo tên dự án; tên file bìa; hậu tố chữ
+  của hồ sơ đặt ngay sau số; viết tắt THBQ chỉ có `01 → VV`, `02 → LD` (QC-13).
+- Excel 2 sheet: "Tổng hợp" (mã cơ quan, gốc, số hồ sơ/văn bản/bìa, số file sẵn sàng, đếm từng vấn
+  đề) và "Kế hoạch đổi tên" (mỗi file một dòng; cột Vấn đề tô màu). Vấn đề: chưa có Mã cơ quan;
+  file không nằm đúng `<Hộp>/<Hồ sơ>/`; tên thư mục không đọc được số; hồ sơ không có trong mục lục;
+  THBQ ngoài QC-13; văn bản chưa "Hoàn thành" nhập liệu (trạng thái của lần lưu mới nhất).
+- Lát tiếp theo: G2 đóng gói (chép file theo kế hoạch vào thư mục bàn giao trên máy chủ, chỉ file
+  không còn vấn đề, ghi SHA-256 từng file + Excel metadata NN-SIP `Metadata_HS`/`MetadataVB`, chạy
+  nền, chạy lại được); G3 biên bản bàn giao tự sinh + khóa dự án. PDF/A và ký số làm ngoài hệ thống
+  (BA), gói G2 để dành hậu tố `_signed`.
+
 ## Việc sau 10/10
 
 - Luồng cũ (giao tài liệu lẻ, nhập thư mục máy chủ) vẫn chỉ nhận tài khoản thường làm người nhập;

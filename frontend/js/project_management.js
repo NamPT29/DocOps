@@ -311,6 +311,13 @@ async function loadProjectList() {
                     handler: () => exportProjectReports(project.id, false),
                     trackExport: true,
                 },
+                {divider: true},
+                {
+                    label: 'Kế hoạch chuẩn hóa (Excel)',
+                    icon: 'fa-list-check',
+                    handler: () => downloadNormalizationPlan(project),
+                    trackExport: true,
+                },
             ],
         );
         actionCell.append(projectActions);

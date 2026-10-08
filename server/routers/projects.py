@@ -2,6 +2,7 @@ from datetime import datetime
 from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
+from fastapi.responses import Response
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.orm import Session
 
@@ -16,6 +17,7 @@ from server.services.project_admin_service import (
     update_project_members,
 )
 from server.services.project_policy_service import get_project_policy, update_project_policy
+from server.services.normalization_plan_service import ascii_name, build_plan, plan_workbook
 from server.services.project_workspace_service import get_project_workspace
 from server.services.export_job_service import (
     ExportJobBusyError,
@@ -186,6 +188,25 @@ def api_delete_project(
         "status": "ok",
         "data": delete_project(db, project_id=project_id),
     }
+
+
+@router.get("/{project_id}/normalization-plan")
+def api_get_normalization_plan(
+    project_id: int,
+    format: Literal["xlsx", "json"] = "xlsx",
+    current_user: dict = Depends(get_admin_user),
+    db: Session = Depends(get_db),
+):
+    """Kế hoạch chuẩn hóa (G1, chỉ đọc): mã hồ sơ, mã văn bản, đường dẫn bàn giao QC-03/QC-04."""
+    plan = build_plan(db, project_id=project_id)
+    if format == "json":
+        return {"status": "ok", "data": {key: plan[key] for key in ("project", "organ_code", "root", "summary")}}
+    filename = f"Ke_hoach_chuan_hoa_{ascii_name(plan['project']['name']) or project_id}.xlsx"
+    return Response(
+        content=plan_workbook(plan),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 @router.get("/{project_id}/submission-folders")
