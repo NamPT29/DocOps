@@ -71,6 +71,7 @@ Cổng: python scripts/gate.py  (dùng --static để kiểm nhanh)
 ## Đợt B (giao Antigravity, nhánh claude/charming-planck-b2k42f; đặc tả docs/plans/2026-10-08-dot-b-spec.md)
 Làm lần lượt; lát trước được reviewer duyệt mới làm lát sau.
 - [x] H1a Sổ giao nhận hồ sơ giấy 5 mốc (FR-ARR-02): CSDL + API + Excel, revision 0016_case_paper_handoffs
+- [x] H1a-2 Sửa H1a (Sổ giao nhận hồ sơ giấy) theo review 15ab685
 - [ ] H1b Sổ giao nhận hồ sơ giấy: giao diện
 - [ ] D1 Bảng tiến độ dự án: API GET /api/projects/{pid}/dashboard
 - [ ] D2 Bảng tiến độ dự án: giao diện
