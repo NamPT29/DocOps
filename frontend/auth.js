@@ -466,6 +466,9 @@ async function apiCall(url, options = {}, errorMessage = "Lỗi kết nối máy
         
         const res = await authFetch(url, options);
         if (!res) return null; // 401 was handled by authFetch
+        // Mọi lệnh ghi có thể đổi danh sách biểu mẫu, từ điển, cấu hình, người dùng: bỏ bộ nhớ đệm
+        // để lần đọc ngay sau đó (vd. danh sách từ điển vừa tạo) lấy dữ liệu mới.
+        if (method !== 'GET') clearApiCache();
         
         const data = await res.json();
         if (data.status === 'ok') {
@@ -701,6 +704,10 @@ async function submitChangePassword() {
         alert('Đổi mật khẩu thành công!');
         bootstrap.Modal.getInstance(document.getElementById('changePasswordModal')).hide();
     }
+}
+
+function clearApiCache() {
+    Object.keys(apiCache).forEach(key => { delete apiCache[key]; });
 }
 
 function invalidateUsersCache() {

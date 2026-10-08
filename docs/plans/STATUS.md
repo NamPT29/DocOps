@@ -62,6 +62,7 @@ Cổng: python scripts/gate.py  (dùng --static để kiểm nhanh)
 - [x] E5 (người nhập: lưu hồ sơ mới cho file đã có hồ sơ báo 409 rõ ràng thay vì "không thuộc người dùng"; lời nhắn sau khi lưu nháp chỉ tab Hồ sơ đã nhập; dòng giải thích chữ gạch ngang/Đã nhập; submission.js v100.06)
 ## Bìa hồ sơ (nhánh claude/nice-hamilton-7pg8bk)
 - [x] F1 Bìa dùng chung theo thư mục: GET /api/cover-data, bìa chỉ mang sang file cùng thư mục, sang thư mục khác nạp bìa đã lưu; chỉ hỏi đồng bộ khi bìa đổi; biểu mẫu ≤ 30 trường mở mọi nhóm; mẫu docs/standards/Mau_Ho_So_Van_Ban.xlsx + danh mục QC-14; form_renderer.js v101.02, submission.js v100.07
+- [x] F2 apiCall xóa bộ nhớ đệm GET sau mọi lệnh ghi (từ điển vừa tạo không hiện, cấu hình mở lại thấy bản cũ); auth.js v102.05
 ## Chuẩn hóa và Bàn giao (nhánh claude/nice-hamilton-7pg8bk)
 - [x] G1 Kế hoạch chuẩn hóa (chỉ đọc): GET /api/projects/{pid}/normalization-plan, Excel mã hồ sơ/mã văn bản/đường dẫn bàn giao QC-03/QC-04 + vấn đề từng file; menu dự án "Kế hoạch chuẩn hóa (Excel)"; project_reports.js v1.01, project_management.js v2.17
 - [ ] G2 Đóng gói: chép file theo kế hoạch + SHA-256 + metadata NN-SIP, chạy nền

@@ -348,6 +348,12 @@ Thứ tự cắt khi trễ: chi trả CTV → dashboard → đối soát R1/R3/R
 
 ## Nhật ký sửa lỗi
 
+- 08/10 (F2): `apiCall` giữ kết quả GET của `/api/templates…` và `/api/users…` 5 giây, kể cả ngay
+  sau lệnh ghi. Hậu quả: tạo từ điển xong không thấy trong "Kho Từ điển"; tải biểu mẫu xong danh
+  sách chưa có; mở lại "Cấu hình Biểu mẫu" ngay sau khi lưu thấy cấu hình cũ (lưu tiếp sẽ ghi đè).
+  Sửa: mọi lệnh ghi qua `apiCall` (POST/PUT/DELETE, kể cả lỗi) xóa toàn bộ bộ nhớ đệm;
+  `auth.js?v=102.05`, selfcheck `tests/api_cache_selfcheck.js`. Phát hiện khi chạy lại kịch bản
+  cấu hình từ điển trên PostgreSQL.
 - 02/10: Commit `204140b` đã tách 10 hàm khỏi `frontend/auth.js` sang `js/account_management.js`
   và `js/admin_dashboard.js`, nhưng không trang nào nạp hai file này. Hậu quả: trang nhập liệu
   báo `populateTemplateDropdown is not defined` (không chọn được biểu mẫu), trang admin mất
