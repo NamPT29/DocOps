@@ -38,6 +38,9 @@ const ADMIN_PAGE_ACTIONS = Object.freeze({
     'submit-edit-user': () => submitEditUser(),
     'open-action-needed-cases': () => openActionNeededCases(),
     'submit-case-revoke': () => submitCaseRevoke(),
+    'save-paper-handoff': () => savePaperHandoff(),
+    'cancel-paper-handoff': () => hidePaperHandoffForm(),
+    'download-paper-handoffs': () => downloadPaperHandoffs(),
 });
 
 function runAdminPageAction(actionName) {

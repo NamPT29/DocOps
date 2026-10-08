@@ -313,6 +313,11 @@ async function loadProjectList() {
                 },
                 {divider: true},
                 {
+                    label: 'Sổ giao nhận hồ sơ giấy',
+                    icon: 'fa-truck-ramp-box',
+                    handler: () => openPaperHandoffModal(project),
+                },
+                {
                     label: 'Kế hoạch chuẩn hóa (Excel)',
                     icon: 'fa-list-check',
                     handler: () => downloadNormalizationPlan(project),

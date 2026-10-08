@@ -375,6 +375,7 @@ file đã bị xóa); menu dự án "Tải biên bản bàn giao".
 - API: `GET /api/projects/{pid}/paper-handoffs`, `PUT|DELETE /api/projects/{pid}/cases/{cid}/paper-handoffs/{mốc}`,
   `GET /api/projects/{pid}/paper-handoffs.xlsx` (sheet "Sổ giao nhận", giờ Việt Nam, mỗi hộp một dòng kể cả hộp chưa có mốc).
 - Hộp sắp theo số hộp (thành phần cuối của case_key, quy tắc B0) rồi tên hộp theo thứ tự tự nhiên (QC-12).
+- Giao diện (H1b): admin.html, menu dự án "Sổ giao nhận hồ sơ giấy"; mỗi hộp một dòng, chỉ mốc kế tiếp có nút Ghi, Xóa chỉ ở mốc cuối cùng; giờ hiện theo giờ Việt Nam; lỗi hiện trong hộp thoại; nút Tải Excel. Nhân viên Chỉnh lý/Scan có quyền API nhưng chưa có giao diện ở index.html (làm sau 10/10).
 
 ## Việc sau 10/10
 

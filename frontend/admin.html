@@ -760,6 +760,54 @@
       </div>
     </div>
 
+    <!-- SỔ GIAO NHẬN HỒ SƠ GIẤY (FR-ARR-02, H1b) -->
+    <div class="modal fade" id="paperHandoffModal" tabindex="-1" aria-hidden="true">
+      <div class="modal-dialog modal-xl modal-dialog-scrollable">
+        <div class="modal-content">
+          <div class="modal-header bg-primary text-white">
+            <h5 class="modal-title"><i class="fas fa-truck-ramp-box"></i> Sổ giao nhận hồ sơ giấy – <span id="paperHandoffTitle"></span></h5>
+            <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Đóng"></button>
+          </div>
+          <div class="modal-body">
+            <div class="alert alert-info small">Mỗi hộp ghi lần lượt 5 mốc: Nhận từ khách hàng → Giao chỉnh lý → Giao scan → Trả kho → Trả khách hàng. Chỉ mốc kế tiếp có nút Ghi; giờ theo giờ Việt Nam.</div>
+            <div id="paperHandoffError" class="alert alert-danger small d-none" role="alert"></div>
+            <div id="paperHandoffForm" class="border rounded p-3 mb-3 bg-light d-none">
+              <h6 class="text-primary" id="paperHandoffFormTitle"></h6>
+              <div class="row g-2">
+                <div class="col-md-3">
+                  <label class="form-label small fw-semibold" for="paperHandoffTime">Thời gian</label>
+                  <input type="datetime-local" class="form-control form-control-sm" id="paperHandoffTime">
+                </div>
+                <div class="col-md-3">
+                  <label class="form-label small fw-semibold" for="paperHandoffHandedBy">Người giao</label>
+                  <input type="text" class="form-control form-control-sm" id="paperHandoffHandedBy" maxlength="255">
+                </div>
+                <div class="col-md-3">
+                  <label class="form-label small fw-semibold" for="paperHandoffReceivedBy">Người nhận</label>
+                  <input type="text" class="form-control form-control-sm" id="paperHandoffReceivedBy" maxlength="255">
+                </div>
+                <div class="col-md-3">
+                  <label class="form-label small fw-semibold" for="paperHandoffNote">Ghi chú</label>
+                  <input type="text" class="form-control form-control-sm" id="paperHandoffNote" maxlength="1000">
+                </div>
+              </div>
+              <div class="d-flex gap-2 mt-2">
+                <button type="button" class="btn btn-sm btn-primary" data-admin-action="save-paper-handoff"><i class="fas fa-save"></i> Lưu</button>
+                <button type="button" class="btn btn-sm btn-secondary" data-admin-action="cancel-paper-handoff">Hủy</button>
+              </div>
+            </div>
+            <div class="table-responsive">
+              <table class="table table-sm table-bordered align-middle mb-0" id="paperHandoffTable"></table>
+            </div>
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-outline-success me-auto" data-admin-action="download-paper-handoffs"><i class="fas fa-file-excel"></i> Tải Excel</button>
+            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Đóng</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <div class="modal fade" id="projectAssetsModal" tabindex="-1" aria-hidden="true">
       <div class="modal-dialog modal-xl">
         <div class="modal-content">
@@ -1203,7 +1251,8 @@
     <script src="js/admin_panel.js?v=203.07"></script>
     <script src="js/project_upload.js?v=1.01"></script>
     <script src="js/project_reports.js?v=1.03"></script>
-    <script src="js/project_management.js?v=2.19"></script>
+    <script src="js/paper_handoff.js?v=1.00"></script>
+    <script src="js/project_management.js?v=2.20"></script>
     <script src="js/project_scan_submit.js?v=1.05"></script>
     <script src="js/project_workflow.js?v=1.09"></script>
     <script src="js/project_entry_qc.js?v=1.06"></script>
@@ -1212,6 +1261,6 @@
     <script src="js/ocr_image.js?v=2"></script>
     <script src="js/ocr_config.js?v=4"></script>
     <script src="js/template_config.js?v=101.01"></script>
-    <script src="admin-page.js?v=6"></script>
+    <script src="admin-page.js?v=7"></script>
 </body>
 </html>
