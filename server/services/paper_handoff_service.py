@@ -1,5 +1,4 @@
 import io
-import re
 from datetime import datetime, timedelta, timezone
 from fastapi import HTTPException
 from server.repositories.paper_handoff_repository import PaperHandoffRepository
@@ -257,7 +256,7 @@ class PaperHandoffService:
         ws = wb.active
         ws.title = "Sổ giao nhận"
 
-        headers = ["Hộp"]
+        headers = ["Hộp", "Tên hộp"]
         for m in MILESTONES:
             headers.extend([f"{m['label']} - Thời gian", f"{m['label']} - Người giao", f"{m['label']} - Người nhận"])
         headers.append("Ghi chú")
@@ -265,7 +264,7 @@ class PaperHandoffService:
         ws.append(headers)
 
         for c in cases_sorted:
-            row = [c.display_name or ""]
+            row = [box_number_of_case_key(c.case_key), c.display_name or ""]
             case_handoffs = handoffs_by_case.get(c.id, {})
             notes = []
             for m in MILESTONES:

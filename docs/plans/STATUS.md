@@ -1,7 +1,6 @@
 # Trạng thái (cập nhật mỗi lát)
 Cổng: python scripts/gate.py  (dùng --static để kiểm nhanh)
 ## Triển khai (nhánh claude/nice-hamilton-7pg8bk)
-- [x] H1a Sổ giao nhận hồ sơ giấy (CSDL, API, xuất Excel)
 - [x] R1 scripts/preflight.py (chỉ đọc) + tests/test_preflight.py + docs/plans/runbook-trien-khai.md
 - [x] R2 tests/test_migrations_postgres_offline.py (SQL PostgreSQL offline 0010 -> head); đã chạy thật 0001 -> 0014 trên PostgreSQL 16
 - [x] R3 Runbook + test offline cập nhật cho 0015_entry_qc_round2; đã chạy thật hạ 0015 -> 0010 -> head trên PostgreSQL 16 (0 khác biệt)
@@ -71,7 +70,8 @@ Cổng: python scripts/gate.py  (dùng --static để kiểm nhanh)
 ## Đợt B (giao Antigravity, nhánh claude/charming-planck-b2k42f; đặc tả docs/plans/2026-10-08-dot-b-spec.md)
 Làm lần lượt; lát trước được reviewer duyệt mới làm lát sau.
 - [x] H1a Sổ giao nhận hồ sơ giấy 5 mốc (FR-ARR-02): CSDL + API + Excel, revision 0016_case_paper_handoffs
-- [x] H1a-2 Sửa H1a (Sổ giao nhận hồ sơ giấy) theo review 15ab685
+- [x] H1a-2 Sửa H1a theo review 15ab685: lỗi {code,message}, thời gian bắt buộc múi giờ, schema 422, quyền trước 404, số hộp theo case_key, test đủ ca
+- [x] H1a-3 (reviewer) Excel sổ giao nhận đủ 18 cột: "Hộp" là số hộp theo case_key, có lại "Tên hộp" (prompt H1a-2 đếm nhầm 17); mục tài liệu H1 chép đúng; dọn STATUS
 - [ ] H1b Sổ giao nhận hồ sơ giấy: giao diện
 - [ ] D1 Bảng tiến độ dự án: API GET /api/projects/{pid}/dashboard
 - [ ] D2 Bảng tiến độ dự án: giao diện

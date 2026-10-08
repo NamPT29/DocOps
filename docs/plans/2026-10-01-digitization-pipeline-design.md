@@ -365,9 +365,16 @@ file đã bị xóa); menu dự án "Tải biên bản bàn giao".
 
 ## Sổ giao nhận hồ sơ giấy (H1, FR-ARR-02, revision 0016)
 
-Theo dõi 5 mốc giao nhận hồ sơ giấy của hộp (nhận từ khách, giao chỉnh lý, giao scan, trả kho, trả khách).
-Người dùng là admin hoặc nhân viên thuộc tổ chỉnh lý, scan. Mỗi mốc ghi nhận thời gian, người giao, người nhận, ghi chú.
-Dữ liệu lưu ở bảng `case_paper_handoffs` (revision 0016_case_paper_handoffs). Có thể xuất báo cáo Excel cho toàn dự án.
+- Bảng `case_paper_handoffs`: mỗi hộp mỗi mốc 1 bản ghi (ghi lại = sửa). 5 mốc theo thứ tự: Nhận từ khách hàng,
+  Giao chỉnh lý, Giao scan, Trả kho, Trả khách hàng.
+- Luật (giả định reviewer, chờ BA): mốc sau phải có mốc trước (409 `previous_milestone_missing`); thời gian không sớm hơn
+  mốc trước (409 `milestone_before_previous`) và không muộn hơn mốc sau đã ghi (409 `milestone_after_next`); không quá
+  hiện tại 5 phút (400 `future_time`); thời gian gửi lên phải kèm múi giờ (400 `timezone_required`).
+- Quyền: Admin, hoặc thành viên đang hoạt động bước Chỉnh lý hoặc Scan của dự án; CTV luôn bị từ chối.
+  Xóa: chỉ Admin, chỉ mốc cuối cùng đã ghi của hộp (409 `not_last_milestone`).
+- API: `GET /api/projects/{pid}/paper-handoffs`, `PUT|DELETE /api/projects/{pid}/cases/{cid}/paper-handoffs/{mốc}`,
+  `GET /api/projects/{pid}/paper-handoffs.xlsx` (sheet "Sổ giao nhận", giờ Việt Nam, mỗi hộp một dòng kể cả hộp chưa có mốc).
+- Hộp sắp theo số hộp (thành phần cuối của case_key, quy tắc B0) rồi tên hộp theo thứ tự tự nhiên (QC-12).
 
 ## Việc sau 10/10
 

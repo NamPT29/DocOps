@@ -1,5 +1,4 @@
 from fastapi import APIRouter, Depends, Response
-from urllib.parse import quote
 from pydantic import BaseModel, ConfigDict
 from server.database import get_db
 from server.routers.auth import get_current_user

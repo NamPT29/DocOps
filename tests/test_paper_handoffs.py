@@ -299,26 +299,33 @@ def test_8_excel(auth_client, test_db):
         "happened_at": "2026-10-08T09:30:00+07:00", "handed_by": "Giao 2", "received_by": "Nhận 2", "note": "Ghi chú B"
     })
 
+    case1.case_key = "phong01/0007"  # số hộp = thành phần cuối của case_key (B0); case2 "box-2" không có số
+    test_db.commit()
+
     res = auth_client.get(f"/api/projects/{project.id}/paper-handoffs.xlsx")
     assert res.status_code == 200
-    assert "attachment; filename=\"so_giao_nhan_ho_so_giay_" in res.headers["content-disposition"]
+    assert res.headers["content-disposition"] == f'attachment; filename="so_giao_nhan_ho_so_giay_{project.id}.xlsx"'
     
     wb = load_workbook(filename=io.BytesIO(res.content))
     ws = wb["Sổ giao nhận"]
     
     # Header
     headers = [cell.value for cell in ws[1]]
-    assert len(headers) == 17
-    assert headers[0] == "Hộp"
-    assert headers[16] == "Ghi chú"
+    labels = ["Nhận từ khách hàng", "Giao chỉnh lý", "Giao scan", "Trả kho", "Trả khách hàng"]
+    assert headers == ["Hộp", "Tên hộp"] + [
+        f"{label} - {part}" for label in labels for part in ("Thời gian", "Người giao", "Người nhận")
+    ] + ["Ghi chú"]
     
     # Rows
     rows = list(ws.iter_rows(values_only=True))
     assert len(rows) == 3 # 1 header, 2 cases
     
-    case1_row = [r for r in rows if r[0] == "Hộp 1"][0]
-    assert "08/10/2026 08:30" in case1_row
-    assert "Nhận từ khách hàng: Ghi chú A\nGiao chỉnh lý: Ghi chú B" in case1_row[16]
+    assert [(r[0], r[1]) for r in rows[1:]] == [(7, "Hộp 1"), (None, "Hộp 2")]
+    case1_row = rows[1]
+    assert case1_row[2:5] == ("08/10/2026 08:30", "Giao 1", "Nhận 1")
+    assert case1_row[5:8] == ("08/10/2026 09:30", "Giao 2", "Nhận 2")
+    assert case1_row[17] == "Nhận từ khách hàng: Ghi chú A\nGiao chỉnh lý: Ghi chú B"
+    assert rows[2][2:] == (None,) * 16  # hộp chưa có mốc vẫn có dòng, ô trống
 
 
 def test_9_pragma_foreign_keys(test_db):
