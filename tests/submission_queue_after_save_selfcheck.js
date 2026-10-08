@@ -14,6 +14,7 @@ let requestedUrl = '';
 let selectedIndex = null;
 let queueSaved = 0;
 let queueRendered = 0;
+const alerts = [];
 
 const sandbox = {
     console,
@@ -37,7 +38,7 @@ const sandbox = {
         return { ok: true, async json() { return { status: 'ok' }; } };
     },
     formatApiErrorDetail: value => String(value),
-    alert() {},
+    alert(message) { alerts.push(message); },
     fetchSubmissions() {},
     saveQueueState() { queueSaved++; },
     renderFileQueue() { queueRendered++; },
@@ -74,6 +75,9 @@ vm.runInContext(`
         'Tài liệu vừa nhập phải được giữ lại trong queue local',
     );
     assert.equal(sandbox.uploadedFilesQueue[0].completed, true);
+    assert.equal(alerts.length, 1);
+    assert.match(alerts[0], /^Lưu thành công!/);
+    assert.match(alerts[0], /tab "Hồ sơ đã nhập"/, 'Sau khi lưu hồ sơ mới phải chỉ chỗ sửa hoặc nộp duyệt');
     assert.equal(queueSaved, 1);
     assert.equal(queueRendered, 1);
     assert.equal(selectedIndex, null, 'Thoát Xem/Sửa không được tự thêm PDF hồ sơ vào queue');
@@ -89,8 +93,8 @@ vm.runInContext(`
 
     const employeeHtml = fs.readFileSync('frontend/index.html', 'utf8');
     const adminHtml = fs.readFileSync('frontend/admin.html', 'utf8');
-    assert(employeeHtml.includes('js/submission.js?v=100.05'));
-    assert(adminHtml.includes('js/submission.js?v=100.05'));
+    assert(employeeHtml.includes('js/submission.js?v=100.06'));
+    assert(adminHtml.includes('js/submission.js?v=100.06'));
     console.log('Submission queue after save self-check: OK');
 })().catch(error => {
     console.error(error);

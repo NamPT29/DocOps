@@ -226,7 +226,9 @@ async function submitData(targetStatus = 'draft') {
                 return;
             }
 
-            alert('Lưu thành công!');
+            alert(isEditing
+                ? 'Lưu thành công!'
+                : 'Lưu thành công! Muốn sửa hoặc nộp duyệt, mở tab "Hồ sơ đã nhập".');
             
             if (isEditing) {
                 cancelEdit();

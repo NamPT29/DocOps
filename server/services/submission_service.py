@@ -41,6 +41,10 @@ def _load_submission_document_metadata(
     return metadata
 
 
+ENTERED_DOCUMENT_MESSAGE = (
+    "File này đã có hồ sơ nhập. Hãy mở tab \"Hồ sơ đã nhập\" để sửa hoặc nộp duyệt."
+)
+
 _CONTEXT_UNSET = object()
 
 class SubmissionService:
@@ -412,10 +416,21 @@ class SubmissionService:
             else:
                 enriched.pop("_folder_path", None)
         elif enriched.get("_pdf_uuid"):
+            if pending_only and SubmissionService._has_entered_document(db, owner_id, enriched["_pdf_uuid"]):
+                raise HTTPException(status_code=409, detail=ENTERED_DOCUMENT_MESSAGE)
             raise HTTPException(status_code=400, detail="File đính kèm không thuộc người dùng")
         elif enriched.get("_pdf_filename"):
             raise HTTPException(status_code=400, detail="Không xác minh được file đính kèm")
         return enriched, document
+
+    @staticmethod
+    def _has_entered_document(db: Session, owner_id: int, uuid_filename: str) -> bool:
+        """True khi file thuộc đúng người dùng và đã có hồ sơ nhập (trạng thái completed)."""
+        existing = DocumentRepository(db).resolve_reference(
+            owner_id=owner_id,
+            uuid_filename=uuid_filename,
+        )
+        return existing is not None and existing.status == "completed"
 
     @staticmethod
     def _enrich_pdf_reference_from_context(
