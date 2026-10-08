@@ -148,10 +148,30 @@ def check_html_pages() -> None:
     record("Trang HTML không dán trùng, không nạp trùng script", not bad, "; ".join(bad))
 
 
+SELFCHECK_END_LINE = re.compile(r"\b(ok|passed|ready)\b", re.IGNORECASE)
+
+
+def selfcheck_reached_end(stdout: str) -> bool:
+    """Node thoát với mã 0 khi một lời hứa không bao giờ xong, nên selfcheck bị treo trông như đạt.
+    Selfcheck chạy tới cuối luôn in một dòng cuối có OK/passed/ready; im lặng hoặc dừng giữa chừng = hỏng."""
+    lines = [line.strip() for line in stdout.splitlines() if line.strip()]
+    return bool(lines) and SELFCHECK_END_LINE.search(lines[-1]) is not None
+
+
 def check_js_selfchecks() -> None:
     files = sorted(glob.glob(str(ROOT / "tests" / "*selfcheck*.js")))
-    failed = [Path(item).name for item in files if run(["node", item])[0] != 0]
+    failed, unfinished = [], []
+    for item in files:
+        proc = subprocess.run(
+            ["node", item], cwd=ROOT, env=ENV, capture_output=True, text=True,
+            encoding="utf-8", errors="replace",
+        )
+        if proc.returncode != 0:
+            failed.append(Path(item).name)
+        elif not selfcheck_reached_end(proc.stdout):
+            unfinished.append(Path(item).name)
     record(f"Selfcheck JS ({len(files)} file)", not failed, ", ".join(failed))
+    record("Selfcheck JS chạy tới dòng kết thúc (treo thì hỏng)", not unfinished, ", ".join(unfinished))
 
 
 def check_pytest(targets: list[str]) -> None:

@@ -5,6 +5,7 @@ Cổng: python scripts/gate.py  (dùng --static để kiểm nhanh)
 - [x] R2 tests/test_migrations_postgres_offline.py (SQL PostgreSQL offline 0010 -> head); đã chạy thật 0001 -> 0014 trên PostgreSQL 16
 - [x] R3 Runbook + test offline cập nhật cho 0015_entry_qc_round2; đã chạy thật hạ 0015 -> 0010 -> head trên PostgreSQL 16 (0 khác biệt)
 - [x] R4 Cổng thêm luật: cổng đầy đủ phải chạy trên cây đã commit, test không sinh file trong repo, selfcheck chỉ dùng module có sẵn của Node, trang HTML không dán/nạp trùng; AGENTS.md thêm "Bài học từ review" và mẫu báo cáo
+- [x] R5 Cổng coi selfcheck JS không in dòng cuối (OK/passed/ready) là hỏng, vì Node thoát mã 0 khi một lời hứa treo; tests/test_gate_rules.py
 ## Chấm công (nhánh claude/nice-hamilton-7pg8bk)
 - [x] T1 Sheet "Chấm công theo ngày" trong mọi file Excel xuất (mỗi người mỗi ngày: số hàng đã nhập, đã duyệt)
 ## 4b Nộp S: sửa theo review c4e1a0f. Đặc tả sửa: docs/plans/4b-fix-checklist.md
@@ -52,7 +53,8 @@ Cổng: python scripts/gate.py  (dùng --static để kiểm nhanh)
 - [x] C3b (tab Việc của tôi ở index.html: Chỉnh lý, Nộp S, Check scan)
 - [x] C3b-2 (reviewer: sửa index.html dán trùng, tab cho người chỉ làm quy trình, my-work hộp chưa có người phụ trách, giờ VN)
 - [x] C3b-3 (gộp C3b-2, test_f đủ ca, sửa tài liệu C3)
-- [ ] C3c (Check nhập vòng 1/2 cho người kiểm tra ở index.html)
+- [x] C3c (Check nhập vòng 1/2 cho người kiểm tra ở index.html; sửa giờ Check nhập lệch 7 tiếng)
 - [x] E4 (giờ thông báo và nhật ký bước trả kèm múi giờ UTC, hết lệch 7 tiếng)
 - [x] E3 (mở lại hộp thoại Nộp S khi đang xử lý)
 - [x] E3-2 (sửa E3 theo review: mở hộp thoại TRƯỚC KHI theo dõi gói processing)
+- [x] E3-3 (reviewer: code E3-2 đạt, thử trình duyệt bản cũ không mở được hộp thoại, bản mới mở sau 0,2 giây; viết lại test để 7/7 mutation bị bắt, điều 10 AGENTS nguyên văn, sửa dòng tài liệu sai)

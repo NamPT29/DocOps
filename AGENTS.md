@@ -39,7 +39,8 @@ check nhập liệu → chuẩn hóa → bàn giao.
 8. Làm ĐỦ mọi mục của prompt, kể cả "BƯỚC 0", sửa tài liệu, gộp nhánh. Đoạn tài liệu reviewer đưa thì chép nguyên văn,
    không tự viết nội dung nghiệp vụ.
 9. Không viết "các bước kiểm tra trên web" cho phần chưa có giao diện; không nói đã kiểm trình duyệt nếu chưa chạy.
-10. Khai báo cáo đã sửa/thêm test hoặc tài liệu nhưng commit thiếu file sẽ bị trả lại toàn bộ lát.
+10. Báo cáo phải khớp `git show --stat <commit>`: chỉ ghi ✅ cho việc có trong commit. Khai đã thêm test/sửa tài liệu mà commit không có là bị trả lại cả lát (E3). Mutation phải đúng danh sách trong prompt, không tự đổi.
+11. Selfcheck JS phải in dòng cuối có OK/passed/ready, và mọi await có thể bị treo phải đi qua withTimeout (mẫu: tests/project_scan_submit_selfcheck.js). Node thoát mã 0 khi một lời hứa không bao giờ xong; cổng coi selfcheck không in dòng cuối là HỎNG (E3-2: 4/6 mutation còn sống vì treo im lặng).
 
 ## Mẫu báo cáo cuối lát (bắt buộc, thiếu mục nào là trả lại)
 ```

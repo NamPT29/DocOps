@@ -122,6 +122,14 @@ async function runTimers() {
     }
 }
 
+// Node thoát với mã 0 khi một lời hứa không bao giờ xong, nên một lần treo trông như "đạt" im lặng.
+// Mọi await có thể bị chặn bởi việc theo dõi gói đi qua withTimeout(): treo thành lỗi rõ ràng.
+function withTimeout(promise, message, ms = 1500) {
+    let timer;
+    const guard = new Promise((_, reject) => { timer = setTimeout(() => reject(new Error(message)), ms); });
+    return Promise.race([promise, guard]).finally(() => clearTimeout(timer));
+}
+
 (async () => {
     // scanSubmitCanSubmit: open Scan, Check scan still pending (or not enabled);
     // a waiting or returned box also needs its previous stage done.
@@ -342,7 +350,7 @@ async function runTimers() {
     const pending = elements.scanSubmitSendButton.listeners.click();
     await flush();
     elements.scanSubmitModal.listeners['hidden.bs.modal']();
-    await pending;
+    await withTimeout(pending, 'đóng hộp thoại phải giải phóng lần nộp đang chờ');
     const before = requests.length;
     await runTimers();
     assert.equal(requests.length, before, 'no polling after the dialog closed');
@@ -379,35 +387,71 @@ async function runTimers() {
     find(rows[0], node => node.textContent === 'Nộp S')[0].listeners.click();
     assert.deepEqual(page.opened, [1, 'Hộp 1']);
 
-    // a) Test hộp thoại hiện RA TRƯỚC KHI theo dõi xong (mô phỏng setTimeout chưa chạy mà DOM đã có .show).
-    let modalShownBeforePolling = false;
-    sandbox.bootstrap.Modal = class { show() { modalShownBeforePolling = true; } };
-    let pollerPromiseResolver;
-    const holdPolling = new Promise(resolve => { pollerPromiseResolver = resolve; });
-    sandbox.scanSubmitStartPolling = () => { return { done: holdPolling, stop: () => {} }; };
-    
+    // E3-2: hộp thoại phải hiện NGAY cả khi hộp đang có gói processing; theo dõi chạy sau đó.
+    let modalShown = 0;
+    sandbox.bootstrap.Modal = class { show() { modalShown += 1; } };
+    let pollersStarted = 0;
+    let pollersStopped = 0;
+    let releasePolling;
+    const holdPolling = new Promise(resolve => { releasePolling = resolve; });
+    sandbox.scanSubmitStartPolling = () => {
+        pollersStarted += 1;
+        return { done: holdPolling, stop: () => { pollersStopped += 1; } };
+    };
+    const packagesRoute = '/api/projects/7/cases/4/scan-packages';
+    const packageRow = status => ({
+        id: 99, version: 1, status, total_files: 10, processed_files: status === 'done' ? 10 : 3, failed_files: 0,
+    });
     routes = {
         '/api/documents/server-folders': { handler: () => respond(200, { current_relative_path: '', directories: [] }) },
-        ['/api/projects/7/cases/4/scan-packages']: { handler: () => respond(200, { status: 'ok', data: [{ id: 99, status: 'processing' }] }) }
+        [packagesRoute]: { handler: () => respond(200, { status: 'ok', data: [packageRow('processing')] }) },
     };
-    
-    await sandbox.openScanSubmit(4, 'Hộp Test');
-    // openScanSubmit should finish without waiting for holdPolling to resolve
-    assert.equal(modalShownBeforePolling, true, 'Dialog shown before polling completes');
-    pollerPromiseResolver(null); // release memory
 
-    // b) Test bỏ qua không theo dõi nếu history trả về 'done' sẵn.
-    let pollingStarted = false;
-    sandbox.scanSubmitStartPolling = () => { pollingStarted = true; return { done: Promise.resolve(null), stop: () => {} }; };
-    routes['/api/projects/7/cases/4/scan-packages'].handler = () => respond(200, { status: 'ok', data: [{ id: 99, status: 'done' }] });
-    await sandbox.openScanSubmit(4, 'Hộp Test 2');
-    assert.equal(pollingStarted, false, 'Does not follow already done package');
+    // a) Gói đang processing: hộp thoại hiện, theo dõi bắt đầu đúng một lần, openScanSubmit không đợi theo dõi xong.
+    await withTimeout(sandbox.openScanSubmit(4, 'Hộp Test'), 'openScanSubmit phải trả về mà không đợi theo dõi xong');
+    assert.equal(modalShown, 1, 'hộp thoại hiện khi gói còn processing');
+    assert.equal(pollersStarted, 1, 'gói processing được theo dõi tự động (một lần)');
+    assert.match(text(elements.scanSubmitResult), /S1 – Đang xử lý/);
+    assert.match(text(elements.scanSubmitResult), /Tiến độ: 3\/10 file \(30%\)/);
+    assert.equal(elements.scanSubmitSendButton.disabled, true, 'đang xử lý thì chưa cho nộp tiếp');
 
-    // c) Test dọn dẹp: gọi stopScanSubmitPolling khi onScanSubmitHidden.
-    let pollerStopped = false;
-    sandbox.scanSubmitState.poller = { stop: () => { pollerStopped = true; } };
-    sandbox.onScanSubmitHidden();
-    assert.equal(pollerStopped, true, 'onScanSubmitHidden cleans up poller');
+    // b) Mở lại khi bộ theo dõi cũ còn chạy: dừng bộ cũ, không có hai bộ theo dõi cùng lúc.
+    await withTimeout(sandbox.openScanSubmit(4, 'Hộp Test'), 'mở lại hộp thoại phải trả về');
+    assert.equal(pollersStopped, 1, 'bộ theo dõi cũ bị dừng khi mở lại');
+    assert.equal(pollersStarted, 2, 'chỉ một bộ theo dõi mới được tạo');
+
+    // c) Đóng hộp thoại dừng đúng bộ theo dõi do openScanSubmit tạo.
+    elements.scanSubmitModal.listeners['hidden.bs.modal']();
+    assert.equal(pollersStopped, 2, 'đóng hộp thoại dừng bộ theo dõi');
+    releasePolling(null);
+    await flush();
+
+    // d) Gói đã done: hộp thoại hiện, không theo dõi.
+    modalShown = 0;
+    pollersStarted = 0;
+    routes[packagesRoute].handler = () => respond(200, { status: 'ok', data: [packageRow('done')] });
+    await withTimeout(sandbox.openScanSubmit(4, 'Hộp Test 2'), 'openScanSubmit (gói đã done) phải trả về');
+    assert.equal(modalShown, 1, 'hộp thoại hiện khi hộp không có gói processing');
+    assert.equal(pollersStarted, 0, 'gói đã done không bị theo dõi');
+
+    // e) Mở lại sang hộp không có gói processing khi bộ theo dõi cũ chưa bị dừng: chính openScanSubmit phải dừng nó.
+    let releaseSecond;
+    const holdSecond = new Promise(resolve => { releaseSecond = resolve; });
+    pollersStarted = 0;
+    pollersStopped = 0;
+    sandbox.scanSubmitStartPolling = () => {
+        pollersStarted += 1;
+        return { done: holdSecond, stop: () => { pollersStopped += 1; } };
+    };
+    routes[packagesRoute].handler = () => respond(200, { status: 'ok', data: [packageRow('processing')] });
+    await withTimeout(sandbox.openScanSubmit(4, 'Hộp A'), 'openScanSubmit (gói processing) phải trả về');
+    assert.equal(pollersStarted, 1);
+    routes[packagesRoute].handler = () => respond(200, { status: 'ok', data: [packageRow('done')] });
+    await withTimeout(sandbox.openScanSubmit(4, 'Hộp B'), 'openScanSubmit (gói đã done) phải trả về');
+    assert.equal(pollersStopped, 1, 'mở sang hộp khác dừng bộ theo dõi còn lại của hộp trước');
+    assert.equal(pollersStarted, 1, 'hộp không có gói processing không tạo bộ theo dõi mới');
+    releaseSecond(null);
+    await flush();
 
     console.log('Project scan submit self-check: OK');
 })().catch(error => {

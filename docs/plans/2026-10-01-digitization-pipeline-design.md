@@ -230,7 +230,7 @@ migration `0011_scan_packages`), giao diện `frontend/js/project_scan_submit.js
    - Hộp thoại chọn thư mục từ `GET /api/documents/server-folders` (vào thư mục con, lên cấp cha,
      "Chọn thư mục này"; KHÔNG có ô gõ đường dẫn); ô "Cấp thư mục tên người scan" mặc định 1, min 0.
    - Lỗi hiện nguyên văn `detail` (detail dạng `{code, message}` hiện `message`).
-   - Luồng theo dõi nộp S (bất đồng bộ): Hiện hộp thoại lên ngay trước khi bắt đầu tải lịch sử gói hoặc theo dõi. Theo dõi hỏi `GET` cùng URL mỗi 2 giây tới khi gói hết `processing` (không block giao diện); dừng khi đóng hộp thoại. Hiện tiến độ (processed + failed)/total; khi xong hiện S{version}, tên người scan
+   - Luồng theo dõi nộp S (bất đồng bộ): Hộp thoại hiện sau khi tải xong danh sách thư mục và lịch sử gói; nếu hộp đang có gói `processing` thì tự theo dõi gói đó SAU khi hộp thoại đã hiện (không chặn giao diện; bản E3 từng đợi theo dõi xong mới hiện hộp thoại nên hộp thoại không mở được). Theo dõi hỏi `GET` cùng URL mỗi 2 giây tới khi gói hết `processing`; dừng khi đóng hộp thoại hoặc khi mở lại; mở lại không tạo hai bộ theo dõi. Hiện tiến độ (processed + failed)/total; khi xong hiện S{version}, tên người scan
      (hoặc "chưa có tên"), số trang, trang A4 quy đổi, thời gian (giờ Việt Nam), cảnh báo theo cờ và
      số file lỗi của gói `done`; gói `failed` hiện `error_message` màu đỏ. Danh sách S1, S2...
      của hộp; xong thì làm mới bảng quy trình.
