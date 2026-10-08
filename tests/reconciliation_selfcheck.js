@@ -54,7 +54,7 @@ vm.runInContext(fs.readFileSync('frontend/js/project_reports.js', 'utf8'), sandb
 
     const menu = fs.readFileSync('frontend/js/project_management.js', 'utf8');
     assert.match(menu, /label: 'Đối soát R1–R4 \(Excel\)',\s*icon: 'fa-scale-balanced',\s*handler: \(\) => downloadReconciliation\(project\)/);
-    assert(fs.readFileSync('frontend/admin.html', 'utf8').includes('js/project_reports.js?v=1.04'));
+    assert(fs.readFileSync('frontend/admin.html', 'utf8').includes('js/project_reports.js?v=1.05'));
     console.log('Reconciliation self-check: OK');
 })().catch(error => {
     console.error(error);

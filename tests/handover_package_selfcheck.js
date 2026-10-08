@@ -108,7 +108,7 @@ const start = () => withTimeout(sandbox.startHandoverPackage(project, { pollMs: 
     const menu = fs.readFileSync('frontend/js/project_management.js', 'utf8');
     assert.match(menu, /label: 'Tải biên bản bàn giao',\s*icon: 'fa-file-signature',\s*handler: \(\) => downloadHandoverReport\(project\)/);
     assert.match(menu, /label: 'Đóng gói bàn giao',\s*icon: 'fa-box',\s*handler: \(\) => startHandoverPackage\(project\)/);
-    assert(fs.readFileSync('frontend/admin.html', 'utf8').includes('js/project_reports.js?v=1.04'));
+    assert(fs.readFileSync('frontend/admin.html', 'utf8').includes('js/project_reports.js?v=1.05'));
     console.log('Handover package self-check: OK');
 })().catch(error => {
     console.error(error);

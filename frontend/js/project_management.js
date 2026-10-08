@@ -173,7 +173,16 @@ async function loadProjectList() {
         const detail = document.createElement('div');
         detail.className = 'small text-muted mt-1';
         detail.textContent = project.template_name;
-        nameCell.append(strong, detail);
+        nameCell.append(strong);
+        if (project.handover_locked_at) {
+            // K1: dự án đã khóa bàn giao, không sửa được hồ sơ.
+            const badge = document.createElement('span');
+            badge.className = 'badge bg-secondary ms-2';
+            badge.dataset.handoverLocked = 'true';
+            badge.textContent = 'Đã bàn giao';
+            nameCell.append(badge);
+        }
+        nameCell.append(detail);
         const assignmentCell = appendProjectCell(row, '');
         assignmentCell.className = 'admin-project-metrics';
         assignmentCell.innerHTML = `<div><span>Nhập</span><strong>${metrics.input_assigned_cases || 0}/${metrics.total_cases || 0}</strong></div><div><span>Kiểm</span><strong>${metrics.reviewer_assigned_cases || 0}/${metrics.total_cases || 0}</strong></div>`;
@@ -346,6 +355,17 @@ async function loadProjectList() {
                     handler: () => downloadHandoverReport(project),
                     trackExport: true,
                 },
+                project.handover_locked_at
+                    ? {
+                        label: 'Mở khóa bàn giao',
+                        icon: 'fa-lock-open',
+                        handler: () => unlockProjectHandover(project),
+                    }
+                    : {
+                        label: 'Khóa bàn giao',
+                        icon: 'fa-lock',
+                        handler: () => lockProjectHandover(project),
+                    },
             ],
         );
         actionCell.append(projectActions);

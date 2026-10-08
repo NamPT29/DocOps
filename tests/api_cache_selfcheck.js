@@ -70,7 +70,7 @@ const count = url => gets.filter(item => item === url).length;
     assert.equal(count(config), 2, 'mở lại cấu hình ngay sau khi lưu phải đọc bản mới');
 
     for (const page of ['frontend/admin.html', 'frontend/index.html']) {
-        assert(fs.readFileSync(page, 'utf8').includes('auth.js?v=102.05'), `${page} phải nạp auth.js?v=102.05`);
+        assert(fs.readFileSync(page, 'utf8').includes('auth.js?v=102.06'), `${page} phải nạp auth.js?v=102.06`);
     }
     console.log('API cache self-check: OK');
 })().catch(error => {

@@ -384,6 +384,50 @@ async function downloadNormalizationPlan(project) {
     }
 }
 
+// Khóa sửa hồ sơ sau bàn giao (K1): khóa cần đã đóng gói xong; mở khóa bắt buộc lý do.
+async function handoverLockErrorText(response) {
+    const errorData = await response.json().catch(() => ({}));
+    const detail = errorData.detail;
+    return (detail && detail.message) || errorData.message || formatApiErrorDetail(detail);
+}
+
+async function sendHandoverLock(project, method, body, doneMessage) {
+    const response = await authFetch(`/api/projects/${Number(project.id)}/handover-lock`, {
+        method,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+    });
+    if (!response) return false;
+    if (!response.ok) {
+        const message = await handoverLockErrorText(response);
+        setProjectExportStatus(message, true);
+        alert(message);
+        return false;
+    }
+    setProjectExportStatus(doneMessage);
+    if (typeof loadProjectList === 'function') await loadProjectList();
+    return true;
+}
+
+async function lockProjectHandover(project) {
+    if (!project || !Number(project.id)) return false;
+    if (!confirm(`Khóa bàn giao dự án “${project.name}”? Sau khi khóa, không ai sửa được hồ sơ của dự án cho tới khi Admin mở khóa.`)) return false;
+    const note = prompt('Ghi chú khi khóa (ví dụ số biên bản bàn giao), có thể để trống:', '');
+    if (note === null) return false;
+    return sendHandoverLock(project, 'POST', { note: note.trim() || null }, `Đã khóa bàn giao dự án “${project.name}”.`);
+}
+
+async function unlockProjectHandover(project) {
+    if (!project || !Number(project.id)) return false;
+    const reason = prompt(`Lý do mở khóa bàn giao dự án “${project.name}” (bắt buộc):`, '');
+    if (reason === null) return false;
+    if (!reason.trim()) {
+        alert('Cần nhập lý do mở khóa.');
+        return false;
+    }
+    return sendHandoverLock(project, 'DELETE', { reason: reason.trim() }, `Đã mở khóa bàn giao dự án “${project.name}”.`);
+}
+
 // Đối soát R1–R4 (lát R1, chỉ đọc): Excel 5 sheet, dòng lệch tô màu.
 async function downloadReconciliation(project) {
     if (!project || !Number(project.id)) return false;

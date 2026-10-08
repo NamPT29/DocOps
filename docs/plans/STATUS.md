@@ -77,7 +77,7 @@ Làm lần lượt; lát trước được reviewer duyệt mới làm lát sau.
 - [x] D2 (reviewer) Bảng tiến độ dự án: giao diện (3 ô số, bảng hạng mục, thanh 14 ngày, bảng người, Làm mới); project_dashboard.js v1.00, project_management.js v2.21, admin-page.js v8
 - [x] R1 (reviewer) Đối soát R1–R4 (Excel, giả định reviewer, chờ BA): GET /api/projects/{pid}/reconciliation; menu "Đối soát R1–R4 (Excel)"; project_reports.js v1.04, project_management.js v2.22
 - [x] K1a (reviewer) Khóa sửa hồ sơ sau bàn giao (thay G4): revision 0017_project_handover_lock, POST/DELETE /api/projects/{pid}/handover-lock, 423 project_handed_over ở mọi đường sửa hồ sơ, danh sách dự án có handover_locked_at
-- [ ] K1b Khóa sửa hồ sơ sau bàn giao: giao diện
+- [x] K1b (reviewer) Khóa sửa hồ sơ sau bàn giao: giao diện (menu Khóa/Mở khóa bàn giao, nhãn "Đã bàn giao", mở khóa bắt buộc lý do); project_reports.js v1.05, project_management.js v2.23; auth.js v102.06 (lỗi {code, message} hiện message)
 - [ ] P1a Chi trả theo sản lượng: đơn giá + bảng tạm tính (API, Excel), revision 0018_project_work_rates
 - [ ] P1b Chi trả theo sản lượng: giao diện
 - [ ] P2 Chi trả: chốt kỳ, lưu kèm tham số, revision 0019_payroll_periods

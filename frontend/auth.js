@@ -447,7 +447,8 @@ function formatApiErrorDetail(detail) {
             return field ? `${field}: ${message}` : message;
         }).join('\n');
     }
-    if (detail && typeof detail === 'object') return detail.msg || JSON.stringify(detail);
+    // Lỗi nghiệp vụ dạng {code, message} (vd. 423 project_handed_over): hiện message, không hiện JSON.
+    if (detail && typeof detail === 'object') return detail.message || detail.msg || JSON.stringify(detail);
     return detail || 'Lỗi không xác định';
 }
 

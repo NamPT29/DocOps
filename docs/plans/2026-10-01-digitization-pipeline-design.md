@@ -423,6 +423,10 @@ Excel 5 sheet: "Tổng hợp" (mỗi mã: số dòng theo từng kết quả) v�
   `POST /api/submit` nên đã bị chặn.
 - Không chặn: xem hồ sơ, giữ chỗ xem (`PUT/DELETE /api/submissions/{id}/view`), xuất Excel, kế hoạch chuẩn hóa, đối
   soát. Hồ sơ không gắn file của dự án nào (luồng cũ) không bị khóa.
+- Giao diện (K1b): menu dự án "Khóa bàn giao" (hỏi xác nhận và ghi chú, ví dụ số biên bản) hoặc "Mở khóa bàn giao"
+  (bắt buộc lý do, để trống thì không gửi); danh sách dự án có nhãn "Đã bàn giao". Lỗi hiện đúng thông báo của máy chủ.
+  `formatApiErrorDetail` (auth.js, dùng chung) hiện `detail.message` của lỗi dạng `{code, message}` thay vì chuỗi JSON,
+  nên trang nhập liệu nhận 423 hiện "Dự án đã bàn giao...".
 
 ## Việc sau 10/10
 
