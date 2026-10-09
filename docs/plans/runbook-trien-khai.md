@@ -73,7 +73,7 @@ Chỉ đọc, không sửa gì, không in mật khẩu. Dòng cuối phải là 
 Hai cách, chọn một:
 
 - **Tự động:** khởi động ở bước 5; cửa sổ host in dòng
-  `Database migration: <cũ> -> 0018_project_work_rates` (hoặc revision mới nhất của bản bàn giao).
+  `Database migration: <cũ> -> 0019_payroll_periods` (hoặc revision mới nhất của bản bàn giao).
 - **Chạy riêng để xem kết quả trước:** `python scripts/migrate_database.py`. In ra
   `Database upgraded: <cũ> -> <mới>`.
 

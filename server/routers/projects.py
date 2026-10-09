@@ -22,6 +22,7 @@ from server.services.project_dashboard_service import build_dashboard
 from server.services.reconciliation_service import build_reconciliation, reconciliation_workbook
 from server.services.handover_lock_service import ensure_project_editable, lock_project, unlock_project
 from server.services.payroll_service import compute_payroll, get_rates, parse_period, payroll_workbook, update_rates
+from server.services.payroll_period_service import create_period, delete_period, list_periods, period_workbook
 from server.services.handover_package_service import read_job, report_path, start_package
 from server.services.project_workspace_service import get_project_workspace
 from server.services.export_job_service import (
@@ -258,6 +259,62 @@ def api_get_payroll_preview(
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
+
+
+class PayrollPeriodRequest(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+    date_from: str = Field(alias="from")
+    date_to: str = Field(alias="to")
+
+
+@router.post("/{project_id}/payroll-periods")
+def api_create_payroll_period(
+    project_id: int,
+    request: PayrollPeriodRequest,
+    current_user: dict = Depends(get_admin_user),
+    db: Session = Depends(get_db),
+):
+    """Chốt kỳ chi trả (P2): tính như tạm tính rồi lưu kèm tham số."""
+    return {"status": "ok", "data": create_period(
+        db, project_id=project_id, date_from=request.date_from, date_to=request.date_to, actor=current_user,
+    )}
+
+
+@router.get("/{project_id}/payroll-periods")
+def api_list_payroll_periods(
+    project_id: int,
+    current_user: dict = Depends(get_admin_user),
+    db: Session = Depends(get_db),
+):
+    return {"status": "ok", "data": list_periods(db, project_id=project_id)}
+
+
+@router.get("/{project_id}/payroll-periods/{period_id}.xlsx")
+def api_download_payroll_period(
+    project_id: int,
+    period_id: int,
+    current_user: dict = Depends(get_admin_user),
+    db: Session = Depends(get_db),
+):
+    """Excel của kỳ đã chốt: đúng số đã lưu, không tính lại."""
+    content, result = period_workbook(db, project_id=project_id, period_id=period_id)
+    period = result["period"]
+    filename = f"Chi_tra_{project_id}_{period['from']}_{period['to']}.xlsx"
+    return Response(
+        content=content,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@router.delete("/{project_id}/payroll-periods/{period_id}")
+def api_delete_payroll_period(
+    project_id: int,
+    period_id: int,
+    current_user: dict = Depends(get_admin_user),
+    db: Session = Depends(get_db),
+):
+    return {"status": "ok", "data": delete_period(db, project_id=project_id, period_id=period_id)}
 
 
 class HandoverLockRequest(BaseModel):

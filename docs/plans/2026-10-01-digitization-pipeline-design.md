@@ -446,6 +446,18 @@ Theo QC-07, QC-10; phần còn lại là giả định reviewer, chờ BA.
   ngày 1 tháng này tới hôm nay, giờ Việt Nam), "Xem tạm tính" (bảng theo người + chi tiết, tiền dạng 1.234.567, cảnh
   báo thiếu đơn giá), "Tải Excel". Lỗi hiện trong hộp thoại.
 
+## Chi trả – chốt kỳ (P2, revision 0019_payroll_periods)
+
+QC-01: kết quả đã tính lưu kèm giá trị tham số tại thời điểm tính.
+- Bảng `payroll_periods` (từ ngày, đến ngày, `params_json` = đơn giá, hệ số giấy xấu, phiên bản QC; tổng tiền; người
+  chốt) và `payroll_lines` (người, tên người lúc chốt, mã, sản lượng, đơn giá, hệ số, thành tiền); xóa kỳ xóa dòng.
+- `POST /api/projects/{pid}/payroll-periods {from, to}` (Admin): tính như bảng tạm tính rồi LƯU. Chồng ngày với kỳ đã
+  chốt: 409 `period_overlap`; mã có sản lượng mà thiếu đơn giá: 409 `missing_rate` (không lưu gì).
+  `GET .../payroll-periods` (mới nhất trước), `GET .../payroll-periods/{id}.xlsx` xuất ĐÚNG số đã lưu (đổi đơn giá,
+  hệ số sau đó không đổi file), `DELETE .../payroll-periods/{id}`: chỉ kỳ mới nhất (409 `not_latest_period`).
+- Giao diện: trong hộp thoại Chi trả sản lượng có nút "Chốt kỳ đang chọn", bảng kỳ đã chốt (kỳ, tổng, số dòng, giờ chốt
+  theo giờ Việt Nam, người chốt), "Tải Excel" từng kỳ, "Xóa" ở kỳ mới nhất.
+
 ## Việc sau 10/10
 
 - Luồng cũ (giao tài liệu lẻ, nhập thư mục máy chủ) vẫn chỉ nhận tài khoản thường làm người nhập;
@@ -454,9 +466,14 @@ Theo QC-07, QC-10; phần còn lại là giả định reviewer, chờ BA.
 - Chấm công KPI scan theo chuỗi tên người scan (`scanned_by_name`).
 - Nộp S: mở lại hộp thoại khi gói của hộp đang `processing` thì chưa tự hỏi tiến độ lại
   (chỉ hiện trong danh sách các lần nộp).
-- Khóa dự án/hồ sơ sau khi ký biên bản bàn giao (G3 mới có biên bản, chưa khóa sửa).
+- Khóa dự án/hồ sơ sau bàn giao: đã làm ở K1 (khóa tay sau khi đóng gói xong); chưa tự khóa khi ký biên bản.
 - Bìa (như hệ thống mẫu): khung bìa riêng có nút "Lưu" bìa; Số tờ để trống thì tự cộng số tờ các
   văn bản đã lưu (cần biểu mẫu có cột số tờ của văn bản).
+- Đợt B (giả định reviewer, chờ BA/Duy Vũ xác nhận): nội dung 4 phép đối soát R1–R4; luật mốc giao nhận hồ sơ giấy;
+  cách tính chi trả (lần nộp/duyệt đầu, giấy xấu theo mục lục, chặn chồng kỳ); định mức QC-10 trừ SC-A4-1.
+- Sổ giao nhận hồ sơ giấy: nhân viên Chỉnh lý/Scan có quyền API nhưng chưa có giao diện ở index.html.
+- Chi trả: chưa tính giờ làm thêm, Chủ nhật (QC-09), Check scan (CS), Chỉnh lý (CL), Chuẩn hóa (CH); chưa có chấm
+  công theo giờ (WorkLog BM-TKDA).
 
 ## Lộ trình (BA mục 12.2)
 

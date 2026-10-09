@@ -12,11 +12,11 @@ assert.doesNotMatch(html, /\bon[a-z]+\s*=/i, 'Admin page must not contain inline
 assert.doesNotMatch(html, /<style\b/i, 'Admin page must not contain inline style elements.');
 assert.doesNotMatch(html, /\bstyle\s*=/i, 'Admin page must not contain inline style attributes.');
 assert.match(html, /href="(?:css\/)?admin-page\.css\?v=1"/i, 'Admin page must load its external stylesheet.');
-assert.match(html, /src="admin-page\.js\?v=9"/i, 'Admin page must load its external behavior script.');
+assert.match(html, /src="admin-page\.js\?v=10"/i, 'Admin page must load its external behavior script.');
 
 const actionNames = [...html.matchAll(/data-admin-action="([^"]+)"/g)].map(match => match[1]);
 const changeNames = [...html.matchAll(/data-admin-change="([^"]+)"/g)].map(match => match[1]);
-assert.equal(actionNames.length, 39, 'All current click handlers must be represented by declarative actions.');
+assert.equal(actionNames.length, 40, 'All current click handlers must be represented by declarative actions.');
 assert.equal(changeNames.length, 10, 'All former change handlers must be represented by declarative actions.');
 
 const calls = [];
@@ -67,6 +67,7 @@ const actionFunctions = {
     savePayrollRates: [],
     previewPayroll: [],
     downloadPayroll: [],
+    closePayrollPeriod: [],
     restoreProjectManagementNavigation: [],
 };
 

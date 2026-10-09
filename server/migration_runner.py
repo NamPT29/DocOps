@@ -21,7 +21,7 @@ from migrations.schema_0001 import SCHEMA
 
 
 BASELINE_REVISION = "0001_current_schema"
-HEAD_REVISION = "0018_project_work_rates"
+HEAD_REVISION = "0019_payroll_periods"
 _POSTGRES_MIGRATION_LOCK_ID = 761_004_001
 
 

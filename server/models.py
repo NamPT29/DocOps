@@ -951,5 +951,7 @@ from server.models_paper import (  # noqa: E402,F401
 )
 
 from server.models_payroll import (  # noqa: E402,F401
+    PayrollLine,
+    PayrollPeriod,
     ProjectWorkRate,
 )

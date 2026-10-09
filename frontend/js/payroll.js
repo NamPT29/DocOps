@@ -168,6 +168,115 @@ async function downloadPayroll() {
     return true;
 }
 
+// ---------------------------------------------------------------- P2: chốt kỳ
+// "2026-10-01" -> "01/10/2026"
+function payrollShowDate(isoDate) {
+    const [year, month, day] = String(isoDate || '').split('-');
+    return `${day}/${month}/${year}`;
+}
+
+// "2026-10-08T02:00:00Z" -> "08/10/2026 09:00" (giờ Việt Nam)
+function payrollShowTime(isoUtc) {
+    const ms = Date.parse(isoUtc || '');
+    if (Number.isNaN(ms)) return '';
+    const date = new Date(ms + PAYROLL_VN_OFFSET_MS);
+    const pad = value => String(value).padStart(2, '0');
+    return `${pad(date.getUTCDate())}/${pad(date.getUTCMonth() + 1)}/${date.getUTCFullYear()} ${pad(date.getUTCHours())}:${pad(date.getUTCMinutes())}`;
+}
+
+function payrollButton(label, className, handler) {
+    const button = payrollElement('button', `btn btn-sm ${className}`, label);
+    button.type = 'button';
+    button.addEventListener('click', handler);
+    return button;
+}
+
+function renderPayrollPeriods(periods) {
+    const table = document.getElementById('payrollPeriodsTable');
+    if (!table) return;
+    const head = payrollElement('thead', 'table-light');
+    const headRow = payrollElement('tr');
+    ['Kỳ', 'Tổng (VNĐ)', 'Số dòng', 'Chốt lúc', 'Người chốt', ''].forEach(text => headRow.appendChild(payrollElement('th', '', text)));
+    head.appendChild(headRow);
+    const body = payrollElement('tbody');
+    if (!periods.length) {
+        const row = payrollElement('tr');
+        const cell = payrollElement('td', 'text-muted text-center', 'Chưa chốt kỳ nào.');
+        cell.colSpan = 6;
+        row.appendChild(cell);
+        body.appendChild(row);
+    }
+    periods.forEach((period, index) => {
+        const row = payrollElement('tr');
+        row.dataset.periodId = String(period.id);
+        [
+            `${payrollShowDate(period.from)} – ${payrollShowDate(period.to)}`,
+            payrollMoney(period.total), String(period.lines), payrollShowTime(period.created_at), period.created_by || '',
+        ].forEach(text => row.appendChild(payrollElement('td', '', text)));
+        const actions = payrollElement('td', 'text-nowrap');
+        actions.appendChild(payrollButton('Tải Excel', 'btn-outline-success py-0 me-1', () => downloadPayrollPeriod(period)));
+        // Danh sách mới nhất trước: chỉ kỳ mới nhất được xóa.
+        if (index === 0) actions.appendChild(payrollButton('Xóa', 'btn-outline-danger py-0', () => deletePayrollPeriod(period)));
+        row.appendChild(actions);
+        body.appendChild(row);
+    });
+    table.replaceChildren(head, body);
+}
+
+async function loadPayrollPeriods() {
+    const response = await authFetch(`/api/projects/${payrollProject.id}/payroll-periods`, { cache: 'no-store' });
+    if (!response) return false;
+    if (!response.ok) {
+        setPayrollError(await payrollErrorText(response));
+        return false;
+    }
+    renderPayrollPeriods((await response.json()).data || []);
+    return true;
+}
+
+async function closePayrollPeriod() {
+    if (!payrollProject) return false;
+    const from = String(document.getElementById('payrollFrom').value || '');
+    const to = String(document.getElementById('payrollTo').value || '');
+    if (!payrollPeriodQuery()) return false;
+    if (!confirm(`Chốt kỳ chi trả ${payrollShowDate(from)} – ${payrollShowDate(to)}? Số liệu và đơn giá lúc này sẽ được lưu cố định.`)) return false;
+    const response = await authFetch(`/api/projects/${payrollProject.id}/payroll-periods`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ from, to }),
+    });
+    if (!response) return false;
+    if (!response.ok) {
+        setPayrollError(await payrollErrorText(response));
+        return false;
+    }
+    setPayrollError('');
+    return loadPayrollPeriods();
+}
+
+async function downloadPayrollPeriod(period) {
+    const response = await authFetch(`/api/projects/${payrollProject.id}/payroll-periods/${Number(period.id)}.xlsx`);
+    if (!response) return false;
+    if (!response.ok) {
+        setPayrollError(await payrollErrorText(response));
+        return false;
+    }
+    await downloadExportResponse(response, `Chi_tra_${payrollProject.id}_${period.from}_${period.to}.xlsx`);
+    return true;
+}
+
+async function deletePayrollPeriod(period) {
+    if (!confirm(`Xóa kỳ đã chốt ${payrollShowDate(period.from)} – ${payrollShowDate(period.to)}?`)) return false;
+    const response = await authFetch(`/api/projects/${payrollProject.id}/payroll-periods/${Number(period.id)}`, { method: 'DELETE' });
+    if (!response) return false;
+    if (!response.ok) {
+        setPayrollError(await payrollErrorText(response));
+        return false;
+    }
+    setPayrollError('');
+    return loadPayrollPeriods();
+}
+
 async function openPayroll(project, nowMs = Date.now()) {
     if (!project || !Number(project.id)) return false;
     payrollProject = { id: Number(project.id), name: project.name || '' };
@@ -176,9 +285,10 @@ async function openPayroll(project, nowMs = Date.now()) {
     const today = payrollVnDate(nowMs);
     document.getElementById('payrollFrom').value = `${today.slice(0, 8)}01`;
     document.getElementById('payrollTo').value = today;
-    ['payrollPeopleTable', 'payrollLinesTable'].forEach(id => document.getElementById(id).replaceChildren());
+    ['payrollPeopleTable', 'payrollLinesTable', 'payrollPeriodsTable'].forEach(id => document.getElementById(id).replaceChildren());
     const warnings = document.getElementById('payrollWarnings');
     if (warnings) warnings.classList.add('d-none');
     bootstrap.Modal.getOrCreateInstance(document.getElementById('payrollModal')).show();
-    return loadPayrollRates();
+    if (!(await loadPayrollRates())) return false;
+    return loadPayrollPeriods();
 }

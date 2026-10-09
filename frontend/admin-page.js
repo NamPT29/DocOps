@@ -45,6 +45,7 @@ const ADMIN_PAGE_ACTIONS = Object.freeze({
     'save-payroll-rates': () => savePayrollRates(),
     'preview-payroll': () => previewPayroll(),
     'download-payroll': () => downloadPayroll(),
+    'close-payroll-period': () => closePayrollPeriod(),
 });
 
 function runAdminPageAction(actionName) {

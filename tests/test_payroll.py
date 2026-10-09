@@ -238,7 +238,7 @@ def test_work_rates_revision_is_additive():
 
     from server.migration_runner import HEAD_REVISION, _alembic_config, current_database_revision
 
-    assert HEAD_REVISION == "0018_project_work_rates"
+    assert HEAD_REVISION == "0019_payroll_periods"
     engine = create_engine("sqlite+pysqlite:///:memory:")
     config = _alembic_config(Path(__file__).resolve().parents[1])
     with engine.begin() as connection:
@@ -252,3 +252,160 @@ def test_work_rates_revision_is_additive():
         assert "project_work_rates" not in inspect(connection).get_table_names()
         command.upgrade(config, "0018_project_work_rates")
         assert "project_work_rates" in inspect(connection).get_table_names()
+
+
+# ---------------------------------------------------------------- P2: chốt kỳ
+def admin_client(db, users):
+    app.dependency_overrides[get_db] = lambda: db
+    app.dependency_overrides[get_current_user] = lambda: as_user(users["admin"])
+    return TestClient(app)
+
+
+def detail_rows(content):
+    sheet = openpyxl.load_workbook(BytesIO(content))["Chi tiết"]
+    return [list(row) for row in sheet.iter_rows(min_row=2, values_only=True)]
+
+
+def test_closed_period_keeps_stored_numbers_after_rates_change(db, world):
+    project, users = world
+    client = admin_client(db, users)
+    try:
+        url = f"/api/projects/{project.id}/payroll-periods"
+        response = client.post(url, json={"from": "2026-10-01", "to": "2026-10-07"})
+        assert response.status_code == 200, response.text
+        period = response.json()["data"]
+        assert (period["total"], period["lines"]) == (108220, 7)
+        assert period["params"]["rates"] == {"NL-1": 1000, "CN-1": 400, "SC-A4-1": 50}
+        assert period["params"]["bad_paper_factor"] == 1.3 and period["params"]["qc_version"]
+        before = client.get(f"{url}/{period['id']}.xlsx")
+        assert before.headers["content-disposition"] == f'attachment; filename="Chi_tra_{project.id}_2026-10-01_2026-10-07.xlsx"'
+
+        client.put(f"/api/projects/{project.id}/work-rates", json={"rates": {"NL-1": 9999, "SC-A4-1": 1}})
+        db.add(ProjectPolicy(project_id=project.id, bad_paper_factor=Decimal("3.00")))
+        db.commit()
+        after = client.get(f"{url}/{period['id']}.xlsx")
+        assert detail_rows(after.content) == detail_rows(before.content), "kỳ đã chốt không đổi theo đơn giá mới"
+        assert ["An CTV", "NL-2", "Nhập liệu", "văn bản", 1, 1000, 1.3, 1300] in detail_rows(after.content)
+        summary = [list(row)[:2] for row in openpyxl.load_workbook(BytesIO(after.content))["Tổng theo người"].iter_rows(values_only=True)]
+        assert ["Đơn giá loại 1", "NL-1: 1000, CN-1: 400, SC-A4-1: 50"] in summary, "tham số lúc chốt"
+        assert ["Hệ số giấy xấu", 1.3] in summary
+        listed = client.get(url).json()["data"]
+        assert [(item["id"], item["from"], item["to"], item["total"], item["created_by"]) for item in listed] == [
+            (period["id"], "2026-10-01", "2026-10-07", 108220, "Quản trị")]
+        assert client.get(f"{url}/999.xlsx").status_code == 404
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_overlap_and_missing_rate_block_closing(db, world):
+    project, users = world
+    client = admin_client(db, users)
+    try:
+        url = f"/api/projects/{project.id}/payroll-periods"
+        assert client.post(url, json={"from": "2026-10-01", "to": "2026-10-07"}).status_code == 200
+        for start, end in (("2026-10-07", "2026-10-10"), ("2026-09-25", "2026-10-01"), ("2026-10-03", "2026-10-04")):
+            response = client.post(url, json={"from": start, "to": end})
+            assert response.status_code == 409 and response.json()["detail"]["code"] == "period_overlap", (start, end)
+        assert client.post(url, json={"from": "2026-10-08", "to": "2026-10-10"}).status_code == 200, "kỳ liền kề không chồng"
+        db.query(ProjectWorkRate).filter(ProjectWorkRate.work_code == "SC-A4-1").delete()
+        db.commit()
+        response = client.post(url, json={"from": "2026-09-01", "to": "2026-09-30"})
+        assert response.status_code == 200, "kỳ không có sản lượng scan thì không cần đơn giá scan"
+        response = client.post(url, json={"from": "2026-11-01", "to": "2026-11-02"})
+        assert response.status_code == 200
+        db.query(ProjectWorkRate).delete()
+        db.commit()
+        db.add(CaseScanPackage(case_id=db.query(ProjectCase).first().id, version=9, submitted_by_user_id=users["admin"].id,
+                               source_path="x", total_a4_equivalent=5, status="done", finished_at=datetime(2026, 12, 2, 3)))
+        db.commit()
+        response = client.post(url, json={"from": "2026-12-01", "to": "2026-12-03"})
+        assert response.status_code == 409 and response.json()["detail"]["code"] == "missing_rate"
+        assert "Chưa có đơn giá SC-A4-1" in response.json()["detail"]["message"]
+        assert len(client.get(url).json()["data"]) == 4, "thiếu đơn giá thì không lưu kỳ"
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_only_latest_period_can_be_deleted(db, world):
+    project, users = world
+    client = admin_client(db, users)
+    try:
+        url = f"/api/projects/{project.id}/payroll-periods"
+        first = client.post(url, json={"from": "2026-10-01", "to": "2026-10-07"}).json()["data"]["id"]
+        second = client.post(url, json={"from": "2026-10-08", "to": "2026-10-09"}).json()["data"]["id"]
+        response = client.delete(f"{url}/{first}")
+        assert response.status_code == 409 and response.json()["detail"]["code"] == "not_latest_period"
+        assert client.delete(f"{url}/{second}").status_code == 200
+        from server.models_payroll import PayrollLine, PayrollPeriod
+        db.expire_all()
+        assert db.query(PayrollPeriod).count() == 1
+        assert db.query(PayrollLine).filter(PayrollLine.period_id == second).count() == 0, "xóa kỳ xóa cả dòng"
+        assert client.delete(f"{url}/{first}").status_code == 200
+        app.dependency_overrides[get_current_user] = lambda: as_user(users["nhap"])
+        assert client.post(url, json={"from": "2026-10-01", "to": "2026-10-07"}).status_code == 403
+        assert client.get(url).status_code == 403
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_deleting_period_cascades_with_foreign_keys_on(tmp_path):
+    from sqlalchemy import event, text
+
+    from server.models_payroll import PayrollLine, PayrollPeriod
+
+    engine = create_engine(f"sqlite:///{(tmp_path / 'fk.sqlite3').as_posix()}")
+    event.listen(engine, "connect", lambda connection, _record: connection.execute("PRAGMA foreign_keys=ON"))
+    Base.metadata.create_all(bind=engine)
+    session = sessionmaker(bind=engine)()
+    try:
+        user = User(username="a", password="x", role="admin", full_name="A")
+        template = Template(name="T", filename="t.xlsx")
+        session.add_all([user, template])
+        session.flush()
+        project = Project(name="P", root_folder_name="P", template_id=template.id, template_name_snapshot="T",
+                          template_filename_snapshot="t.xlsx", case_level=1, report_mode="pdf", created_by_user_id=user.id)
+        session.add(project)
+        session.flush()
+        period = PayrollPeriod(project_id=project.id, date_from=date(2026, 10, 1), date_to=date(2026, 10, 2), params_json="{}",
+                               total_amount=0, created_by_user_id=user.id)
+        session.add(period)
+        session.flush()
+        session.add(PayrollLine(period_id=period.id, person_name="A", work_code="NL-1", quantity=1, unit_price=1, factor=1, amount=1))
+        session.commit()
+        project_id, user_id = project.id, user.id
+        session.execute(text("DELETE FROM payroll_periods"))
+        session.commit()
+        session.expunge_all()
+        assert session.query(PayrollLine).count() == 0
+        session.add(PayrollPeriod(project_id=project_id, date_from=date(2026, 10, 1), date_to=date(2026, 10, 2), params_json="{}",
+                                  total_amount=0, created_by_user_id=user_id))
+        session.commit()
+        session.execute(text("DELETE FROM projects"))
+        session.commit()
+        assert session.query(PayrollPeriod).count() == 0, "xóa dự án xóa kỳ"
+    finally:
+        session.close()
+        engine.dispose()
+
+
+def test_payroll_periods_revision_is_additive():
+    pytest.importorskip("alembic")
+    from pathlib import Path
+
+    from alembic import command
+
+    from server.migration_runner import _alembic_config, current_database_revision
+
+    engine = create_engine("sqlite+pysqlite:///:memory:")
+    config = _alembic_config(Path(__file__).resolve().parents[1])
+    with engine.begin() as connection:
+        config.attributes["connection"] = connection
+        command.upgrade(config, "0018_project_work_rates")
+        assert not {"payroll_periods", "payroll_lines"} & set(inspect(connection).get_table_names())
+        command.upgrade(config, "0019_payroll_periods")
+        assert current_database_revision(connection) == "0019_payroll_periods"
+        assert {"payroll_periods", "payroll_lines"} <= set(inspect(connection).get_table_names())
+        command.downgrade(config, "0018_project_work_rates")
+        assert not {"payroll_periods", "payroll_lines"} & set(inspect(connection).get_table_names())
+        command.upgrade(config, "0019_payroll_periods")
+        assert {"payroll_periods", "payroll_lines"} <= set(inspect(connection).get_table_names())
