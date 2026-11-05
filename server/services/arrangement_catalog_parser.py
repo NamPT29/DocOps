@@ -102,6 +102,9 @@ class ParsedCatalog:
     errors: list = field(default_factory=list)  # {"row", "column", "message"}
     file_errors: list = field(default_factory=list)
     data_rows: int = 0
+    # Số hộp của mọi dòng có "Hộp số" hợp lệ, kể cả dòng lỗi ở cột khác: dùng để
+    # đếm hộp trong file cùng phạm vi với data_rows (đếm hồ sơ).
+    box_numbers: set = field(default_factory=set)
 
     @property
     def error_count(self):
@@ -342,6 +345,10 @@ def parse_catalog_workbook(content: bytes, *, today: date) -> ParsedCatalog:
                 )
                 parsed.rows.clear()
                 return parsed
+            try:
+                parsed.box_numbers.add(parse_positive_integer(cells.get("box_number"), "Hộp số"))
+            except CatalogValueError:
+                pass  # lỗi Hộp số được _parse_row báo theo dòng
             catalog_row, errors = _parse_row(cells, row_number=row_number, today=today)
             parsed.errors.extend(errors)
             if catalog_row is None:

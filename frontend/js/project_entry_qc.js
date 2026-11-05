@@ -95,7 +95,7 @@ async function openEntryQc(caseId, caseName) {
             liveBody.appendChild(_entryQcElement('div', 'text-muted fst-italic', 'Chưa có biên bản nào được kiểm.'));
         } else {
             const l = data.live;
-            liveBody.appendChild(_entryQcElement('div', '', `Biên bản đã kiểm ${l.reports_assessed}/${l.reports_total}; Biên bản lỗi ${l.error_reports}`));
+            liveBody.appendChild(_entryQcElement('div', '', `Phiếu đã kiểm ${l.reports_assessed}/${l.reports_total}; Phiếu lỗi ${l.error_reports}`));
             liveBody.appendChild(_entryQcElement('div', '', `Trường lỗi ${l.error_fields}/${l.total_fields}`));
             
             const rateStr = `Tỷ lệ lỗi ${l.rate_percent}% (ngưỡng ${l.threshold_percent}%)`;

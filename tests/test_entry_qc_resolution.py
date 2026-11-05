@@ -285,3 +285,23 @@ def test_entry_qc_snapshot(client, test_db, mock_data):
     data = res.json()["data"]
     assert data["rounds"][0]["threshold_percent"] == 5.0
     assert data["rounds"][0]["rate_percent"] == 10.0
+
+
+def test_entry_qc_counts_reports_in_one_unit(client, test_db, mock_data):
+    # Một biên bản (thư mục hồ sơ) có 3 phiếu PDF: "đã kiểm x/y" phải cùng đơn vị phiếu (3/3), không phải 3/1.
+    p1, c1, admin, scanner = mock_data["p1"], mock_data["c1"], mock_data["admin"], mock_data["scanner"]
+    setup_headers(app.dependency_overrides, admin)
+    enable_stages(client, p1.id)
+    for errors in (0, 1, 0):
+        make_submission(test_db, p1.id, c1.id, scanner["id"], 10, errors)
+
+    res = client.get(f"/api/projects/{p1.id}/workflow/cases/{c1.id}/entry-qc")
+    assert res.status_code == 200
+    live = res.json()["data"]["live"]
+    assert (live["reports_assessed"], live["reports_total"]) == (3, 3)
+    assert (live["error_fields"], live["total_fields"]) == (1, 30)
+
+    res = client.post(f"/api/projects/{p1.id}/workflow/cases/{c1.id}/entry-qc/round1")
+    assert res.status_code == 200
+    row = test_db.query(CaseEntryQcResult).filter_by(case_id=c1.id, round=1).one()
+    assert (row.reports_assessed, row.reports_total) == (3, 3)

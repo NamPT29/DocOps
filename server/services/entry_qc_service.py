@@ -83,7 +83,7 @@ def get_entry_qc_summary(db, project_id, case_id, actor):
         threshold = policy["error_threshold_percent"]
         rate = (Decimal(error_fields) * 100 / Decimal(total_fields)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
         live = {
-            "reports_total": progress["report_total"],
+            "reports_total": progress["submissions_total"],
             "reports_assessed": stats["reports_assessed"],
             "error_reports": stats["error_reports"],
             "total_fields": total_fields,
@@ -192,7 +192,7 @@ def finalize_round1(db, project_id, case_id, actor):
         project_id=project_id,
         case_id=case_id,
         round=1,
-        reports_total=progress["report_total"],
+        reports_total=progress["submissions_total"],
         reports_assessed=stats["reports_assessed"],
         error_reports=stats["error_reports"],
         total_fields=total_fields,

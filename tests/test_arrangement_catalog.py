@@ -300,6 +300,24 @@ def test_any_error_blocks_the_whole_import(world):
     assert world.db.query(ArrangementDossier).count() == 0
 
 
+def test_preview_counts_boxes_over_the_same_rows_as_dossiers(world):
+    # "N hồ sơ trong M hộp": M đếm cả hộp chỉ có dòng lỗi, như N đếm mọi dòng dữ liệu.
+    rows = [
+        dossier(1, 1),
+        dossier(2, 1, title=""),            # hộp 2 chỉ có dòng lỗi
+        dossier(2, 2, start="31/02/2020"),
+        dossier("abc", 1),                  # Hộp số sai: báo lỗi, không tính là hộp
+    ]
+    result = preview(world, rows)
+    assert result["row_count"] == 4
+    assert result["box_count"] == 2
+    assert result["error_count"] == 3
+    assert result["can_import"] is False
+
+    ok = preview(world, [dossier(1, 1), dossier(1, 2), dossier(3, 1)])
+    assert (ok["row_count"], ok["box_count"]) == (3, 2)
+
+
 def test_confirm_needs_the_previewed_state(world):
     rows = [dossier(1, 1)]
     token = preview(world, rows)["plan_token"]

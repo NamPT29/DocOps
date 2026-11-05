@@ -143,7 +143,7 @@ def preview_catalog(db, *, project_id, file_name, content, today=None):
         "file_name": file_name,
         "file_sha256": parsed.file_sha256,
         "row_count": parsed.data_rows,
-        "box_count": len({row.box_number for row in parsed.rows}),
+        "box_count": len(parsed.box_numbers),
         "file_errors": file_errors,
         "errors": parsed.errors[:MAX_REPORTED_ERRORS],
         "error_count": len(parsed.errors),

@@ -304,8 +304,8 @@ async function runTest() {
     overlay = body.children[body.children.length - 1];
     txt = text(overlay);
     assert.match(txt, /Dự kiến: Không đạt/);
-
-    assert.match(txt, /Dự kiến: Không đạt/);
+    assert.match(txt, /Phiếu đã kiểm 10\/10; Phiếu lỗi 2/, 'Số liệu hiện tại đếm theo phiếu, tử và mẫu cùng đơn vị');
+    assert.doesNotMatch(txt, /Biên bản đã kiểm/);
     
     // --- ROUND 2 TESTS ---
     // (r2a) chưa bật
