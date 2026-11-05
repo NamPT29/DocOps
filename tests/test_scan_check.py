@@ -1,6 +1,10 @@
 """Check scan (lát CS1): xem file và trang của gói scan, so số trang với số tờ mục lục."""
+import hashlib
+from datetime import datetime
+
 import pypdf
 import pytest
+from pypdf.generic import DecodedStreamObject
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
@@ -9,9 +13,10 @@ from server.database import Base, get_db
 from server.main import app
 from server.models import ArrangementDossier, Project, ProjectCase, Template, User
 from server.models_scan import CaseScanFile, CaseScanPackage
-from server.models_workflow import ProjectStageMember
+from server.models_workflow import CaseStageState, ProjectStageMember
 from server.routers.auth import get_admin_user, get_current_user
-from server.services.scan_check_service import dossier_page_status
+from server.services import scan_check_service
+from server.services.scan_check_service import dossier_page_status, to_pdf_point
 
 client = TestClient(app)
 A4 = (595, 842)
@@ -244,3 +249,226 @@ def test_permissions_follow_scan_and_scan_qc_membership(env):
     app.dependency_overrides[get_current_user] = lambda: _as(env["ctv"])
     assert client.get(_view_url(env)).status_code == 403
     assert client.get(_file_url(env, scan_file.id)).status_code == 403
+
+
+# --- Bôi trắng vết ghim (CS2) ------------------------------------------------------
+
+MARK = b"0 0 0 rg 50 750 40 40 re f"
+
+
+def _write_marked_pdf(path, pages=2, rotate=0):
+    writer = pypdf.PdfWriter()
+    for _ in range(pages):
+        page = writer.add_blank_page(width=A4[0], height=A4[1])
+        stream = DecodedStreamObject()
+        stream.set_data(MARK)
+        page.replace_contents(stream)
+        if rotate:
+            page.rotate(rotate)
+    with open(path, "wb") as handle:
+        writer.write(handle)
+
+
+def _start_check_scan(env, user=None, status="in_progress"):
+    user = user or env["staff"]
+    db = env["db"]
+    db.add(ProjectStageMember(project_id=env["project"].id, user_id=env["staff"].id, stage_key="scan_qc"))
+    db.add(CaseStageState(project_id=env["project"].id, case_id=env["case"].id, stage_key="scan_qc",
+                          status=status, assigned_user_id=user.id, rework_count=0))
+    db.commit()
+    app.dependency_overrides[get_current_user] = lambda: _as(env["staff"])
+
+
+def _sha(path):
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def _whiteout(env, scan_file, **body):
+    payload = {"page": 1, "base_sha256": "", "strokes": [{"width": 0.03, "points": [[0.1, 0.1], [0.2, 0.1]]}]}
+    payload.update(body)
+    return client.post(f"{_file_url(env, scan_file.id)}/whiteout", json=payload)
+
+
+@pytest.fixture()
+def marked(env):
+    path = env["box"] / "01" / "1.pdf"
+    _write_marked_pdf(path)
+    return path
+
+
+@pytest.mark.parametrize("rotation,point,expected", [
+    (0, (0, 0), (0, 800)),
+    (0, (1, 1), (600, 0)),
+    (90, (0, 0), (0, 0)),
+    (90, (1, 0), (0, 800)),
+    (180, (0, 0), (600, 0)),
+    (270, (0, 0), (600, 800)),
+    (270, (0, 1), (0, 800)),
+    (-90, (0, 0), (600, 800)),
+])
+def test_to_pdf_point_follows_page_rotation(rotation, point, expected):
+    assert to_pdf_point(*point, (0, 0, 600, 800), rotation) == expected
+
+
+def test_to_pdf_point_uses_crop_box_origin():
+    assert to_pdf_point(0.5, 0.5, (10, 20, 610, 820), 0) == (310, 420)
+
+
+def test_file_response_carries_sha256(env, marked):
+    res = client.get(_file_url(env, env["files"]["01/1.pdf"].id))
+    assert res.headers["x-scan-file-sha256"] == _sha(marked)
+
+
+def test_whiteout_overwrites_page_with_white_strokes(env, marked):
+    _start_check_scan(env)
+    scan_file = env["files"]["01/1.pdf"]
+    view = client.get(_view_url(env)).json()["data"]
+    assert view["can_whiteout"] is True and view["whiteout_hint"] == ""
+
+    res = _whiteout(env, scan_file, base_sha256=_sha(marked))
+    assert res.status_code == 200, res.text
+    data = res.json()["data"]
+    assert data["sha256"] == _sha(marked)
+    assert data["file_size"] == marked.stat().st_size
+    env["db"].refresh(scan_file)
+    assert (scan_file.sha256, scan_file.file_size) == (data["sha256"], data["file_size"])
+
+    reader = pypdf.PdfReader(marked)
+    assert len(reader.pages) == 2
+    content = reader.pages[0].get_contents().get_data().decode("ascii")
+    assert content.startswith("q\n" + MARK.decode() + "\nQ\n"), "nội dung scan cũ giữ nguyên, bọc q/Q"
+    tail = content.split("\nQ\n", 1)[1].split("\n")
+    assert tail[:4] == ["q", "1 1 1 RG", "1 J", "1 j"]
+    assert tail[4:8] == ["17.85 w", "59.50 757.80 m", "119.00 757.80 l", "S"]
+    assert reader.pages[1].get_contents().get_data() == MARK, "trang khác không đổi"
+    assert sorted(p.name for p in marked.parent.iterdir()) == ["1.pdf", "10.pdf", "2.pdf", "BIA.pdf", "Thumbs.db"]
+
+
+def test_whiteout_single_point_and_rotated_page(env):
+    path = env["box"] / "01" / "2.pdf"
+    _write_marked_pdf(path, pages=1, rotate=90)
+    _start_check_scan(env)
+    res = _whiteout(env, env["files"]["01/2.pdf"], base_sha256=_sha(path),
+                    strokes=[{"width": 0.03, "points": [[0.1, 0.1]]}])
+    assert res.status_code == 200, res.text
+    tail = pypdf.PdfReader(path).pages[0].get_contents().get_data().decode().split("\nQ\n", 1)[1].split("\n")
+    # Trang xoay 90: bề ngang đang hiển thị là cạnh 842 của trang.
+    assert tail[4:8] == ["25.26 w", "59.50 84.20 m", "59.50 84.20 l", "S"]
+
+
+def test_whiteout_refuses_stale_file(env, marked):
+    _start_check_scan(env)
+    before = marked.read_bytes()
+    res = _whiteout(env, env["files"]["01/1.pdf"], base_sha256="0" * 64)
+    assert res.status_code == 409
+    assert "đã thay đổi" in res.json()["detail"]
+    assert marked.read_bytes() == before
+
+
+def test_whiteout_needs_check_scan_in_progress(env, marked):
+    scan_file = env["files"]["01/1.pdf"]
+    view = client.get(_view_url(env)).json()["data"]
+    assert view["can_whiteout"] is False
+    assert "Bắt đầu Check scan" in view["whiteout_hint"]
+    assert _whiteout(env, scan_file, base_sha256=_sha(marked)).status_code == 409
+
+    _start_check_scan(env, status="done")
+    assert client.get(_view_url(env)).json()["data"]["can_whiteout"] is False
+    before = marked.read_bytes()
+    assert _whiteout(env, scan_file, base_sha256=_sha(marked)).status_code == 409
+    assert marked.read_bytes() == before
+
+
+def test_whiteout_permissions(env, marked):
+    db = env["db"]
+    scan_file = env["files"]["01/1.pdf"]
+    other = User(username="hc2", password="x", full_name="Người khác", role="user", account_type="staff")
+    db.add(other)
+    db.commit()
+    _start_check_scan(env, user=other)
+    before = marked.read_bytes()
+
+    # Thành viên Check scan nhưng hộp đang do người khác check.
+    res = _whiteout(env, scan_file, base_sha256=_sha(marked))
+    assert res.status_code == 403
+    assert client.get(_view_url(env)).json()["data"]["can_whiteout"] is False
+
+    # Người scan xem được gói nhưng không được bôi.
+    scanner = User(username="scan", password="x", full_name="Người scan", role="user", account_type="staff")
+    db.add(scanner)
+    db.commit()
+    db.add(ProjectStageMember(project_id=env["project"].id, user_id=scanner.id, stage_key="scan"))
+    db.commit()
+    app.dependency_overrides[get_current_user] = lambda: _as(scanner)
+    assert client.get(_view_url(env)).status_code == 200
+    assert _whiteout(env, scan_file, base_sha256=_sha(marked)).status_code == 403
+
+    # CTV dù là thành viên Check scan cũng không được.
+    db.add(ProjectStageMember(project_id=env["project"].id, user_id=env["ctv"].id, stage_key="scan_qc"))
+    db.commit()
+    app.dependency_overrides[get_current_user] = lambda: _as(env["ctv"])
+    assert _whiteout(env, scan_file, base_sha256=_sha(marked)).status_code == 403
+    assert marked.read_bytes() == before
+
+    # Admin được bôi khi Check scan đang làm, kể cả hộp do người khác nhận.
+    app.dependency_overrides[get_current_user] = lambda: _as(env["admin"])
+    assert _whiteout(env, scan_file, base_sha256=_sha(marked)).status_code == 200
+    assert marked.read_bytes() != before
+
+
+def test_whiteout_only_on_latest_package(env, marked):
+    _start_check_scan(env)
+    db = env["db"]
+    db.add(CaseScanPackage(case_id=env["case"].id, version=2, source_path="P1/Hộp 01",
+                           status="done", submitted_by_user_id=env["admin"].id))
+    db.commit()
+    res = _whiteout(env, env["files"]["01/1.pdf"], base_sha256=_sha(marked))
+    assert res.status_code == 409
+    assert "mới nhất" in res.json()["detail"]
+
+
+@pytest.mark.parametrize("body,status", [
+    ({"page": 0}, 400),
+    ({"page": 3}, 400),
+    ({"page": "1"}, 400),
+    ({"page": True}, 400),
+    ({"strokes": []}, 400),
+    ({"strokes": [{"width": 0.03, "points": []}]}, 400),
+    ({"strokes": [{"width": 0.03, "points": [[1.5, 0.1]]}]}, 400),
+    ({"strokes": [{"width": 0.5, "points": [[0.1, 0.1]]}]}, 400),
+    ({"strokes": [{"width": 0.03, "points": [[0.1]]}]}, 400),
+    ({"strokes": [{"width": 0.03, "points": [[0.1, 0.1]]}] * 301}, 400),
+    ({"extra": 1}, 422),
+])
+def test_whiteout_validates_input(env, marked, body, status):
+    _start_check_scan(env)
+    before = marked.read_bytes()
+    res = _whiteout(env, env["files"]["01/1.pdf"], base_sha256=_sha(marked), **body)
+    assert res.status_code == status, res.text
+    assert marked.read_bytes() == before
+
+
+def test_whiteout_blocked_after_handover_lock(env, marked):
+    _start_check_scan(env)
+    before = marked.read_bytes()
+    env["project"].handover_locked_at = datetime(2026, 11, 1)
+    env["db"].commit()
+    res = _whiteout(env, env["files"]["01/1.pdf"], base_sha256=_sha(marked))
+    assert res.status_code == 423
+    assert marked.read_bytes() == before
+
+
+def test_whiteout_replace_failure_keeps_original(env, marked, monkeypatch):
+    _start_check_scan(env)
+    before = marked.read_bytes()
+
+    def refuse(*_args):
+        raise PermissionError("file đang mở")
+
+    monkeypatch.setattr(scan_check_service.os, "replace", refuse)
+    res = _whiteout(env, env["files"]["01/1.pdf"], base_sha256=_sha(marked))
+    assert res.status_code == 409
+    assert marked.read_bytes() == before
+    assert not any(p.name.endswith(".docops-tmp") for p in marked.parent.iterdir())
+    env["db"].refresh(env["files"]["01/1.pdf"])
+    assert env["files"]["01/1.pdf"].sha256 is None

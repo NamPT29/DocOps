@@ -639,7 +639,9 @@ def api_scan_check_view(
     enforce_can_view_scan_packages(db, project_id, current_user)
     return {
         "status": "ok",
-        "data": get_scan_check_view(db, project_id=project_id, case_id=case_id, package_id=package_id),
+        "data": get_scan_check_view(
+            db, project_id=project_id, case_id=case_id, package_id=package_id, actor=current_user,
+        ),
     }
 
 
@@ -652,13 +654,54 @@ def api_scan_package_file(
     current_user: dict = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    from fastapi.responses import FileResponse
-    from server.services.scan_check_service import resolve_scan_file
+    from server.services.scan_check_service import file_sha256, resolve_scan_file
     from server.services.workflow_service import enforce_can_view_scan_packages
 
     enforce_can_view_scan_packages(db, project_id, current_user)
     path = resolve_scan_file(db, project_id=project_id, case_id=case_id, package_id=package_id, file_id=file_id)
-    return FileResponse(path, media_type="application/pdf", headers={"Cache-Control": "no-store"})
+    return Response(
+        content=path.read_bytes(),
+        media_type="application/pdf",
+        headers={"Cache-Control": "no-store", "X-Scan-File-Sha256": file_sha256(path)},
+    )
+
+
+class ScanWhiteoutRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    page: Any = None
+    base_sha256: str = Field(default="", max_length=64)
+    strokes: Any = None
+
+
+@router.post("/{project_id}/cases/{case_id}/scan-packages/{package_id}/files/{file_id}/whiteout")
+def api_scan_file_whiteout(
+    project_id: int,
+    case_id: int,
+    package_id: int,
+    file_id: int,
+    payload: ScanWhiteoutRequest,
+    current_user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    from server.services.scan_check_service import whiteout_scan_page
+    from server.services.workflow_service import enforce_can_view_scan_packages
+
+    enforce_can_view_scan_packages(db, project_id, current_user)
+    ensure_project_editable(db, project_id)
+    return {
+        "status": "ok",
+        "data": whiteout_scan_page(
+            db,
+            project_id=project_id,
+            case_id=case_id,
+            package_id=package_id,
+            file_id=file_id,
+            actor=current_user,
+            page=payload.page,
+            base_sha256=payload.base_sha256,
+            strokes=payload.strokes,
+        ),
+    }
 
 
 @router.get("/{project_id}/cases/{case_id}/scan-packages")

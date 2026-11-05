@@ -414,7 +414,23 @@ const SCAN_CHECK_STATUS = Object.freeze({
     no_catalog: { label: 'Không có trong mục lục', css: 'bg-secondary' },
 });
 
-var scanCheckState = { packageId: 0, viewed: new Set(), renderToken: 0, pdfjs: null, overlay: null };
+const SCAN_WHITEOUT_BRUSHES = Object.freeze([
+    { label: 'Bút nhỏ', width: 0.015 },
+    { label: 'Bút vừa', width: 0.03 },
+    { label: 'Bút lớn', width: 0.06 },
+]);
+
+var scanCheckState = {
+    packageId: 0,
+    viewed: new Set(),
+    renderToken: 0,
+    pdfjs: null,
+    overlay: null,
+    canWhiteout: false,
+    whiteoutHint: '',
+    sha: new Map(),
+    editing: null,
+};
 
 /** Một dòng tóm tắt số trang của hồ sơ, ví dụ "3 tờ · cần 4–7 trang · có 5". */
 function scanCheckDossierLine(dossier) {
@@ -442,40 +458,212 @@ async function scanCheckLoadPdfjs() {
     return scanCheckState.pdfjs;
 }
 
-async function scanCheckRenderFile(container, file, token) {
+/** Tải file PDF của gói, nhớ mã SHA-256 máy chủ gửi kèm (dùng khi lưu bôi trắng). */
+async function scanCheckFetchPdf(file) {
     const response = await authFetch(scanCheckFileUrl(file.id), { cache: 'no-store' });
-    if (token !== scanCheckState.renderToken) return false;
     if (!response || !response.ok) {
         const { data } = await scanSubmitReadJson(response);
-        container.appendChild(scanSubmitElement('div', 'alert alert-danger py-1 small',
-            `${file.name}: ${scanSubmitErrorText(data, 'Không mở được file.')}`));
-        return false;
+        return { error: scanSubmitErrorText(data, 'Không mở được file.') };
     }
+    const sha = response.headers && typeof response.headers.get === 'function'
+        ? response.headers.get('X-Scan-File-Sha256') : '';
+    scanCheckState.sha.set(file.id, sha || '');
     const bytes = new Uint8Array(await response.arrayBuffer());
     const pdfjs = await scanCheckLoadPdfjs();
-    const pdf = await pdfjs.getDocument({ data: bytes, isEvalSupported: false, useWasm: false }).promise;
+    return { pdf: await pdfjs.getDocument({ data: bytes, isEvalSupported: false, useWasm: false }).promise };
+}
+
+async function scanCheckPaintPage(pdf, number, canvas) {
+    const page = await pdf.getPage(number);
+    const base = page.getViewport({ scale: 1 });
+    const viewport = page.getViewport({ scale: Math.min(2, 900 / Math.max(base.width, 1)) });
+    canvas.width = Math.floor(viewport.width);
+    canvas.height = Math.floor(viewport.height);
+    await page.render({ canvasContext: canvas.getContext('2d'), viewport }).promise;
+}
+
+async function scanCheckRenderFile(container, file, token) {
+    const loaded = await scanCheckFetchPdf(file);
+    if (token !== scanCheckState.renderToken) return false;
+    if (loaded.error) {
+        container.appendChild(scanSubmitElement('div', 'alert alert-danger py-1 small', `${file.name}: ${loaded.error}`));
+        return false;
+    }
+    const pdf = loaded.pdf;
     for (let number = 1; number <= pdf.numPages; number += 1) {
         if (token !== scanCheckState.renderToken) return false;
-        const page = await pdf.getPage(number);
-        const base = page.getViewport({ scale: 1 });
-        const viewport = page.getViewport({ scale: Math.min(2, 900 / Math.max(base.width, 1)) });
         const canvas = document.createElement('canvas');
-        canvas.width = Math.floor(viewport.width);
-        canvas.height = Math.floor(viewport.height);
-        canvas.className = 'border shadow-sm d-block mx-auto';
+        canvas.className = 'border shadow-sm d-block';
         canvas.style.maxWidth = '100%';
         canvas.style.height = 'auto';
-        const figure = scanSubmitElement('div', 'mb-3');
-        figure.append(canvas, scanSubmitElement('div', 'text-center small text-muted',
+        const frame = scanSubmitElement('div', 'position-relative d-inline-block');
+        frame.style.maxWidth = '100%';
+        frame.appendChild(canvas);
+        const figure = scanSubmitElement('div', 'mb-3 text-center');
+        if (scanCheckState.canWhiteout) {
+            const tools = scanSubmitElement('div', 'mb-1');
+            scanCheckIdleTools(tools, { frame, canvas, tools, file, number });
+            figure.appendChild(tools);
+        }
+        figure.append(frame, scanSubmitElement('div', 'small text-muted',
             `${file.name} – trang ${number}/${pdf.numPages}`));
         container.appendChild(figure);
-        await page.render({ canvasContext: canvas.getContext('2d'), viewport }).promise;
+        await scanCheckPaintPage(pdf, number, canvas);
     }
+    return true;
+}
+
+// --- Bôi trắng vết ghim: vẽ nét trắng lên lớp phủ, Lưu trang thì máy chủ ghi đè file ---
+
+function scanCheckIdleTools(tools, target, message) {
+    tools.replaceChildren();
+    const start = scanSubmitElement('button', 'btn btn-sm btn-outline-secondary', 'Bôi trắng vết ghim');
+    start.type = 'button';
+    start.addEventListener('click', () => scanCheckStartWhiteout(target));
+    tools.appendChild(start);
+    if (message) tools.appendChild(scanSubmitElement('span', 'small text-success ms-2', message));
+}
+
+/** Điểm con trỏ trên trang đang hiển thị, quy về 0..1 tính từ góc trên trái. */
+function scanCheckPoint(event, rect) {
+    const clamp = value => Math.min(1, Math.max(0, value));
+    const u = clamp((event.clientX - rect.left) / Math.max(rect.width, 1));
+    const v = clamp((event.clientY - rect.top) / Math.max(rect.height, 1));
+    return [Math.round(u * 10000) / 10000, Math.round(v * 10000) / 10000];
+}
+
+function scanCheckDrawStrokes(overlay, strokes) {
+    const context = overlay.getContext('2d');
+    if (!context) return;
+    context.clearRect(0, 0, overlay.width, overlay.height);
+    context.strokeStyle = '#ffffff';
+    context.lineCap = 'round';
+    context.lineJoin = 'round';
+    strokes.forEach(stroke => {
+        context.lineWidth = stroke.width * overlay.width;
+        context.beginPath();
+        const [first, ...rest] = stroke.points;
+        context.moveTo(first[0] * overlay.width, first[1] * overlay.height);
+        (rest.length ? rest : [first]).forEach(([u, v]) => context.lineTo(u * overlay.width, v * overlay.height));
+        context.stroke();
+    });
+}
+
+function scanCheckStartWhiteout(target) {
+    if (scanCheckState.editing) {
+        alert('Hãy Lưu trang hoặc Hủy trang đang bôi trước.');
+        return null;
+    }
+    const { frame, canvas, tools, file, number } = target;
+    const overlay = document.createElement('canvas');
+    overlay.width = canvas.width;
+    overlay.height = canvas.height;
+    overlay.className = 'position-absolute top-0 start-0 w-100 h-100';
+    overlay.style.touchAction = 'none';
+    overlay.style.cursor = 'crosshair';
+    frame.appendChild(overlay);
+
+    const strokes = [];
+    let current = null;
+    let brush = SCAN_WHITEOUT_BRUSHES[1].width;
+    let busy = false;
+
+    const status = scanSubmitElement('span', 'small ms-2');
+    const size = document.createElement('select');
+    size.className = 'form-select form-select-sm d-inline-block w-auto me-1';
+    SCAN_WHITEOUT_BRUSHES.forEach((item, index) => {
+        const option = scanSubmitElement('option', '', item.label);
+        option.value = String(index);
+        size.appendChild(option);
+    });
+    size.value = '1';
+    size.addEventListener('change', () => { brush = (SCAN_WHITEOUT_BRUSHES[Number(size.value)] || SCAN_WHITEOUT_BRUSHES[1]).width; });
+    const undo = scanSubmitElement('button', 'btn btn-sm btn-outline-secondary me-1', 'Hoàn tác nét');
+    const cancel = scanSubmitElement('button', 'btn btn-sm btn-outline-secondary me-1', 'Hủy');
+    const save = scanSubmitElement('button', 'btn btn-sm btn-primary', 'Lưu trang');
+    [undo, cancel, save].forEach(button => { button.type = 'button'; });
+    tools.replaceChildren(size, undo, cancel, save, status);
+
+    const finish = message => {
+        overlay.remove();
+        scanCheckState.editing = null;
+        scanCheckIdleTools(tools, target, message);
+    };
+    const editing = {
+        number,
+        strokes,
+        dirty: () => strokes.length > 0,
+        cancel: () => finish(''),
+    };
+    scanCheckState.editing = editing;
+
+    overlay.addEventListener('pointerdown', event => {
+        if (busy) return;
+        if (typeof overlay.setPointerCapture === 'function') overlay.setPointerCapture(event.pointerId);
+        current = { width: brush, points: [scanCheckPoint(event, overlay.getBoundingClientRect())] };
+        strokes.push(current);
+        scanCheckDrawStrokes(overlay, strokes);
+    });
+    overlay.addEventListener('pointermove', event => {
+        if (!current) return;
+        const point = scanCheckPoint(event, overlay.getBoundingClientRect());
+        const last = current.points[current.points.length - 1];
+        if (Math.abs(point[0] - last[0]) + Math.abs(point[1] - last[1]) < 0.002) return;
+        if (current.points.length >= 2000) return;
+        current.points.push(point);
+        scanCheckDrawStrokes(overlay, strokes);
+    });
+    const stop = () => { current = null; };
+    overlay.addEventListener('pointerup', stop);
+    overlay.addEventListener('pointercancel', stop);
+    undo.addEventListener('click', () => {
+        strokes.pop();
+        scanCheckDrawStrokes(overlay, strokes);
+    });
+    cancel.addEventListener('click', () => editing.cancel());
+    save.addEventListener('click', async () => {
+        if (busy) return;
+        if (!strokes.length) {
+            status.className = 'small ms-2 text-danger';
+            status.textContent = 'Chưa có nét bôi nào.';
+            return;
+        }
+        busy = true;
+        save.disabled = true;
+        status.className = 'small ms-2 text-muted';
+        status.textContent = 'Đang lưu...';
+        const { ok, data } = await scanSubmitReadJson(await authFetch(`${scanCheckFileUrl(file.id)}/whiteout`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ page: number, base_sha256: scanCheckState.sha.get(file.id) || '', strokes }),
+        }));
+        busy = false;
+        save.disabled = false;
+        if (!ok) {
+            status.className = 'small ms-2 text-danger';
+            status.textContent = scanSubmitErrorText(data, 'Không lưu được trang.');
+            return;
+        }
+        scanCheckState.sha.set(file.id, data.data.sha256);
+        const loaded = await scanCheckFetchPdf(file);
+        if (loaded.pdf) await scanCheckPaintPage(loaded.pdf, number, canvas);
+        finish(loaded.pdf ? 'Đã lưu, file gốc đã được ghi đè.' : `Đã lưu nhưng chưa tải lại được trang: ${loaded.error}`);
+    });
+    return editing;
+}
+
+/** Có nét chưa lưu thì hỏi trước khi bỏ; trả về false nếu người dùng muốn ở lại. */
+function scanCheckLeaveEditing() {
+    const editing = scanCheckState.editing;
+    if (!editing) return true;
+    if (editing.dirty() && !confirm('Trang đang bôi có nét chưa lưu. Bỏ các nét này?')) return false;
+    editing.cancel();
     return true;
 }
 
 /** Hiện các trang của danh sách file ở cột phải; lần chọn mới hủy lần vẽ cũ. */
 async function scanCheckShowFiles(pane, title, files, markers) {
+    if (!scanCheckLeaveEditing()) return;
     scanCheckState.renderToken += 1;
     const token = scanCheckState.renderToken;
     pane.replaceChildren(scanSubmitElement('h6', 'mb-3', title));
@@ -558,6 +746,7 @@ function renderScanCheckList(list, pane, view) {
 }
 
 function closeScanCheck() {
+    if (!scanCheckLeaveEditing()) return;
     scanCheckState.renderToken += 1;
     if (scanCheckState.overlay) scanCheckState.overlay.remove();
     scanCheckState.overlay = null;
@@ -573,7 +762,13 @@ async function openScanMatch(caseId, caseName) {
         return;
     }
     closeScanCheck();
-    if (scanCheckState.packageId !== pkg.id) scanCheckState.viewed = new Set();
+    if (scanCheckState.overlay) return;
+    if (scanCheckState.packageId !== pkg.id) {
+        scanCheckState.viewed = new Set();
+        scanCheckState.sha = new Map();
+    }
+    scanCheckState.canWhiteout = false;
+    scanCheckState.whiteoutHint = '';
     scanCheckState.packageId = pkg.id;
 
     const overlay = scanSubmitElement('div', 'modal fade show');
@@ -619,6 +814,11 @@ async function openScanMatch(caseId, caseName) {
         list.appendChild(scanSubmitElement('div', 'alert alert-danger small',
             scanSubmitErrorText(data, 'Không tải được danh sách file.')));
         return;
+    }
+    scanCheckState.canWhiteout = Boolean(data.data.can_whiteout);
+    scanCheckState.whiteoutHint = data.data.whiteout_hint || '';
+    if (!scanCheckState.canWhiteout && scanCheckState.whiteoutHint) {
+        summary.appendChild(scanSubmitElement('div', 'small text-muted mt-1', `Bôi trắng vết ghim: ${scanCheckState.whiteoutHint}`));
     }
     renderScanCheckList(list, pane, data.data);
 }

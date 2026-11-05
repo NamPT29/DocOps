@@ -13,7 +13,7 @@ for (const page of ['frontend/admin.html', 'frontend/index.html']) {
     const html = fs.readFileSync(page, 'utf8');
     const tags = html.match(/<script src="js\/project_scan_submit\.js\?v=[\d.]+"><\/script>/g) || [];
     assert.equal(tags.length, 1, `${page} nạp project_scan_submit.js đúng một lần`);
-    assert.match(tags[0], /\?v=1\.06"/, `${page} nâng ?v= của project_scan_submit.js`);
+    assert.match(tags[0], /\?v=1\.07"/, `${page} nâng ?v= của project_scan_submit.js`);
 }
 
 function withTimeout(promise, message, ms = 1500) {
@@ -52,7 +52,18 @@ function element(tag) {
             this.removed = true;
             if (this.parent) this.parent.children = this.parent.children.filter(child => child !== this);
         },
-        getContext: () => ({ canvas: true }),
+        value: '',
+        getContext() {
+            if (!this.ctx) {
+                const calls = [];
+                this.ctx = { calls };
+                ['clearRect', 'beginPath', 'moveTo', 'lineTo', 'stroke'].forEach(name => {
+                    this.ctx[name] = (...args) => calls.push([name, ...args]);
+                });
+            }
+            return this.ctx;
+        },
+        getBoundingClientRect: () => ({ left: 100, top: 50, width: 200, height: 300 }),
     };
     return node;
 }
@@ -66,14 +77,21 @@ const byText = (root, tag, wanted) => find(root, node => node.tagName === tag &&
 
 // --- fake server and PDF.js -----------------------------------------------------
 const requests = [];
+const posts = [];
 let routes = [];
 function respond(status, body) {
     return { ok: status >= 200 && status < 300, status, json: async () => body, arrayBuffer: async () => new ArrayBuffer(4) };
 }
-function pdfResponse(pages) {
+function pdfResponse(pages, sha = 'sha-a') {
     const buffer = new ArrayBuffer(1);
     new Uint8Array(buffer)[0] = pages;
-    return { ok: true, status: 200, json: async () => ({}), arrayBuffer: async () => buffer };
+    return {
+        ok: true,
+        status: 200,
+        headers: { get: name => (name === 'X-Scan-File-Sha256' ? sha : null) },
+        json: async () => ({}),
+        arrayBuffer: async () => buffer,
+    };
 }
 const rendered = [];
 let holdRender = null;
@@ -100,6 +118,8 @@ const fakePdfjs = {
 
 const body = element('body');
 const alerts = [];
+const confirms = [];
+let confirmAnswer = true;
 const sandbox = {
     console,
     Promise,
@@ -108,6 +128,8 @@ const sandbox = {
     Set,
     projectWorkflowProjectId: 7,
     alert: message => alerts.push(message),
+    confirm: message => { confirms.push(message); return confirmAnswer; },
+    JSON,
     document: {
         body,
         getElementById: () => null,
@@ -117,6 +139,7 @@ const sandbox = {
     clearTimeout,
     async authFetch(url, options = {}) {
         requests.push(url);
+        if (options.method === 'POST') posts.push({ url, body: JSON.parse(options.body) });
         const route = routes.find(([prefix]) => url === prefix);
         return route ? route[1](url, options) : respond(404, { detail: 'Không tìm thấy' });
     },
@@ -144,10 +167,13 @@ const view = {
     ],
     misplaced_files: [{ id: 30, name: 'ghichu.pdf', relative_path: 'ghichu.pdf', page_count: 1, status: 'ok', is_pdf: true, is_cover: false }],
 };
-function setRoutes(pkgStatus = 'done') {
+function setRoutes(pkgStatus = 'done', editable = false) {
     routes = [
         [base, () => respond(200, { status: 'ok', data: [{ id: 9, version: 2, status: pkgStatus, match_status: 'matched' }] })],
-        [`${base}/9/check-view`, () => respond(200, { status: 'ok', data: view })],
+        [`${base}/9/check-view`, () => respond(200, {
+            status: 'ok',
+            data: { ...view, can_whiteout: editable, whiteout_hint: editable ? '' : 'Bấm Bắt đầu Check scan của hộp trước khi bôi trắng.' },
+        })],
         [`${base}/9/files/10`, () => pdfResponse(1)],
         [`${base}/9/files/11`, () => pdfResponse(2)],
         [`${base}/9/files/20`, () => respond(404, { detail: 'File không còn trong thư mục scan trên máy chủ.' })],
@@ -261,6 +287,102 @@ function setRoutes(pkgStatus = 'done') {
     await withTimeout(sandbox.openScanMatch(4, 'Hộp 01'), 'mở khi bị từ chối');
     assert.match(text(body), /Không có quyền thực hiện thao tác này/);
     sandbox.closeScanCheck();
+
+    // j) Không được bôi: không có nút, cột trái nói lý do.
+    setRoutes();
+    await withTimeout(sandbox.openScanMatch(4, 'Hộp 01'), 'mở khi chưa bắt đầu Check scan');
+    let shown = body.children[0];
+    assert.match(text(shown), /Bôi trắng vết ghim: Bấm Bắt đầu Check scan của hộp trước khi bôi trắng\./);
+    let buttons = find(shown, node => node.tagName === 'BUTTON' && node.className.includes('list-group-item'));
+    await withTimeout(buttons[1].listeners.click(), 'vẽ 1.pdf khi không được bôi');
+    assert.equal(byText(shown, 'BUTTON', 'Bôi trắng vết ghim').length, 0);
+    sandbox.closeScanCheck();
+
+    // k) Được bôi: mỗi trang một nút; vẽ, đổi cỡ bút, hoàn tác, lưu.
+    setRoutes('done', true);
+    await withTimeout(sandbox.openScanMatch(4, 'Hộp 01'), 'mở khi được bôi');
+    shown = body.children[0];
+    assert.doesNotMatch(text(shown), /Bôi trắng vết ghim:/);
+    buttons = find(shown, node => node.tagName === 'BUTTON' && node.className.includes('list-group-item'));
+    await withTimeout(buttons[1].listeners.click(), 'vẽ 1.pdf');
+    const editPane = find(shown, node => node.className.includes('flex-grow-1'))[0];
+    const starts = byText(editPane, 'BUTTON', 'Bôi trắng vết ghim');
+    assert.equal(starts.length, 2, 'mỗi trang có nút Bôi trắng');
+    assert.equal(sandbox.scanCheckState.sha.get(11), 'sha-a', 'nhớ SHA-256 máy chủ gửi kèm file');
+    starts[1].listeners.click();
+    const frames = find(editPane, node => node.className.includes('position-relative'));
+    assert.equal(frames[1].children.length, 2, 'trang 2 có lớp phủ để vẽ');
+    const overlayCanvas = frames[1].children[1];
+    assert.equal(overlayCanvas.style.touchAction, 'none');
+    assert.equal(frames[0].children.length, 1, 'trang 1 không bị phủ');
+    alerts.length = 0;
+    starts[0].listeners.click();
+    assert.equal(alerts.length, 1, 'chỉ bôi một trang một lúc');
+    assert.equal(frames[0].children.length, 1);
+
+    overlayCanvas.listeners.pointerdown({ clientX: 120, clientY: 80, pointerId: 1 });
+    overlayCanvas.listeners.pointermove({ clientX: 140, clientY: 80 });
+    overlayCanvas.listeners.pointermove({ clientX: 140.1, clientY: 80 });
+    overlayCanvas.listeners.pointerup({});
+    overlayCanvas.listeners.pointermove({ clientX: 180, clientY: 80 });
+    const editing = sandbox.scanCheckState.editing;
+    assert.deepEqual(JSON.parse(JSON.stringify(editing.strokes)), [{ width: 0.03, points: [[0.1, 0.1], [0.2, 0.1]] }]);
+    assert.ok(overlayCanvas.ctx.calls.some(call => call[0] === 'lineTo'), 'nét được vẽ lên lớp phủ');
+    const tools = frames[1].parent.children[0];
+    assert.ok(byText(tools, 'BUTTON', 'Lưu trang').length === 1, 'thanh công cụ nằm trên trang');
+    const select = tools.children[0];
+    select.value = '2';
+    select.listeners.change();
+    overlayCanvas.listeners.pointerdown({ clientX: 400, clientY: 900, pointerId: 1 });
+    overlayCanvas.listeners.pointerup({});
+    assert.deepEqual(JSON.parse(JSON.stringify(editing.strokes[1])), { width: 0.06, points: [[1, 1]] }, 'bút lớn, điểm bị kẹp trong trang');
+    byText(tools, 'BUTTON', 'Hoàn tác nét')[0].listeners.click();
+    assert.equal(editing.strokes.length, 1);
+
+    routes.push([`${base}/9/files/11/whiteout`, () => respond(409, { detail: 'File đã thay đổi kể từ lúc mở.' })]);
+    const saveButton = byText(tools, 'BUTTON', 'Lưu trang')[0];
+    await withTimeout(saveButton.listeners.click(), 'lưu bị từ chối');
+    assert.match(text(tools), /File đã thay đổi kể từ lúc mở\./);
+    assert.equal(frames[1].children.length, 2, 'lỗi thì giữ lớp phủ và các nét');
+    assert.equal(sandbox.scanCheckState.editing, editing);
+
+    // Rời file khi còn nét chưa lưu: hỏi, chọn ở lại thì không đổi gì.
+    confirmAnswer = false;
+    await withTimeout(buttons[0].listeners.click(), 'đổi file nhưng ở lại');
+    assert.equal(confirms.length, 1);
+    assert.equal(sandbox.scanCheckState.editing, editing);
+    assert.match(text(editPane), /1\.pdf – trang 2\/2/);
+    confirmAnswer = true;
+
+    posts.length = 0;
+    routes[routes.length - 1][1] = () => respond(200, { status: 'ok', data: { sha256: 'sha-b', page: 2 } });
+    routes.find(([prefix]) => prefix === `${base}/9/files/11`)[1] = () => pdfResponse(2, 'sha-b');
+    rendered.length = 0;
+    await withTimeout(saveButton.listeners.click(), 'lưu trang');
+    assert.deepEqual(posts, [{
+        url: `${base}/9/files/11/whiteout`,
+        body: { page: 2, base_sha256: 'sha-a', strokes: [{ width: 0.03, points: [[0.1, 0.1], [0.2, 0.1]] }] },
+    }]);
+    assert.equal(sandbox.scanCheckState.sha.get(11), 'sha-b', 'lần lưu sau dùng SHA-256 mới');
+    assert.deepEqual(rendered, [2], 'vẽ lại đúng trang vừa lưu');
+    assert.equal(frames[1].children.length, 1, 'lưu xong gỡ lớp phủ');
+    assert.equal(sandbox.scanCheckState.editing, null);
+    assert.match(text(tools), /Đã lưu, file gốc đã được ghi đè\./);
+    assert.equal(byText(tools, 'BUTTON', 'Bôi trắng vết ghim').length, 1);
+
+    // Lưu khi chưa có nét: không gửi gì.
+    byText(tools, 'BUTTON', 'Bôi trắng vết ghim')[0].listeners.click();
+    posts.length = 0;
+    await withTimeout(byText(tools, 'BUTTON', 'Lưu trang')[0].listeners.click(), 'lưu khi chưa có nét');
+    assert.equal(posts.length, 0);
+    assert.match(text(tools), /Chưa có nét bôi nào\./);
+    // Chưa có nét thì đổi file không cần hỏi.
+    confirms.length = 0;
+    await withTimeout(buttons[0].listeners.click(), 'đổi file khi lớp phủ trống');
+    assert.equal(confirms.length, 0);
+    assert.equal(sandbox.scanCheckState.editing, null);
+    sandbox.closeScanCheck();
+    assert.equal(body.children.length, 0);
 
     console.log('Project scan check self-check: OK');
 })().catch(error => {
