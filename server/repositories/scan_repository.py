@@ -118,6 +118,17 @@ def get_scan_package_files(db: Session, package_id: int) -> list[str]:
         ).all()
     ]
 
+def list_scan_package_files(db: Session, package_id: int) -> list[CaseScanFile]:
+    return db.query(CaseScanFile).filter(
+        CaseScanFile.package_id == package_id
+    ).order_by(CaseScanFile.relative_path).all()
+
+def get_scan_package_file(db: Session, package_id: int, file_id: int) -> CaseScanFile | None:
+    return db.query(CaseScanFile).filter(
+        CaseScanFile.package_id == package_id,
+        CaseScanFile.id == file_id,
+    ).first()
+
 def update_scan_package_match_result(
     db: Session, package_id: int, match_status: str | None, match_summary: str | None, error: bool = False
 ):

@@ -401,6 +401,168 @@ async function openScanSubmit(caseId, caseName) {
         followScanPackage(processingPkg.id);
     }
 }
+// =============================================================================
+// CHECK SCAN: cột trái là hồ sơ/file, cột phải là các trang PDF để vuốt kiểm số
+// chỉnh lý. Chỉ đọc; số trang so với mục lục: cần Số tờ + 1 đến 2 x Số tờ + 1.
+// =============================================================================
+
+const SCAN_CHECK_STATUS = Object.freeze({
+    ok: { label: 'Đủ trang', css: 'bg-success' },
+    missing: { label: 'Thiếu trang', css: 'bg-danger' },
+    over: { label: 'Thừa trang', css: 'bg-warning text-dark' },
+    unknown: { label: 'Chưa đếm được', css: 'bg-secondary' },
+    no_catalog: { label: 'Không có trong mục lục', css: 'bg-secondary' },
+});
+
+var scanCheckState = { packageId: 0, viewed: new Set(), renderToken: 0, pdfjs: null, overlay: null };
+
+/** Một dòng tóm tắt số trang của hồ sơ, ví dụ "3 tờ · cần 4–7 trang · có 5". */
+function scanCheckDossierLine(dossier) {
+    const parts = [];
+    if (Number.isInteger(dossier.sheets) && dossier.sheets > 0) {
+        parts.push(`${dossier.sheets} tờ`);
+        parts.push(`cần ${dossier.min_pages}–${dossier.max_pages} trang`);
+    }
+    parts.push(`có ${Number(dossier.pages) || 0} trang`);
+    if (!dossier.has_cover) parts.push('chưa có bìa');
+    return parts.join(' · ');
+}
+
+function scanCheckFileUrl(fileId) {
+    return `${scanSubmitApiBase()}/${Number(scanCheckState.packageId)}/files/${Number(fileId)}`;
+}
+
+async function scanCheckLoadPdfjs() {
+    if (!scanCheckState.pdfjs) {
+        scanCheckState.pdfjs = import('/vendor/pdfjs/pdf.js').then(pdfjs => {
+            pdfjs.GlobalWorkerOptions.workerSrc = '/vendor/pdfjs/pdf.worker.js';
+            return pdfjs;
+        });
+    }
+    return scanCheckState.pdfjs;
+}
+
+async function scanCheckRenderFile(container, file, token) {
+    const response = await authFetch(scanCheckFileUrl(file.id), { cache: 'no-store' });
+    if (token !== scanCheckState.renderToken) return false;
+    if (!response || !response.ok) {
+        const { data } = await scanSubmitReadJson(response);
+        container.appendChild(scanSubmitElement('div', 'alert alert-danger py-1 small',
+            `${file.name}: ${scanSubmitErrorText(data, 'Không mở được file.')}`));
+        return false;
+    }
+    const bytes = new Uint8Array(await response.arrayBuffer());
+    const pdfjs = await scanCheckLoadPdfjs();
+    const pdf = await pdfjs.getDocument({ data: bytes, isEvalSupported: false, useWasm: false }).promise;
+    for (let number = 1; number <= pdf.numPages; number += 1) {
+        if (token !== scanCheckState.renderToken) return false;
+        const page = await pdf.getPage(number);
+        const base = page.getViewport({ scale: 1 });
+        const viewport = page.getViewport({ scale: Math.min(2, 900 / Math.max(base.width, 1)) });
+        const canvas = document.createElement('canvas');
+        canvas.width = Math.floor(viewport.width);
+        canvas.height = Math.floor(viewport.height);
+        canvas.className = 'border shadow-sm d-block mx-auto';
+        canvas.style.maxWidth = '100%';
+        canvas.style.height = 'auto';
+        const figure = scanSubmitElement('div', 'mb-3');
+        figure.append(canvas, scanSubmitElement('div', 'text-center small text-muted',
+            `${file.name} – trang ${number}/${pdf.numPages}`));
+        container.appendChild(figure);
+        await page.render({ canvasContext: canvas.getContext('2d'), viewport }).promise;
+    }
+    return true;
+}
+
+/** Hiện các trang của danh sách file ở cột phải; lần chọn mới hủy lần vẽ cũ. */
+async function scanCheckShowFiles(pane, title, files, markers) {
+    scanCheckState.renderToken += 1;
+    const token = scanCheckState.renderToken;
+    pane.replaceChildren(scanSubmitElement('h6', 'mb-3', title));
+    const pdfs = files.filter(file => file.is_pdf);
+    if (!pdfs.length) {
+        pane.appendChild(scanSubmitElement('div', 'text-muted small', 'Không có file PDF để xem.'));
+        return;
+    }
+    for (const file of pdfs) {
+        if (token !== scanCheckState.renderToken) return;
+        if (pdfs.length > 1) pane.appendChild(scanSubmitElement('div', 'fw-bold small border-bottom mb-2', file.name));
+        try {
+            if (await scanCheckRenderFile(pane, file, token)) {
+                scanCheckState.viewed.add(file.id);
+                const marker = markers.get(file.id);
+                if (marker) marker.textContent = '✓';
+            }
+        } catch (error) {
+            pane.appendChild(scanSubmitElement('div', 'alert alert-danger py-1 small',
+                `${file.name}: không đọc được PDF (${error && error.message ? error.message : error}).`));
+        }
+    }
+}
+
+function scanCheckFileButton(file, onPick, markers) {
+    const button = scanSubmitElement('button', 'list-group-item list-group-item-action py-1 small d-flex justify-content-between');
+    button.type = 'button';
+    const pages = file.is_pdf ? `${file.page_count > 0 ? file.page_count : '?'} tr` : 'không phải PDF';
+    const marker = scanSubmitElement('span', 'text-success ms-2', scanCheckState.viewed.has(file.id) ? '✓' : '');
+    const right = scanSubmitElement('span', 'text-nowrap');
+    right.append(scanSubmitElement('span', 'text-muted', pages), marker);
+    button.append(
+        scanSubmitElement('span', file.is_cover ? 'fw-bold' : '', file.is_cover ? `${file.name} (bìa)` : file.name),
+        right,
+    );
+    markers.set(file.id, marker);
+    if (file.is_pdf) button.addEventListener('click', () => onPick(file));
+    else button.disabled = true;
+    return button;
+}
+
+/** Cột trái: mỗi hồ sơ một khối có nhãn trạng thái số trang và danh sách file. */
+function renderScanCheckList(list, pane, view) {
+    list.replaceChildren();
+    const markers = new Map();
+    const show = (title, files) => scanCheckShowFiles(pane, title, files, markers);
+    if (!view.dossiers.length && !view.misplaced_files.length) {
+        list.appendChild(scanSubmitElement('div', 'text-muted small', 'Gói scan không có file nào.'));
+    }
+    view.dossiers.forEach(dossier => {
+        const block = scanSubmitElement('div', 'mb-3');
+        block.dataset.status = dossier.status;
+        const head = scanSubmitElement('button', 'btn btn-light btn-sm w-100 text-start');
+        head.type = 'button';
+        const status = SCAN_CHECK_STATUS[dossier.status] || SCAN_CHECK_STATUS.unknown;
+        head.append(
+            scanSubmitElement('span', 'fw-bold me-2', `Hồ sơ ${dossier.folder}`),
+            scanSubmitElement('span', `badge ${status.css}`, status.label),
+            scanSubmitElement('div', 'small text-muted', scanCheckDossierLine(dossier)),
+        );
+        head.addEventListener('click', () => show(`Hồ sơ ${dossier.folder} – cả hồ sơ`, dossier.files));
+        const files = scanSubmitElement('div', 'list-group list-group-flush');
+        dossier.files.forEach(file => files.appendChild(
+            scanCheckFileButton(file, picked => show(`Hồ sơ ${dossier.folder} – ${picked.name}`, [picked]), markers),
+        ));
+        block.append(head, files);
+        list.appendChild(block);
+    });
+    if (view.misplaced_files.length) {
+        const block = scanSubmitElement('div', 'mb-3');
+        block.appendChild(scanSubmitElement('div', 'fw-bold small text-danger', 'File sai cấp thư mục'));
+        const files = scanSubmitElement('div', 'list-group list-group-flush');
+        view.misplaced_files.forEach(file => files.appendChild(
+            scanCheckFileButton(file, picked => show(picked.relative_path, [picked]), markers),
+        ));
+        block.appendChild(files);
+        list.appendChild(block);
+    }
+    return markers;
+}
+
+function closeScanCheck() {
+    scanCheckState.renderToken += 1;
+    if (scanCheckState.overlay) scanCheckState.overlay.remove();
+    scanCheckState.overlay = null;
+}
+
 async function openScanMatch(caseId, caseName) {
     scanSubmitState.projectId = Number(projectWorkflowProjectId);
     scanSubmitState.caseId = Number(caseId);
@@ -410,30 +572,53 @@ async function openScanMatch(caseId, caseName) {
         alert('Chưa có gói scan nào.');
         return;
     }
+    closeScanCheck();
+    if (scanCheckState.packageId !== pkg.id) scanCheckState.viewed = new Set();
+    scanCheckState.packageId = pkg.id;
 
     const overlay = scanSubmitElement('div', 'modal fade show');
     overlay.style.display = 'block';
     overlay.style.backgroundColor = 'rgba(0,0,0,0.5)';
-    
-    const dialog = scanSubmitElement('div', 'modal-dialog modal-dialog-scrollable');
+    const dialog = scanSubmitElement('div', 'modal-dialog modal-fullscreen');
     const content = scanSubmitElement('div', 'modal-content');
-    
-    const header = scanSubmitElement('div', 'modal-header bg-info text-white');
-    const title = scanSubmitElement('h5', 'modal-title', `So khớp: ${caseName}`);
+
+    const header = scanSubmitElement('div', 'modal-header bg-info text-white py-2');
+    const title = scanSubmitElement('h5', 'modal-title', `Check scan: ${caseName} – S${pkg.version}`);
     const closeBtn = scanSubmitElement('button', 'btn-close btn-close-white');
-    closeBtn.addEventListener('click', () => overlay.remove());
+    closeBtn.type = 'button';
+    closeBtn.addEventListener('click', closeScanCheck);
     header.append(title, closeBtn);
-    
-    const body = scanSubmitElement('div', 'modal-body');
-    renderScanPackage(body, pkg);
-    
-    const footer = scanSubmitElement('div', 'modal-footer');
-    const closeBtn2 = scanSubmitElement('button', 'btn btn-secondary', 'Đóng');
-    closeBtn2.addEventListener('click', () => overlay.remove());
-    footer.appendChild(closeBtn2);
-    
-    content.append(header, body, footer);
+
+    const body = scanSubmitElement('div', 'modal-body p-0 d-flex');
+    const left = scanSubmitElement('div', 'border-end p-2 overflow-auto');
+    left.style.width = '360px';
+    left.style.flex = '0 0 360px';
+    const summary = scanSubmitElement('div', 'mb-2 small');
+    renderScanPackage(summary, pkg);
+    const list = scanSubmitElement('div');
+    left.append(summary, list);
+    const pane = scanSubmitElement('div', 'flex-grow-1 p-3 overflow-auto bg-light');
+    pane.appendChild(scanSubmitElement('div', 'text-muted',
+        'Bấm tên hồ sơ để vuốt cả hồ sơ, hoặc bấm một file để xem riêng file đó.'));
+    body.append(left, pane);
+
+    content.append(header, body);
     dialog.appendChild(content);
     overlay.appendChild(dialog);
     document.body.appendChild(overlay);
+    scanCheckState.overlay = overlay;
+
+    if (pkg.status !== 'done') {
+        list.appendChild(scanSubmitElement('div', 'text-muted small', 'Gói scan chưa xử lý xong.'));
+        return;
+    }
+    const { ok, data } = await scanSubmitReadJson(
+        await authFetch(`${scanSubmitApiBase()}/${Number(pkg.id)}/check-view`, { cache: 'no-store' }),
+    );
+    if (!ok) {
+        list.appendChild(scanSubmitElement('div', 'alert alert-danger small',
+            scanSubmitErrorText(data, 'Không tải được danh sách file.')));
+        return;
+    }
+    renderScanCheckList(list, pane, data.data);
 }
