@@ -308,7 +308,7 @@ function renderWorkflowReadyInput(data) {
 
         const tdPdf = document.createElement('td');
         tdPdf.className = 'text-center';
-        tdPdf.textContent = String(caseItem.active_pdf_count || 0);
+        tdPdf.textContent = String(caseItem.pdf_count || 0);
         tr.appendChild(tdPdf);
 
         const tdPrev = document.createElement('td');
@@ -353,7 +353,7 @@ function renderWorkflowReadyInput(data) {
             assignBtn.disabled = true;
             try {
                 const resp = await apiCall(
-                    `/api/projects/${projectWorkflowProjectId}/cases/${caseItem.id}/assign-input`,
+                    `/api/projects/${projectWorkflowProjectId}/cases/${caseItem.case_id}/assign-input`,
                     {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },

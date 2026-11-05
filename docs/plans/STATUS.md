@@ -81,3 +81,5 @@ Làm lần lượt; lát trước được reviewer duyệt mới làm lát sau.
 - [x] P1a (reviewer) Chi trả theo sản lượng: đơn giá + bảng tạm tính (API, Excel), revision 0018_project_work_rates; GET/PUT /api/projects/{pid}/work-rates, GET /api/projects/{pid}/payroll-preview
 - [x] P1b (reviewer) Chi trả theo sản lượng: giao diện (đơn giá, kỳ, xem tạm tính, Tải Excel); payroll.js v1.00, project_management.js v2.24, admin-page.js v9
 - [x] P2 (reviewer) Chi trả: chốt kỳ, lưu kèm tham số, revision 0019_payroll_periods; POST/GET /api/projects/{pid}/payroll-periods, {id}.xlsx, DELETE kỳ mới nhất; payroll.js v1.01, admin-page.js v10
+## Sửa lỗi giao hộp (phát hiện khi chạy demo tự động 05/11/2026)
+- [x] G1 Giao hộp nhập liệu: service gọi workflow_repo.get_state (trước đây case_stage_state không tồn tại -> 500 khi dự án bật quy trình); tab "Hộp chờ giao nhập" đọc case_id và pdf_count đúng theo API ready-input-cases (trước đây caseItem.id -> 422, Số PDF luôn 0); project_workflow.js?v=1.10. Test: test_assign_case_input_with_workflow_requires_previous_stage_done, case_assignment_selfcheck.js render bảng và bấm Giao hộp.

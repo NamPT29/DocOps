@@ -442,6 +442,55 @@ def test_ready_input_cases_workflow_prerequisites(database):
     assert ready["cases"][0]["case_id"] == case.id
 
 
+def test_assign_case_input_with_workflow_requires_previous_stage_done(database):
+    # Dự án bật quy trình: giao hộp phải đọc trạng thái bước liền trước (trước đây gọi hàm không tồn tại -> 500).
+    admin, input1, _, _, project, cases, _ = seed_test_project(database, name="P6b", case_count=1)
+    case = cases[0]
+    database.add_all([
+        ProjectStage(project_id=project.id, stage_key="scan_qc", position=1, is_enabled=True),
+        ProjectStage(project_id=project.id, stage_key="data_entry", position=2, is_enabled=True),
+    ])
+    database.commit()
+
+    def assign():
+        return assign_case_input(
+            database, project_id=project.id, case_id=case.id, user_id=input1.id, actor_user_id=admin.id
+        )
+
+    # Chưa có trạng thái Check scan -> chặn.
+    with pytest.raises(HTTPException) as exc_info:
+        assign()
+    assert exc_info.value.status_code == 409
+    assert exc_info.value.detail == "Bước liền trước (Check scan) chưa hoàn tất"
+
+    # Check scan đang chờ -> vẫn chặn.
+    state = CaseStageState(project_id=project.id, case_id=case.id, stage_key="scan_qc", status="pending")
+    database.add(state)
+    database.commit()
+    with pytest.raises(HTTPException) as exc_info:
+        assign()
+    assert exc_info.value.status_code == 409
+    assert exc_info.value.detail == "Bước liền trước (Check scan) chưa hoàn tất"
+    database.refresh(case)
+    assert case.assigned_input_user_id is None
+
+    # Check scan xong -> giao được, tài liệu của hộp chuyển cho người nhập.
+    state.status = "done"
+    database.commit()
+    result = assign()
+    assert result["status"] == "ok"
+    assert result["case_id"] == case.id
+    assert result["assigned_user_id"] == input1.id
+    database.refresh(case)
+    assert case.assigned_input_user_id == input1.id
+    documents = database.scalars(
+        select(AssignedDocument)
+        .join(ProjectDocumentAsset, ProjectDocumentAsset.assigned_document_id == AssignedDocument.id)
+        .where(ProjectDocumentAsset.case_id == case.id)
+    ).all()
+    assert documents and all(doc.assigned_to_user_id == input1.id for doc in documents)
+
+
 def test_submitted_by_user_id_and_null_safe_review_queue(database):
     admin, input1, input2, reviewer, project, cases, template = seed_test_project(database, name="P7", case_count=1)
     case = cases[0]

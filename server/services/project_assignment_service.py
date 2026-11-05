@@ -220,7 +220,7 @@ def assign_case_input(db, *, project_id: int, case_id: int, user_id: int, actor_
     if enabled_keys:
         prev_stage = engine.previous_enabled("data_entry", enabled_keys)
         if prev_stage is not None:
-            prev_state = workflow_repo.case_stage_state(case_id, prev_stage)
+            prev_state = workflow_repo.get_state(case_row.id, prev_stage)
             if not prev_state or prev_state.status != engine.DONE:
                 stage_def = engine.get_stage(prev_stage)
                 raise HTTPException(
