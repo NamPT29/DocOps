@@ -363,3 +363,33 @@ def test_file_download_does_not_fallback_to_legacy_submission(monkeypatch):
         )
 
     assert error.value.status_code == 404
+
+
+def test_header_ocr_reuses_document_access_check(monkeypatch):
+    from server.services import document_ocr_service
+
+    document = SimpleNamespace(
+        id=1, original_filename="private.pdf", uuid_filename="private.pdf", assigned_to_user_id=3,
+    )
+    calls = []
+    monkeypatch.setattr(document_ocr_service, "recognize_document", lambda path: calls.append(path))
+    with pytest.raises(HTTPException) as denied:
+        submissions.api_recognize_document("private.pdf", {"id": 2, "role": "user"}, FakeDb(document))
+    assert denied.value.status_code == 403
+    assert calls == []
+
+
+def test_header_ocr_returns_fields_without_raw_text(tmp_path, monkeypatch):
+    from server.services import document_ocr_service
+
+    path = tmp_path / "assigned.pdf"
+    path.touch()
+    document = SimpleNamespace(
+        id=1, original_filename=path.name, uuid_filename=path.name, assigned_to_user_id=3,
+    )
+    monkeypatch.setattr(submissions, "PDF_STORAGE_PATH", str(tmp_path))
+    monkeypatch.setattr(submissions, "enforce_heavy_api_rate_limit", lambda *_: None)
+    monkeypatch.setattr(document_ocr_service, "recognize_document",
+                        lambda source: {"raw": str(source), "fields": {"typeName": "Báo cáo"}})
+    result = submissions.api_recognize_document(path.name, {"id": 3, "role": "user"}, FakeDb(document))
+    assert result == {"status": "ok", "data": {"fields": {"typeName": "Báo cáo"}}}
