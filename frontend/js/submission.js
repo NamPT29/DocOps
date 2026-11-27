@@ -122,6 +122,10 @@ async function submitData(targetStatus = 'draft') {
             const linkedPdf = uploadedFilesQueue[iframeCurrentIndex];
             data['_pdf_filename'] = linkedPdf.name;
             if (linkedPdf.uuid) data['_pdf_uuid'] = linkedPdf.uuid;
+            const ocr = linkedPdf.ocr_experiment;
+            if (ocr && ocr.uuid === linkedPdf.uuid) {
+                data._ocr_experiment = { ...ocr, open_to_save_seconds: Math.max(0, (Date.now() - ocr.opened_at) / 1000) };
+            }
             if (linkedPdf.url) data['_pdf_url'] = linkedPdf.url;
             if (linkedPdf.relative_path) data['_pdf_relative_path'] = linkedPdf.relative_path;
             if (linkedPdf.folder_group && linkedPdf.folder_group !== '__ROOT__') {

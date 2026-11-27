@@ -684,6 +684,9 @@ def api_update_submission(
                 db,
                 allow_missing_linked_path=True,
             )
+        existing_data = json.loads(sub.data_json or "{}")
+        if existing_data.get("_pdf_uuid") == data_dict.get("_pdf_uuid") and existing_data.get("_ocr_experiment"):
+            data_dict["_ocr_experiment"] = existing_data["_ocr_experiment"]
         sub.data_json = json.dumps(data_dict, ensure_ascii=False)
         SubmissionService.sync_submission_metadata(sub, data_dict, document, db)
         if req.status == "pending_review":
@@ -1251,4 +1254,26 @@ def api_get_pdf_file(
             raise HTTPException(status_code=403, detail="Không có quyền truy cập file")
 
     return create_document_file_response(document, PDF_STORAGE_PATH)
+
+
+@router.post("/files/{uuid_filename}/ocr")
+def api_recognize_document(
+    uuid_filename: str,
+    current_user: dict = Depends(get_input_user),
+    db: Session = Depends(get_db),
+):
+    from server.services.document_ocr_service import recognize_document
+
+    response = api_get_pdf_file(uuid_filename, current_user, db)
+    if response.media_type != "application/pdf":
+        raise HTTPException(status_code=415, detail="Nhận dạng đầu trang yêu cầu file PDF")
+    enforce_heavy_api_rate_limit("document_ocr", current_user["id"])
+    try:
+        result = recognize_document(response.path)
+    except ImportError as exc:
+        raise HTTPException(status_code=503, detail="Máy chủ chưa cài bộ nhận dạng OCR") from exc
+    except (OSError, RuntimeError, ValueError, IndexError) as exc:
+        raise HTTPException(status_code=422, detail="Không đọc được trang đầu của PDF") from exc
+    result.pop("raw")
+    return {"status": "ok", "data": result}
 
