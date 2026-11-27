@@ -273,7 +273,7 @@ function open(pdf) {
     for (const page of ['frontend/index.html', 'frontend/admin.html']) {
         const html = fs.readFileSync(page, 'utf8');
         assert(html.includes('js/form_renderer.js?v=101.03'), `${page}: form_renderer.js phải là v101.03`);
-        assert(html.includes('js/submission.js?v=100.08'), `${page}: submission.js phải là v100.08`);
+        assert(html.includes('js/submission.js?v=100.09'), `${page}: submission.js phải là v100.09`);
     }
     console.log('Cover scope self-check: OK');
 })().catch(error => {
