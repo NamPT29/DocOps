@@ -52,10 +52,12 @@ def main():
         raw = result["raw"]
         guessed = result["fields"]
         row = dict(pdf=sample["pdf"], seconds=result["seconds"], method=result["method"],
-                   pipeline=result["pipeline"], error=error, raw=raw)
+                   pipeline=result["pipeline"], engine=tesserocr.tesseract_version().splitlines()[0],
+                   error=error, raw=raw)
         for field in FIELDS:
             expected = sample[field]
             row[field] = guessed[field]
+            row[field + "_confidence"] = result.get("field_confidence", {}).get(field)
             row[field + "_expected"] = expected
             row[field + "_correct"] = int(not error and normalized(expected) == normalized(guessed[field])) if expected.strip() else ""
         reference = normalized(sample.get("header_text") or "")
@@ -81,6 +83,7 @@ def main():
     timings = [row["seconds"] for row in results if row["seconds"] != ""]
     if timings:
         print("Median seconds:", statistics.median(timings))
+        print("Over 5 seconds:", sum(value > 5 for value in timings), "/", len(timings))
     if reference_chars:
         print("Normalized header CER:", char_errors / reference_chars)
     return int(any(row["error"] for row in results))
