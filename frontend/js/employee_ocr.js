@@ -477,7 +477,7 @@
             const suggested = {};
             const keys = new Map();
             form?.querySelectorAll('[data-field-label]').forEach(input => {
-                const label = input.dataset.fieldLabel.trim().toLowerCase().normalize('NFC');
+                const label = input.dataset.fieldLabel.replace(/^\s*\d+\s*-\s*/, '').trim().toLowerCase().normalize('NFC');
                 const key = Object.keys(headerLabels).find(field => headerLabels[field].includes(label));
                 if (key && !keys.has(key)) keys.set(key, input);
             });
