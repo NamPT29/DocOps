@@ -687,6 +687,8 @@ def api_update_submission(
         existing_data = json.loads(sub.data_json or "{}")
         if existing_data.get("_pdf_uuid") == data_dict.get("_pdf_uuid") and existing_data.get("_ocr_experiment"):
             data_dict["_ocr_experiment"] = existing_data["_ocr_experiment"]
+        if existing_data.get("_pdf_uuid") == data_dict.get("_pdf_uuid") and existing_data.get("_entry_experiment"):
+            data_dict["_entry_experiment"] = existing_data["_entry_experiment"]
         sub.data_json = json.dumps(data_dict, ensure_ascii=False)
         SubmissionService.sync_submission_metadata(sub, data_dict, document, db)
         if req.status == "pending_review":

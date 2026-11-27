@@ -462,6 +462,7 @@
         const form = el('dataForm');
         const config = root.activeTemplateConfig;
         const started = performance.now();
+        file.ocr_header_attempted = true;
         button.disabled = true;
         setStatus('Đang nhận dạng đầu trang PDF…', 'primary');
         try {
