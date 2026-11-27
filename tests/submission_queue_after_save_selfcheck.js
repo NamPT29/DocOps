@@ -93,8 +93,8 @@ vm.runInContext(`
 
     const employeeHtml = fs.readFileSync('frontend/index.html', 'utf8');
     const adminHtml = fs.readFileSync('frontend/admin.html', 'utf8');
-    assert(employeeHtml.includes('js/submission.js?v=100.07'));
-    assert(adminHtml.includes('js/submission.js?v=100.07'));
+    assert(employeeHtml.includes('js/submission.js?v=100.08'));
+    assert(adminHtml.includes('js/submission.js?v=100.08'));
     console.log('Submission queue after save self-check: OK');
 })().catch(error => {
     console.error(error);

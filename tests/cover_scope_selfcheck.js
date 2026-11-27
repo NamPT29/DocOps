@@ -272,8 +272,8 @@ function open(pdf) {
     // Phiên bản script đã nâng trong cả hai trang
     for (const page of ['frontend/index.html', 'frontend/admin.html']) {
         const html = fs.readFileSync(page, 'utf8');
-        assert(html.includes('js/form_renderer.js?v=101.02'), `${page}: form_renderer.js phải là v101.01`);
-        assert(html.includes('js/submission.js?v=100.07'), `${page}: submission.js phải là v100.07`);
+        assert(html.includes('js/form_renderer.js?v=101.03'), `${page}: form_renderer.js phải là v101.03`);
+        assert(html.includes('js/submission.js?v=100.08'), `${page}: submission.js phải là v100.08`);
     }
     console.log('Cover scope self-check: OK');
 })().catch(error => {
