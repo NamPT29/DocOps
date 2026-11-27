@@ -569,6 +569,7 @@ function _buildFieldGroup(field, config, draftData) {
     input.className = 'form-control dynamic-height-input';
     input.name = field.name;
     input.id = field.name;
+    input.dataset.fieldLabel = field.label;
     input.rows = 1;
     const hasCustomDropdown = field.type === 'dropdown' && Array.isArray(field.options);
     input.setAttribute('autocomplete', hasCustomDropdown ? 'off' : 'on');

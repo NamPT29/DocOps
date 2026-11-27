@@ -441,6 +441,81 @@
             || document.querySelector(`[name="col_${col - 1}"]`);
     }
 
+    const headerLabels = {
+        typeName: ['tên loại', 'tên loại văn bản', 'thể loại văn bản', 'loại văn bản'],
+        code: ['số và ký hiệu', 'số và ký hiệu văn bản', 'số, ký hiệu văn bản', 'số ký hiệu văn bản'],
+        codeNumber: ['số văn bản', 'số của văn bản'],
+        codeNotation: ['ký hiệu', 'ký hiệu văn bản', 'ký hiệu của văn bản'],
+        issuedDate: ['ngày ban hành', 'ngày văn bản', 'ngày ký', 'ngày ký (ngày, tháng, năm văn bản)'],
+        organName: ['cơ quan ban hành', 'tên cơ quan ban hành', 'tên cơ quan, tổ chức ban hành văn bản'],
+        subject: ['trích yếu', 'trích yếu nội dung', 'trích yếu nội dung văn bản'],
+    };
+
+    async function recognizeHeader() {
+        const button = el('ocrHeaderButton');
+        const file = selectedFile();
+        if (!button || button.disabled || !canRun()) return;
+        if (!file?.uuid || file.temporary_view) {
+            setStatus('Chọn PDF được giao trước khi nhận dạng.', 'warning');
+            return;
+        }
+        const form = el('dataForm');
+        const config = root.activeTemplateConfig;
+        const started = performance.now();
+        file.ocr_header_attempted = true;
+        button.disabled = true;
+        setStatus('Đang nhận dạng đầu trang PDF…', 'primary');
+        try {
+            const response = await authFetch('/api/files/' + encodeURIComponent(file.uuid) + '/ocr', { method: 'POST' });
+            if (!response) return;
+            const result = await response.json();
+            if (!response.ok) throw new Error(formatApiErrorDetail(result.detail || result.message));
+            if (file !== selectedFile() || form !== el('dataForm') || config !== root.activeTemplateConfig || !canRun()) {
+                setStatus('PDF đang mở đã thay đổi. Hãy nhận dạng lại.', 'warning');
+                return;
+            }
+            const { fields, pipeline, method, seconds, page_confidence: confidence, field_confidence: scores } = result.data;
+            const suggested = {};
+            const keys = new Map();
+            form?.querySelectorAll('[data-field-label]').forEach(input => {
+                const label = input.dataset.fieldLabel.replace(/^\s*\d+\s*-\s*/, '').trim().toLowerCase().normalize('NFC');
+                const key = Object.keys(headerLabels).find(field => headerLabels[field].includes(label));
+                if (key && !keys.has(key)) keys.set(key, input);
+            });
+            for (const [key, input] of keys) {
+                if (!fields[key] || input.readOnly || input.disabled || input.value.trim()) continue;
+                input.value = fields[key];
+                input.dataset.ocrProposed = 'true';
+                input.classList.add('border-warning');
+                const score = scores?.[key];
+                input.title = Number.isFinite(score) ? `Điểm OCR ${score}/100 · Cần xác nhận` : 'Gợi ý OCR · Cần xác nhận';
+                input.addEventListener('input', () => {
+                    input.classList.remove('border-warning');
+                    input.removeAttribute('title');
+                }, { once: true });
+                input.dispatchEvent(new Event('change', { bubbles: true }));
+                suggested[input.name] = { field: key, value: fields[key], confidence: score ?? null };
+            }
+            if (!Object.keys(suggested).length) {
+                setStatus('Không tìm thấy ô trống phù hợp với kết quả nhận dạng.', 'warning');
+                return;
+            }
+            file.ocr_experiment = {
+                uuid: file.uuid, pipeline, method, seconds, confidence,
+                wait_seconds: (performance.now() - started) / 1000,
+                opened_at: file.ocr_opened_at || Date.now(),
+                suggested: { ...suggested, ...file.ocr_experiment?.suggested },
+            };
+            safeSaveQueue();
+            if (typeof saveFormDraft === 'function') saveFormDraft();
+            setStatus('Đã điền gợi ý. Hãy kiểm tra các ô viền vàng trước khi lưu.', 'success');
+        } catch (error) {
+            setStatus(error.message || 'Không thể nhận dạng đầu trang.', 'danger');
+        } finally {
+            button.disabled = false;
+        }
+    }
+
     function getOcrFields(file) {
         if (!file.ocr_fields || typeof file.ocr_fields !== 'object' || Array.isArray(file.ocr_fields)) file.ocr_fields = {};
         return file.ocr_fields;
@@ -498,9 +573,9 @@
         let changed = false;
         uploadedFilesQueue.forEach(file => {
             const old = storedById.get(String(file.uuid || file.url || ''));
-            if (!old || (!old.ocr_status && !old.ocr_fields)) return;
-            ['ocr_status', 'ocr_progress', 'ocr_message', 'ocr_fields', 'ocr_applied_fields'].forEach(key => {
-                if (old[key] !== undefined) {
+            if (!old) return;
+            ['ocr_status', 'ocr_progress', 'ocr_message', 'ocr_fields', 'ocr_applied_fields', 'ocr_experiment'].forEach(key => {
+                if (old[key] !== undefined && (key !== 'ocr_experiment' || !file.ocr_experiment)) {
                     file[key] = old[key];
                     changed = true;
                 }
@@ -711,7 +786,10 @@
     function selectionStarted(file) {
         if (!canRun()) return;
         hydrateQueue();
-        if (file) applyProposals(file);
+        if (file) {
+            file.ocr_opened_at = Date.now();
+            applyProposals(file);
+        }
     }
 
     async function selected(file) {
@@ -737,6 +815,11 @@
         resume.addEventListener('click', () => { void startQueue(); });
         pause.addEventListener('click', pauseQueue);
         retry.addEventListener('click', () => { void retrySelected(); });
+        const header = el('ocrHeaderButton');
+        if (header) {
+            header.hidden = !canRun();
+            header.addEventListener('click', () => { void recognizeHeader(); });
+        }
         window.addEventListener('offline', () => {
             pauseForConnectivity();
         });

@@ -1,0 +1,4 @@
+-r requirements.txt
+-r requirements-ocr.txt
+pgserver==0.1.4
+httpx==0.29.0
